@@ -45,3 +45,10 @@ def test_git_standard_excludes_are_respected(tmp_path: Path) -> None:
     assert "visible.py" in {path.name for path in files}
     assert "plan.md" not in {path.name for path in files}
     assert ignored >= 1
+
+
+def test_cloudformation_content_marker_is_detected(tmp_path: Path) -> None:
+    (tmp_path / "template.yaml").write_text(
+        'AWSTemplateFormatVersion: "2010-09-09"\nResources: {}\n'
+    )
+    assert discover_project(tmp_path).iac == ["cloudformation"]

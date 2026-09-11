@@ -1,28 +1,44 @@
 from __future__ import annotations
 
+import ast
 import hashlib
+import io
 import json
 import re
+import tokenize
 import tomllib
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from blueprint_ai.core import Finding, ProjectFacts
-from blueprint_ai.core.models import Remediation
+import yaml
+
+from blueprint_ai.core import Applicability, Finding, ProjectFacts
+from blueprint_ai.core.models import FileRange, Remediation
 from blueprint_ai.discovery import iter_project_files
 
 Check = Callable[[Path, ProjectFacts], list[Finding]]
-Applicability = Callable[[ProjectFacts], bool]
+Predicate = Callable[[ProjectFacts], bool]
 
 
 @dataclass(frozen=True)
 class Blueprint:
     name: str
     description: str
-    applicability: Applicability
+    applicability: Predicate
     check: Check
     model_review: bool = False
+    not_applicable_reason: str = "project evidence does not match this capability"
+    partial: Predicate | None = None
+    partial_reason: str = "only generic deterministic coverage is available"
+
+    def assess(self, facts: ProjectFacts) -> Applicability:
+        if not self.applicability(facts):
+            return Applicability(state="not_applicable", reason=self.not_applicable_reason)
+        if self.partial and self.partial(facts):
+            return Applicability(state="partial", reason=self.partial_reason)
+        return Applicability(state="applicable", reason="matching project evidence was discovered")
 
 
 def _finding(
@@ -34,21 +50,28 @@ def _finding(
     severity: str = "medium",
     priority: str | None = None,
     file: str | None = None,
+    line: int | None = None,
     evidence: list[str] | None = None,
     remediation: Remediation | None = None,
+    verification: str = "rerun blueprint",
+    rule_id: str | None = None,
 ) -> Finding:
     derived = {"critical": "P0", "high": "P1", "medium": "P2", "low": "P3", "info": "P3"}
     return Finding(
         blueprint=blueprint,
         category=category,
+        rule_id=rule_id or f"blueprint-ai/{blueprint}/{category}",
         source="blueprint-ai",
+        sources=["blueprint-ai"],
         severity=severity,
         priority=priority or derived[severity],
         file=file,
+        range=FileRange(start_line=line) if line else None,
         evidence=evidence or [],
         message=message,
         recommendation=recommendation,
         remediation=remediation,
+        verification=verification,
     )
 
 
@@ -68,12 +91,22 @@ def _manifest_identity(root: Path) -> tuple[str | None, list[str]]:
             return data.get("name"), [bins] if isinstance(bins, str) else list(bins)
         except (OSError, ValueError):
             pass
+    cargo = root / "Cargo.toml"
+    if cargo.is_file():
+        try:
+            package_data = tomllib.loads(cargo.read_text(encoding="utf-8")).get("package", {})
+            return package_data.get("name"), []
+        except (OSError, tomllib.TOMLDecodeError):
+            pass
+    go_mod = root / "go.mod"
+    if go_mod.is_file():
+        match = re.search(r"(?m)^module\s+(\S+)", go_mod.read_text(errors="ignore"))
+        return (match.group(1).rsplit("/", 1)[-1], []) if match else (None, [])
     return None, []
 
 
 def identity_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     name, commands = _manifest_identity(root)
-    findings = []
     if not name:
         return [
             _finding(
@@ -84,14 +117,14 @@ def identity_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 severity="low",
             )
         ]
-    if not re.fullmatch(r"(?:@[a-z0-9._-]+/)?[a-z0-9][a-z0-9._-]*", name):
+    findings = []
+    if not re.fullmatch(r"(?:@[a-z0-9._-]+/)?[a-z0-9][a-z0-9._/-]*", name):
         findings.append(
             _finding(
                 "identity",
                 "invalid-package-name",
                 f"Package name '{name}' is not portable.",
-                "Use a lowercase package name containing letters, numbers, dots, "
-                "underscores, or hyphens.",
+                "Use the ecosystem's lowercase portable package naming convention.",
                 severity="high",
             )
         )
@@ -105,7 +138,7 @@ def identity_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 f"Directory '{facts.name}' and package '{name}' differ.",
                 "Choose a consistent repository/package identity or document the distinction.",
                 severity="low",
-                evidence=[*commands],
+                evidence=commands,
             )
         )
     return findings
@@ -145,7 +178,7 @@ def repository_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 "repository",
                 "missing-quality-hooks",
                 "No pre-commit quality baseline was found.",
-                "Add minimal whitespace, YAML, and large-file checks.",
+                "Add fast whitespace, syntax, quality, and secret checks.",
                 severity="low",
                 file=".pre-commit-config.yaml",
                 remediation=Remediation(
@@ -156,35 +189,142 @@ def repository_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 ),
             )
         )
-    files, _ = iter_project_files(root)
-    for path in files:
-        try:
-            if path.stat().st_size > 1_000_000:
+    if "open-source" in facts.project_types:
+        for filename in ("SECURITY.md", "CONTRIBUTING.md"):
+            if not (root / filename).is_file():
                 findings.append(
                     _finding(
                         "repository",
-                        "large-file",
-                        "Large file may not belong in source control.",
-                        "Confirm the file is intentional or store it as an artifact.",
-                        severity="medium",
-                        file=path.relative_to(root).as_posix(),
-                        evidence=[f"{path.stat().st_size} bytes"],
+                        "oss-readiness",
+                        f"{filename} is missing from this open-source project.",
+                        f"Add a concise {filename} appropriate to the project.",
+                        severity="low",
+                        file=filename,
                     )
                 )
+    files, _ = iter_project_files(root)
+    for path in files:
+        rel = path.relative_to(root).as_posix()
+        try:
+            size = path.stat().st_size
         except OSError:
-            pass
+            continue
+        if size > 1_000_000:
+            findings.append(
+                _finding(
+                    "repository",
+                    "large-file",
+                    "Large file may not belong in source control.",
+                    "Confirm the file is intentional or store it as an artifact.",
+                    file=rel,
+                    evidence=[f"{size} bytes"],
+                )
+            )
+        if path.suffix.lower() in {".bak", ".old", ".orig", ".rej"}:
+            findings.append(
+                _finding(
+                    "repository",
+                    "stale-artifact",
+                    "A likely backup or merge artifact is tracked.",
+                    "Remove it if obsolete or document why it is source material.",
+                    severity="low",
+                    file=rel,
+                )
+            )
+    return findings
+
+
+def code_design_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    files, _ = iter_project_files(root)
+    imports: dict[str, set[str]] = defaultdict(set)
+    for path in files:
+        if path.suffix != ".py":
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):
+            continue
+        module = rel.removesuffix(".py").replace("/", ".").removeprefix("src.")
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                end = getattr(node, "end_lineno", node.lineno)
+                complexity = sum(
+                    isinstance(child, (ast.If, ast.For, ast.While, ast.Try, ast.With, ast.Match))
+                    for child in ast.walk(node)
+                )
+                if end - node.lineno + 1 > 100 and complexity > 10:
+                    findings.append(
+                        _finding(
+                            "code-design",
+                            "large-function",
+                            f"Function '{node.name}' spans {end - node.lineno + 1} lines.",
+                            "Extract cohesive responsibilities and keep the public contract "
+                            "stable.",
+                            severity="low",
+                            file=rel,
+                            line=node.lineno,
+                        )
+                    )
+            elif isinstance(node, ast.Import):
+                imports[module].update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imports[module].add(node.module)
+        try:
+            comments = [
+                token
+                for token in tokenize.generate_tokens(io.StringIO(text).readline)
+                if token.type == tokenize.COMMENT
+            ]
+        except (IndentationError, tokenize.TokenError):
+            comments = []
+        for token in comments:
+            if re.search(r"\b(TODO|FIXME|HACK|XXX)\b", token.string, re.IGNORECASE):
+                findings.append(
+                    _finding(
+                        "code-design",
+                        "work-marker",
+                        "Unresolved work marker should be tracked or resolved.",
+                        "Link it to an issue with intent/expiry, or remove stale commentary.",
+                        severity="info",
+                        file=rel,
+                        line=token.start[0],
+                        evidence=[token.string.strip()[:200]],
+                    )
+                )
+    local = set(imports)
+    for module, dependencies in imports.items():
+        for dependency in dependencies:
+            candidates = {
+                item for item in local if item == dependency or item.startswith(dependency + ".")
+            }
+            if any(module in imports.get(candidate, set()) for candidate in candidates):
+                pair = sorted([module, dependency])
+                findings.append(
+                    _finding(
+                        "code-design",
+                        "dependency-cycle",
+                        f"Possible Python import cycle between {' and '.join(pair)}.",
+                        "Move the shared contract to a lower-level module and verify imports.",
+                        evidence=pair,
+                    )
+                )
     return findings
 
 
 def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
-    files, _ = iter_project_files(root)
     findings = []
+    files, _ = iter_project_files(root)
+    secret_pattern = re.compile(
+        r"(?i)\b(api[_-]?key|secret|token|password)\b\s*[:=]\s*['\"]([^'\"\s]{16,})['\"]"
+    )
+    code_suffixes = {".py", ".js", ".ts", ".java", ".go", ".rs", ".yaml", ".yml", ".json"}
     for path in files:
         rel = path.relative_to(root).as_posix()
-        if (
-            path.name == ".env"
-            or path.name.startswith(".env.")
-            and path.name not in {".env.example", ".env.template"}
+        if path.name == ".env" or (
+            path.name.startswith(".env.") and path.name not in {".env.example", ".env.template"}
         ):
             findings.append(
                 _finding(
@@ -196,59 +336,346 @@ def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     file=rel,
                 )
             )
-    if facts.is_git and not (root / "SECURITY.md").is_file() and facts.file_count > 25:
+        if path.suffix.lower() not in code_suffixes:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")[:300_000]
+        except OSError:
+            continue
+        for match in secret_pattern.finditer(text):
+            value = match.group(2)
+            if any(marker in value.lower() for marker in ("example", "placeholder", "changeme")):
+                continue
+            findings.append(
+                _finding(
+                    "security",
+                    "hardcoded-secret",
+                    f"Potential hardcoded {match.group(1)} was found.",
+                    "Rotate if real and load the value from an approved secret store.",
+                    severity="high",
+                    file=rel,
+                    line=text.count("\n", 0, match.start()) + 1,
+                    evidence=["value redacted"],
+                )
+            )
+    return findings
+
+
+def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    present = set(facts.test_capabilities)
+    required: list[tuple[str, str, str]] = [("unit", "high", "core behavior")]
+    types = set(facts.project_types)
+    if types & {"api", "backend-service", "full-stack"}:
+        required.append(("integration", "medium", "service boundaries"))
+    if facts.api_specs:
+        required.append(("contract", "medium", "API schema compatibility"))
+    if types & {"web-app", "frontend", "full-stack"}:
+        required.append(("end-to-end", "medium", "critical user journeys"))
+    if "cli" in types:
+        required.append(("smoke", "medium", "installed command execution"))
+    if "production" in types and types & {
+        "api",
+        "backend-service",
+        "web-app",
+        "full-stack",
+        "data-pipeline",
+        "container",
+        "kubernetes",
+    }:
+        required.append(("performance", "low", "capacity assumptions"))
+    findings = []
+    for capability, severity, scope in required:
+        satisfied = capability in present or (capability == "unit" and "smoke" in present)
+        if satisfied:
+            continue
+        language = (
+            "python"
+            if "Python" in facts.languages
+            else "javascript"
+            if set(facts.languages) & {"JavaScript", "TypeScript"}
+            else None
+        )
+        remediation = None
+        if capability in {"unit", "smoke"} and language:
+            target = "tests/test_smoke.py" if language == "python" else "tests/smoke.test.js"
+            remediation = Remediation(
+                kind="test-scaffold",
+                target=target,
+                safe=True,
+                description=f"add generated {capability} test",
+            )
         findings.append(
             _finding(
-                "security",
-                "missing-policy",
-                "SECURITY.md is missing.",
-                "Document supported versions and private vulnerability reporting.",
-                severity="low",
-                file="SECURITY.md",
+                "testing",
+                f"missing-{capability}-tests",
+                f"No {capability} test capability was discovered for {scope}.",
+                f"Use the existing test stack to cover {scope}; mark generated-test provenance.",
+                severity=severity,
+                remediation=remediation,
+                verification="execute the generated or existing test suite",
             )
         )
     return findings
 
 
-def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
-    if facts.tests:
-        return []
-    language = (
-        "Python"
-        if "Python" in facts.languages
-        else "JavaScript"
-        if {"JavaScript", "TypeScript"} & set(facts.languages)
-        else None
+def api_data_config_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    for rel in facts.api_specs:
+        path = root / rel
+        try:
+            raw = path.read_text(encoding="utf-8")
+            data = json.loads(raw) if path.suffix == ".json" else yaml.safe_load(raw)
+        except (OSError, ValueError, yaml.YAMLError) as exc:
+            findings.append(
+                _finding(
+                    "api-data-config",
+                    "invalid-schema",
+                    f"API/schema document cannot be parsed: {exc}",
+                    "Fix syntax, then validate with the native schema validator or Spectral.",
+                    severity="high",
+                    file=rel,
+                )
+            )
+            continue
+        if isinstance(data, dict) and any(
+            key in data for key in ("openapi", "swagger", "asyncapi")
+        ):
+            if not data.get("info", {}).get("version"):
+                findings.append(
+                    _finding(
+                        "api-data-config",
+                        "unversioned-contract",
+                        "API contract has no info.version.",
+                        "Record a contract version and compare it with a baseline in CI.",
+                        file=rel,
+                    )
+                )
+    env_example = any(
+        Path(rel).name in {".env.example", ".env.template"} for rel in facts.config_files
     )
-    remediation = None
-    if language:
-        target = "tests/test_smoke.py" if language == "Python" else "tests/smoke.test.js"
-        remediation = Remediation(
-            kind="test-scaffold", target=target, safe=True, description=f"add {language} smoke test"
+    if facts.config_files and not env_example:
+        findings.append(
+            _finding(
+                "api-data-config",
+                "undocumented-environment",
+                "Configuration exists without an environment-variable example file.",
+                "Document required variables, safe defaults, validation, and secret-store "
+                "ownership.",
+                severity="low",
+            )
         )
-    return [
-        _finding(
-            "testing",
-            "missing-tests",
-            "No tests were discovered.",
-            "Add a small smoke test using the project's native test framework.",
-            severity="high",
-            remediation=remediation,
+    has_rollback = any(
+        "down" in Path(rel).stem.lower() or "rollback" in rel.lower() for rel in facts.migrations
+    )
+    if facts.migrations and not has_rollback:
+        findings.append(
+            _finding(
+                "api-data-config",
+                "migration-recovery",
+                "Migrations were found without an obvious rollback/recovery artifact.",
+                "Document roll-forward/rollback strategy and test migration compatibility.",
+                evidence=facts.migrations[:10],
+            )
         )
-    ]
+    return findings
+
+
+def supply_chain_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    lock_markers = {
+        "uv.lock",
+        "poetry.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "go.sum",
+        "Cargo.lock",
+    }
+    if facts.manifests and not any((root / marker).is_file() for marker in lock_markers):
+        findings.append(
+            _finding(
+                "supply-chain",
+                "missing-lockfile",
+                "No dependency lock or checksum file was discovered.",
+                "Use the ecosystem-native lock/checksum mechanism for reproducible resolution.",
+            )
+        )
+    if set(facts.project_types) & {"open-source", "production"}:
+        known_sbom = any(
+            (root / name).exists() for name in (".syft.yaml", ".github/workflows/sbom.yml")
+        )
+        workflow_dir = root / ".github" / "workflows"
+        if workflow_dir.is_dir():
+            known_sbom = known_sbom or any(
+                "sbom-action" in path.read_text(encoding="utf-8", errors="ignore")
+                or "syft" in path.read_text(encoding="utf-8", errors="ignore")
+                for path in workflow_dir.glob("*.y*ml")
+            )
+        known_sbom = known_sbom or any(
+            Path(rel).name.lower().startswith(("sbom", "bom.")) for rel in facts.docs
+        )
+        if not known_sbom:
+            findings.append(
+                _finding(
+                    "supply-chain",
+                    "missing-sbom-process",
+                    "No SBOM generation configuration or artifact was discovered.",
+                    "Generate CycloneDX or SPDX with Syft/native build attestations in release CI.",
+                    severity="low",
+                )
+            )
+    return findings
+
+
+def iac_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    if "terraform" in facts.iac:
+        tf_files = list(root.rglob("*.tf"))
+        combined = "\n".join(path.read_text(errors="ignore")[:100_000] for path in tf_files)
+        if "required_version" not in combined:
+            findings.append(
+                _finding(
+                    "iac",
+                    "terraform-version",
+                    "Terraform required_version is not constrained.",
+                    "Declare a compatible version range and verify with terraform validate.",
+                )
+            )
+        for path in tf_files:
+            if path.name.endswith(".tfstate"):
+                findings.append(
+                    _finding(
+                        "iac",
+                        "tracked-state",
+                        "Terraform state must not be kept in source control.",
+                        "Remove it from Git history, rotate exposed secrets, and use a protected "
+                        "backend.",
+                        severity="critical",
+                        file=path.relative_to(root).as_posix(),
+                    )
+                )
+    return findings
+
+
+def container_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    for rel in facts.containers:
+        path = root / rel
+        if path.name.lower() != "dockerfile":
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if re.search(r"(?mi)^FROM\s+\S+:latest(?:\s|$)", text):
+            findings.append(
+                _finding(
+                    "containers",
+                    "floating-base-image",
+                    "Docker base image uses the floating latest tag.",
+                    "Pin an immutable digest and automate reviewed updates.",
+                    severity="high",
+                    file=rel,
+                )
+            )
+        if not re.search(r"(?mi)^USER\s+\S+", text):
+            findings.append(
+                _finding(
+                    "containers",
+                    "root-runtime",
+                    "Dockerfile does not set a non-root runtime user.",
+                    "Create and switch to a least-privileged user in the final stage.",
+                    severity="high",
+                    file=rel,
+                )
+            )
+        if "production" in facts.project_types and "HEALTHCHECK" not in text.upper():
+            findings.append(
+                _finding(
+                    "containers",
+                    "missing-healthcheck",
+                    "Production container has no Docker health check.",
+                    "Add a cheap health check or document platform-owned probes.",
+                    file=rel,
+                )
+            )
+    return findings
+
+
+def kubernetes_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    rules = (
+        (
+            "privileged-workload",
+            r"(?m)^\s*privileged:\s*true\s*$",
+            "Kubernetes workload enables privileged mode.",
+            "Remove privileged mode or document and isolate the narrow requirement.",
+            "critical",
+        ),
+        (
+            "floating-image",
+            r"(?m)^\s*-?\s*image:\s*\S+:latest\s*$",
+            "Kubernetes workload uses a floating image tag.",
+            "Pin an immutable digest and use controlled rollout automation.",
+            "high",
+        ),
+    )
+    for rel in facts.kubernetes:
+        path = root / rel
+        if path.name.lower() in {"chart.yaml", "kustomization.yaml", "kustomization.yml"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for category, pattern, message, recommendation, severity in rules:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                findings.append(
+                    _finding(
+                        "kubernetes",
+                        category,
+                        message,
+                        recommendation,
+                        severity=severity,
+                        file=rel,
+                        line=text.count("\n", 0, match.start()) + 1,
+                    )
+                )
+        workload = re.search(r"(?m)^kind:\s*(Deployment|StatefulSet)\s*$", text)
+        if workload and "resources:" not in text:
+            findings.append(
+                _finding(
+                    "kubernetes",
+                    "missing-resource-policy",
+                    "Workload has no resource requests/limits block.",
+                    "Set workload-informed requests and limits, then load test scheduling "
+                    "behavior.",
+                    file=rel,
+                )
+            )
+    return findings
 
 
 def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     findings = []
     sha = re.compile(r"^[0-9a-f]{40}$")
-    for workflow in (
-        (root / ".github" / "workflows").glob("*.y*ml")
-        if (root / ".github" / "workflows").is_dir()
-        else []
-    ):
-        for number, line in enumerate(
-            workflow.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
-        ):
+    workflow_dir = root / ".github" / "workflows"
+    workflow_texts = []
+    for workflow in workflow_dir.glob("*.y*ml") if workflow_dir.is_dir() else []:
+        text = workflow.read_text(encoding="utf-8", errors="ignore")
+        workflow_texts.append(text)
+        try:
+            loaded = yaml.safe_load(text)
+            if not isinstance(loaded, dict):
+                raise ValueError("workflow root is not a mapping")
+        except (ValueError, yaml.YAMLError) as exc:
+            findings.append(
+                _finding(
+                    "ci-cd",
+                    "invalid-workflow-yaml",
+                    f"Workflow YAML cannot be parsed: {exc}",
+                    "Correct workflow syntax and validate with actionlint.",
+                    severity="high",
+                    file=workflow.relative_to(root).as_posix(),
+                )
+            )
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
             match = re.search(r"\buses:\s*([^\s#]+)", line)
             if not match or match.group(1).startswith(("./", "docker://")):
                 continue
@@ -259,14 +686,142 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                         "ci-cd",
                         "unpinned-action",
                         f"GitHub Action is not pinned to a full commit SHA: {match.group(1)}",
-                        "Pin third-party actions to a reviewed full commit SHA and retain "
-                        "the version in a comment.",
+                        "Pin third-party actions to a reviewed SHA and retain the version in a "
+                        "comment.",
                         severity="high",
                         file=workflow.relative_to(root).as_posix(),
-                        evidence=[f"line {number}"],
+                        line=number,
+                    )
+                )
+        checks_out = re.search(r"(?m)^\s*-?\s*uses:\s*actions/checkout", text)
+        if "pull_request_target" in text and checks_out:
+            findings.append(
+                _finding(
+                    "ci-cd",
+                    "dangerous-pr-workflow",
+                    "pull_request_target workflow checks out code and may expose a privileged "
+                    "token.",
+                    "Avoid executing untrusted PR code with write permissions or secrets.",
+                    severity="critical",
+                    file=workflow.relative_to(root).as_posix(),
+                )
+            )
+    if "open-source" in facts.project_types:
+        dependency_updates = (root / ".github" / "dependabot.yml").is_file() or any(
+            (root / name).is_file() for name in ("renovate.json", "renovate.json5")
+        )
+        if not dependency_updates:
+            findings.append(
+                _finding(
+                    "ci-cd",
+                    "missing-dependency-updates",
+                    "No dependency-update automation configuration was discovered.",
+                    "Configure Dependabot or Renovate for the detected package managers and CI.",
+                    severity="low",
+                )
+            )
+        if not any((root / name).is_file() for name in ("CHANGELOG.md", "CHANGES.md")):
+            findings.append(
+                _finding(
+                    "ci-cd",
+                    "missing-changelog",
+                    "Open-source release history is not documented.",
+                    "Keep a concise changelog or document the generated release-note authority.",
+                    severity="low",
+                )
+            )
+    if (
+        facts.package_managers
+        and workflow_texts
+        and not any("cache" in text.lower() for text in workflow_texts)
+    ):
+        findings.append(
+            _finding(
+                "ci-cd",
+                "missing-build-cache",
+                "CI does not contain an obvious dependency/build cache.",
+                "Use the package-manager-native cache with lockfile-derived keys.",
+                severity="low",
+            )
+        )
+    return findings
+
+
+def reliability_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    findings = []
+    types = set(facts.project_types)
+    runtime_types = {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+    if types & runtime_types and not facts.observability:
+        findings.append(
+            _finding(
+                "reliability",
+                "missing-observability",
+                "No metrics, tracing, structured logging, or error-monitoring integration was "
+                "discovered.",
+                "Add the smallest applicable signals with correlation IDs and ownership.",
+                remediation=Remediation(
+                    kind="kit",
+                    target="observability",
+                    safe=True,
+                    description="add observability guidance",
+                ),
+            )
+        )
+    files, _ = iter_project_files(root)
+    for path in files:
+        if path.suffix != ".py" or "tests" in path.parts:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _dotted_name(node.func)
+            network_call = name.startswith(("requests.", "httpx.", "urllib3.")) and name.rsplit(
+                ".", 1
+            )[-1] in {"get", "post", "put", "patch", "delete", "request"}
+            bounded_process = name in {"subprocess.run", "subprocess.call", "subprocess.check_call"}
+            if (network_call or bounded_process) and not any(
+                keyword.arg == "timeout" for keyword in node.keywords
+            ):
+                findings.append(
+                    _finding(
+                        "reliability",
+                        "missing-timeout",
+                        f"{name} call has no explicit timeout.",
+                        "Set an operation-appropriate timeout and test timeout/failure behavior.",
+                        severity="medium",
+                        file=path.relative_to(root).as_posix(),
+                        line=node.lineno,
                     )
                 )
     return findings
+
+
+def _dotted_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _dotted_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else node.attr
+    return ""
+
+
+def operations_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    docs = {Path(rel).name.lower() for rel in facts.docs}
+    if docs & {"runbook.md", "operations.md", "ops.md"}:
+        return []
+    return [
+        _finding(
+            "operations",
+            "missing-runbook",
+            "No operational runbook was discovered.",
+            "Document health, alerts, rollback, backup/recovery, and escalation assumptions.",
+            severity="low",
+        )
+    ]
 
 
 def documentation_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
@@ -280,8 +835,7 @@ def documentation_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 "documentation",
                 "missing-readme",
                 "README is missing.",
-                "Add a concise project overview, install instructions, and usage example.",
-                severity="medium",
+                "Add a concise overview, setup, usage, and troubleshooting path.",
                 file="README.md",
                 remediation=Remediation(
                     kind="template",
@@ -299,20 +853,18 @@ def documentation_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     missing = [
         name for name, aliases in concepts.items() if not any(alias in text for alias in aliases)
     ]
-    return (
-        [
-            _finding(
-                "documentation",
-                "readme-incomplete",
-                f"README does not mention: {', '.join(missing)}.",
-                "Add the missing reader-oriented sections.",
-                severity="low",
-                file=readme.name,
-            )
-        ]
-        if missing
-        else []
-    )
+    if not missing:
+        return []
+    return [
+        _finding(
+            "documentation",
+            "readme-incomplete",
+            f"README does not mention: {', '.join(missing)}.",
+            "Add the missing reader-oriented sections.",
+            severity="low",
+            file=readme.name,
+        )
+    ]
 
 
 def ai_context_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
@@ -331,7 +883,6 @@ def ai_context_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     "oversized-context",
                     f"AI context file is {len(content)} bytes.",
                     "Split or compress instructions so agents receive only relevant context.",
-                    severity="medium",
                     file=rel,
                 )
             )
@@ -348,6 +899,61 @@ def ai_context_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     evidence=duplicates,
                 )
             )
+    if set(facts.project_types) & {"ai-app", "ai-agent"}:
+        files, _ = iter_project_files(root)
+        rels = [path.relative_to(root).as_posix().lower() for path in files]
+        if not any("eval" in rel for rel in rels):
+            findings.append(
+                _finding(
+                    "ai-context",
+                    "missing-evals",
+                    "AI project has no discovered regression eval dataset or harness.",
+                    "Add versioned representative and adversarial eval cases with recorded "
+                    "settings.",
+                )
+            )
+        if not facts.ai_context_files:
+            findings.append(
+                _finding(
+                    "ai-context",
+                    "missing-ai-instructions",
+                    "AI project has no discovered agent/context instruction boundary.",
+                    "Document tool permissions, untrusted-input boundaries, models, and budgets.",
+                )
+            )
+    return findings
+
+
+def completeness_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
+    security_workflow = bool(list(root.glob(".github/workflows/*security*")))
+    families = {
+        "testing": bool(facts.tests),
+        "security": (root / "SECURITY.md").is_file() or security_workflow,
+        "ci-cd": bool(facts.ci),
+        "documentation": bool(facts.docs),
+        "reliability": bool(facts.observability),
+    }
+    types = set(facts.project_types)
+    applicable = {"testing", "security", "documentation"}
+    if facts.is_git:
+        applicable.add("ci-cd")
+    if types & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}:
+        applicable.add("reliability")
+    findings = []
+    for family in sorted(applicable):
+        if families[family]:
+            continue
+        findings.append(
+            _finding(
+                "completeness",
+                "missing-family-evidence",
+                f"Applicable '{family}' capability has no supporting project evidence.",
+                f"Enable the {family} blueprint and add the smallest project-appropriate baseline.",
+                severity="medium" if family in {"testing", "security"} else "low",
+                evidence=[f"profiles: {', '.join(facts.project_types) or 'default'}"],
+                rule_id=f"blueprint-ai/completeness/missing/{family}",
+            )
+        )
     return findings
 
 
@@ -366,115 +972,202 @@ BLUEPRINTS: dict[str, Blueprint] = {
         lambda f: bool(f.manifests),
         identity_checks,
         True,
+        "no native package manifest was discovered",
     ),
     "repository": Blueprint(
-        "repository", "Repository structure and hygiene", lambda f: True, repository_checks
+        "repository",
+        "Repository structure, hygiene, OSS readiness, and maintenance",
+        lambda f: True,
+        repository_checks,
     ),
     "code-quality": Blueprint(
-        "code-quality", "Native lint, formatting, and static analysis", _has_code, no_builtin_checks
+        "code-quality",
+        "Native formatting, linting, static correctness, and types",
+        _has_code,
+        no_builtin_checks,
+        False,
+        "no source-language files were discovered",
+    ),
+    "code-design": Blueprint(
+        "code-design",
+        "Complexity, duplication, dead code, comments, and resource patterns",
+        _has_code,
+        code_design_checks,
+        True,
+        "no source-language files were discovered",
+    ),
+    "architecture": Blueprint(
+        "architecture",
+        "Boundaries, coupling, cycles, and design-pattern review",
+        _has_code,
+        no_builtin_checks,
+        True,
+        "no source-language files were discovered",
+    ),
+    "testing": Blueprint(
+        "testing",
+        "Applicable test capabilities, execution, generation, and completeness",
+        _has_code,
+        testing_checks,
+        True,
+        "no testable source-language files were discovered",
+    ),
+    "api-data-config": Blueprint(
+        "api-data-config",
+        "API contracts, schemas, migrations, configuration, and secrets",
+        lambda f: bool(
+            f.api_specs
+            or f.migrations
+            or f.config_files
+            or set(f.project_types) & {"api", "data-pipeline"}
+        ),
+        api_data_config_checks,
+        True,
+        "no API, schema, migration, or application configuration evidence was discovered",
+        lambda f: not bool(f.api_specs),
+        "API/config review is partial because no machine-readable API contract was discovered",
     ),
     "security": Blueprint(
         "security",
-        "Secrets, SAST, dependencies, and security posture",
+        "SAST, secret scanning, and repository security posture",
         lambda f: f.file_count > 0,
         security_checks,
+        True,
     ),
-    "testing": Blueprint(
-        "testing", "Test discovery, execution, and missing layers", _has_code, testing_checks, True
+    "supply-chain": Blueprint(
+        "supply-chain",
+        "Dependencies, SCA, SBOM, licenses, signing, and provenance",
+        lambda f: bool(f.manifests or f.containers),
+        supply_chain_checks,
+        True,
+        "no dependencies or build artifacts were discovered",
     ),
     "iac": Blueprint(
         "iac",
-        "Infrastructure-as-code validation and policy",
+        "Terraform/OpenTofu and CloudFormation validation and policy",
         lambda f: bool(f.iac),
-        no_builtin_checks,
+        iac_checks,
         True,
+        "no supported infrastructure-as-code was discovered",
     ),
-    "ci-cd": Blueprint("ci-cd", "CI workflow syntax and security", lambda f: bool(f.ci), ci_checks),
+    "containers": Blueprint(
+        "containers",
+        "Dockerfile, image, and container runtime posture",
+        lambda f: bool(f.containers),
+        container_checks,
+        True,
+        "no container build or compose file was discovered",
+    ),
+    "kubernetes": Blueprint(
+        "kubernetes",
+        "Kubernetes, Helm, and Kustomize validation and security",
+        lambda f: bool(f.kubernetes),
+        kubernetes_checks,
+        True,
+        "no Kubernetes, Helm, or Kustomize evidence was discovered",
+    ),
+    "ci-cd": Blueprint(
+        "ci-cd",
+        "CI correctness, workflow security, builds, deployments, and releases",
+        lambda f: bool(f.ci),
+        ci_checks,
+        True,
+        "no supported CI configuration was discovered",
+    ),
+    "reliability": Blueprint(
+        "reliability",
+        "Timeouts, retries, idempotency, shutdown, health, and scaling",
+        lambda f: bool(
+            set(f.project_types)
+            & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+        ),
+        reliability_checks,
+        True,
+        "no long-running or production-like runtime was discovered",
+    ),
+    "operations": Blueprint(
+        "operations",
+        "Observability, runbooks, alerts, backup/recovery, and cost evidence",
+        lambda f: bool(
+            set(f.project_types)
+            & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+        ),
+        operations_checks,
+        True,
+        "no operational service or platform evidence was discovered",
+    ),
     "documentation": Blueprint(
         "documentation",
-        "Documentation structure, links, and clarity",
+        "README, architecture docs, links, drift, and presentation",
         lambda f: True,
         documentation_checks,
         True,
     ),
-    "architecture": Blueprint(
-        "architecture",
-        "Dependencies, boundaries, coupling, and resilience",
-        _has_code,
-        no_builtin_checks,
-        True,
-    ),
     "ai-context": Blueprint(
         "ai-context",
-        "AI instruction context size, duplication, and conflicts",
-        lambda f: bool(f.ai_context_files),
+        "AI instructions, providers, prompts, permissions, evals, and budgets",
+        lambda f: bool(f.ai_context_files or set(f.project_types) & {"ai-app", "ai-agent"}),
         ai_context_checks,
         True,
+        "no AI project or instruction context was discovered",
+    ),
+    "completeness": Blueprint(
+        "completeness",
+        "Applicable best-practice families missing from the project",
+        lambda f: True,
+        completeness_checks,
     ),
 }
 
+CORE = [
+    "identity",
+    "repository",
+    "code-quality",
+    "code-design",
+    "security",
+    "supply-chain",
+    "testing",
+    "documentation",
+    "completeness",
+]
+SERVICE = ["architecture", "api-data-config", "ci-cd", "reliability", "operations"]
 PROFILES = {
-    "default": [
-        "identity",
+    "default": CORE,
+    "library": CORE + ["architecture", "ci-cd"],
+    "cli": CORE + ["architecture", "ci-cd", "reliability"],
+    "api": CORE + SERVICE,
+    "backend-service": CORE + SERVICE,
+    "frontend": CORE + ["architecture", "ci-cd", "reliability"],
+    "web-app": CORE + ["architecture", "api-data-config", "ci-cd", "reliability"],
+    "full-stack": CORE + SERVICE,
+    "iac": [
         "repository",
-        "code-quality",
         "security",
+        "supply-chain",
         "testing",
-        "documentation",
-        "ci-cd",
         "iac",
-        "ai-context",
-    ],
-    "library": [
-        "identity",
-        "repository",
-        "code-quality",
-        "security",
-        "testing",
-        "documentation",
-        "architecture",
-    ],
-    "cli": [
-        "identity",
-        "repository",
-        "code-quality",
-        "security",
-        "testing",
-        "documentation",
-        "architecture",
         "ci-cd",
-    ],
-    "api": [
-        "identity",
-        "repository",
-        "code-quality",
-        "security",
-        "testing",
         "documentation",
-        "architecture",
+        "completeness",
+    ],
+    "terraform": [
+        "repository",
+        "security",
+        "supply-chain",
+        "testing",
+        "iac",
         "ci-cd",
-    ],
-    "web-app": [
-        "identity",
-        "repository",
-        "code-quality",
-        "security",
-        "testing",
         "documentation",
-        "architecture",
-        "ci-cd",
+        "completeness",
     ],
-    "iac": ["repository", "security", "testing", "iac", "ci-cd", "documentation"],
-    "ai-app": [
-        "identity",
-        "repository",
-        "code-quality",
-        "security",
-        "testing",
-        "documentation",
-        "architecture",
-        "ai-context",
-    ],
+    "container": CORE + ["containers", "ci-cd", "reliability"],
+    "kubernetes": CORE + ["containers", "kubernetes", "ci-cd", "reliability", "operations"],
+    "data-pipeline": CORE
+    + ["architecture", "api-data-config", "ci-cd", "reliability", "operations"],
+    "ai-app": CORE + ["architecture", "api-data-config", "ai-context", "reliability"],
+    "ai-agent": CORE + ["architecture", "api-data-config", "ai-context", "reliability"],
+    "open-source": CORE + ["architecture", "ci-cd"],
+    "portfolio": ["identity", "repository", "documentation", "security", "completeness"],
     "production": list(BLUEPRINTS),
 }
 

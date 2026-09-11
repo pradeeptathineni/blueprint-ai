@@ -4,15 +4,23 @@ from blueprint_ai.blueprints import BLUEPRINTS
 from blueprint_ai.discovery import discover_project
 
 
-def test_all_v1_blueprints_exist() -> None:
+def test_phase_two_taxonomy_is_complete() -> None:
     assert set(BLUEPRINTS) == {
+        "api-data-config",
+        "containers",
+        "code-design",
+        "completeness",
         "identity",
         "repository",
         "code-quality",
         "security",
+        "supply-chain",
         "testing",
         "iac",
+        "kubernetes",
         "ci-cd",
+        "reliability",
+        "operations",
         "documentation",
         "architecture",
         "ai-context",

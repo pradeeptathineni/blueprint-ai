@@ -44,3 +44,51 @@ def test_review_plan_apply_verify_e2e(python_project: Path) -> None:
         assert result.returncode == 0, f"{command}: {result.stderr}"
         json.loads(result.stdout)
     assert (python_project / ".editorconfig").is_file()
+
+
+def test_review_markdown_and_sarif_cli_contracts(python_project: Path) -> None:
+    markdown = run_cli(
+        "review",
+        str(python_project),
+        "--blueprint",
+        "repository",
+        "--model",
+        "off",
+        "--format",
+        "markdown",
+    )
+    assert markdown.returncode == 0, markdown.stderr
+    assert markdown.stdout.startswith("# Blueprint AI review")
+
+    sarif = run_cli(
+        "review",
+        str(python_project),
+        "--blueprint",
+        "repository",
+        "--model",
+        "off",
+        "--format",
+        "sarif",
+    )
+    assert sarif.returncode == 0, sarif.stderr
+    assert json.loads(sarif.stdout)["version"] == "2.1.0"
+
+
+def test_cli_baseline_separates_existing_findings(python_project: Path) -> None:
+    created = run_cli("baseline", str(python_project), "--profile", "portfolio", "--json")
+    assert created.returncode == 0, created.stderr
+    assert json.loads(created.stdout)["findings"] > 0
+    reviewed = run_cli(
+        "review",
+        str(python_project),
+        "--profile",
+        "portfolio",
+        "--model",
+        "off",
+        "--json",
+    )
+    payload = json.loads(reviewed.stdout)
+    dispositions = {
+        finding["disposition"] for result in payload["results"] for finding in result["findings"]
+    }
+    assert dispositions == {"baseline"}

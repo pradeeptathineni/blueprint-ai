@@ -22,13 +22,14 @@ def derive_priority(finding: Finding, project_types: list[str]) -> str:
 
 
 def deduplicate(findings: list[Finding], project_types: list[str]) -> list[Finding]:
-    grouped: dict[tuple[str, str, str | None, int | None, str], Finding] = {}
+    grouped: dict[str, Finding] = {}
     for item in findings:
         item.priority = derive_priority(item, project_types)
-        line = item.range.start_line if item.range else None
         issue = ISSUE_ID.search(item.message)
-        identity = issue.group(0).upper() if issue else " ".join(item.message.lower().split())
-        key = (item.blueprint, item.category, item.file, line, identity)
+        if issue and not item.rule_id:
+            item.rule_id = issue.group(0).upper()
+        item.sources = sorted(set(item.sources or [item.source]))
+        key = item.fingerprint
         previous = grouped.get(key)
         if not previous:
             grouped[key] = item
@@ -36,6 +37,7 @@ def deduplicate(findings: list[Finding], project_types: list[str]) -> list[Findi
         previous.evidence = sorted(
             set(previous.evidence + item.evidence + [f"also reported by {item.source}"])
         )
+        previous.sources = sorted(set(previous.sources + item.sources + [item.source]))
         if ORDER[item.priority] < ORDER[previous.priority]:
             previous.priority = item.priority
             previous.severity = item.severity

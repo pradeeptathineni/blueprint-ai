@@ -1,6 +1,7 @@
 """Stable engine contracts."""
 
 from .models import (
+    Applicability,
     BlueprintResult,
     Finding,
     ProjectFacts,
@@ -10,6 +11,7 @@ from .models import (
 )
 
 __all__ = [
+    "Applicability",
     "BlueprintResult",
     "Finding",
     "ProjectFacts",
