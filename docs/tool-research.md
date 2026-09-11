@@ -1,4 +1,4 @@
-# Phase 2 tool research
+# Tool research
 
 Snapshot: 2026-09-11. This refresh uses upstream documentation and repositories rather than
 memory. The actively maintained [static-analysis](https://github.com/analysis-tools-dev/static-analysis)
@@ -10,6 +10,19 @@ Selection weights maintenance, meaningful adoption, OSI license, machine-readabl
 local execution, CI suitability, startup/runtime cost, macOS/Linux/Windows availability, overlap,
 configuration burden, and false-positive behavior. Tools remain optional CLIs; none of their code is
 redistributed. Blueprint AI never silently downloads a tool.
+
+The Phase 3 refresh rechecked the actively changing defaults against upstream releases. Ruff remains
+the Python default and documents JSON/SARIF output. Semgrep remains on major version 1 with frequent
+2026 releases. Gitleaks remains on major version 8. OSV-Scanner v2 documents `scan --format json -r`
+and guarantees compatible JSON/CLI behavior within a major release. Trivy 0.72, Syft 1.51, and Grype
+0.116 publish checksums plus signed bundles or release attestations. The broad compatible ranges in
+`doctor` intentionally avoid claiming exact reproducibility; CI should pin an exact release and
+verify the upstream checksum/attestation. `bootstrap` only reports official guidance and never pipes
+an installer to a shell.
+
+The release dependency audit found the prior pytest 8.4.2 development pin affected by
+PYSEC-2026-1845. The development/test range therefore starts at 9.0.3; this is a test-only upgrade,
+not a runtime dependency.
 
 ## Language authorities
 
@@ -86,7 +99,10 @@ confidence, provenance, baseline state, and reasoned/expiring suppressions remai
 
 Commands are argument arrays constructed in code and execute without a shell. Availability/version,
 command, exit class, exit code, and duration are captured. Independent tools run concurrently with a
-bounded worker count and per-tool timeout. Outcomes distinguish finding, passed, tool error, missing,
-and unsupported. Missing tools make a blueprint partial and include explicit install guidance. The
-`bootstrap` command only prints guidance: package-native ephemeral runners and containers are not
+bounded worker count, per-tool timeout, bounded sanitized output, and controlled environment.
+Outcomes distinguish finding, passed, tool error, missing, and unsupported. Missing tools make a
+blueprint partial and include explicit install guidance. Tools that run target code or executable
+configuration are unsupported until the operator passes `--trust-project-executables`; DAST requires
+the separate exact `--authorize-target` scope. Network-capable tools are suppressed in offline mode.
+The `bootstrap` command only prints guidance: package-native ephemeral runners and containers are not
 invoked automatically because mutable registries/tags weaken reproducibility and trust.

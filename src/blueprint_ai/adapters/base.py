@@ -5,31 +5,67 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from blueprint_ai.core import Finding, ToolStatus
-from blueprint_ai.core.models import FileRange
+from blueprint_ai.core.models import FileRange, Priority, Severity
+from blueprint_ai.safety import MAX_TOOL_OUTPUT_BYTES, run_process, sanitize_label
 
 
 class CommandResult:
     def __init__(
-        self, command: list[str], returncode: int, stdout: str, stderr: str, timed_out: bool = False
+        self,
+        command: list[str],
+        returncode: int,
+        stdout: str,
+        stderr: str,
+        timed_out: bool = False,
+        output_truncated: bool = False,
     ):
         self.command = command
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
         self.timed_out = timed_out
+        self.output_truncated = output_truncated
+
+
+def run_bounded_command(
+    command: list[str], root: Path, timeout: float, output_limit: int = MAX_TOOL_OUTPUT_BYTES
+) -> CommandResult:
+    """Run without a shell while draining and bounding both output streams."""
+    result = run_process(command, root, timeout, output_limit=output_limit)
+    return CommandResult(
+        command,
+        result.returncode,
+        result.stdout,
+        result.stderr,
+        result.timed_out,
+        result.output_truncated,
+    )
+
+
+def _resolve_executable(executable: str) -> str | None:
+    if os.sep in executable or (os.altsep and os.altsep in executable):
+        path = Path(executable)
+        return str(path) if path.is_file() and os.access(path, os.X_OK) else None
+    found = shutil.which(executable)
+    if found:
+        return found
+    sibling = Path(sys.executable).parent / executable
+    return str(sibling) if sibling.is_file() and os.access(sibling, os.X_OK) else None
 
 
 class ToolAdapter(ABC):
     name: str
     blueprint: str
+    expected_codes: set[int]
 
     @abstractmethod
     def status(self) -> ToolStatus: ...
@@ -40,47 +76,36 @@ class ToolAdapter(ABC):
     @abstractmethod
     def parse(self, result: CommandResult, root: Path) -> list[Finding]: ...
 
-    def run(self, root: Path, timeout: int = 120) -> tuple[ToolStatus, list[Finding], str | None]:
+    def run(self, root: Path, timeout: float = 120) -> tuple[ToolStatus, list[Finding], str | None]:
         status = self.status()
         if not status.available:
-            status.outcome = "tool_missing"
+            if status.outcome != "unsupported":
+                status.outcome = "tool_missing"
             return status, [], None
         command = self.command(root)
         status.command = command
-        env = {**os.environ, "NO_COLOR": "1", "CI": "1"}
         started = time.monotonic()
         try:
-            process = subprocess.run(
-                command,
-                cwd=root,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=timeout,
-                check=False,
-                env=env,
+            result = run_bounded_command(
+                command, root, timeout, getattr(self, "max_output_bytes", MAX_TOOL_OUTPUT_BYTES)
             )
-            result = CommandResult(command, process.returncode, process.stdout, process.stderr)
-            findings = self.parse(result, root)
+            findings = [] if result.timed_out else self.parse(result, root)
             error = (
-                None if process.returncode in self.expected_codes else f"exit {process.returncode}"
+                f"timed out after {timeout}s"
+                if result.timed_out
+                else None
+                if result.returncode in self.expected_codes
+                else f"exit {result.returncode}"
             )
-            status.exit_code = process.returncode
+            status.exit_code = result.returncode
             status.duration_ms = round((time.monotonic() - started) * 1000)
+            status.output_truncated = result.output_truncated
             status.outcome = "tool_error" if error else "finding" if findings else "passed"
+            if error:
+                findings = []
             return status, findings, error
-        except subprocess.TimeoutExpired as exc:
-            stdout = (
-                exc.stdout.decode(errors="replace")
-                if isinstance(exc.stdout, bytes)
-                else exc.stdout or ""
-            )
-            stderr = (
-                exc.stderr.decode(errors="replace")
-                if isinstance(exc.stderr, bytes)
-                else exc.stderr or ""
-            )
-            result = CommandResult(command, 124, stdout, stderr, True)
+        except subprocess.TimeoutExpired:
+            result = CommandResult(command, 124, "", "", True)
             status.exit_code = 124
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
@@ -89,6 +114,14 @@ class ToolAdapter(ABC):
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
             return status, [], str(exc)
+        except Exception as exc:
+            status.duration_ms = round((time.monotonic() - started) * 1000)
+            status.outcome = "tool_error"
+            return (
+                status,
+                [],
+                (f"malformed tool output: {type(exc).__name__}: {sanitize_label(str(exc), 300)}"),
+            )
 
 
 Parser = Callable[[CommandResult, Path, "ExternalToolAdapter"], list[Finding]]
@@ -105,6 +138,9 @@ class ExternalToolAdapter(ToolAdapter):
         expected_codes: set[int] | None = None,
         executable: str | None = None,
         install: str | None = None,
+        network_required: bool = False,
+        recommended_version: str | None = None,
+        executes_project_code: bool = False,
     ):
         self.name = name
         self.blueprint = blueprint
@@ -113,40 +149,66 @@ class ExternalToolAdapter(ToolAdapter):
         self.expected_codes = expected_codes or {0, 1}
         self.executable = executable or name
         self.install = install or f"install {name} with its official package or release"
+        self.network_required = network_required
+        self.recommended_version = recommended_version
+        self.disabled_reason: str | None = None
+        self.executes_project_code = executes_project_code
+        self.max_output_bytes = MAX_TOOL_OUTPUT_BYTES
 
     def status(self) -> ToolStatus:
-        path = shutil.which(self.executable)
+        if self.disabled_reason:
+            return ToolStatus(
+                name=self.name,
+                available=False,
+                detail=self.disabled_reason,
+                outcome="unsupported",
+                network_required=self.network_required,
+                recommended_version=self.recommended_version,
+                requires_project_trust=self.executes_project_code,
+            )
+        path = _resolve_executable(self.executable)
         if not path:
             return ToolStatus(
-                name=self.name, available=False, detail=self.install, outcome="tool_missing"
+                name=self.name,
+                available=False,
+                detail=self.install,
+                outcome="tool_missing",
+                network_required=self.network_required,
+                recommended_version=self.recommended_version,
+                requires_project_trust=self.executes_project_code,
             )
+        self._resolved_executable = path
         version = None
         for flag in (["--version"], ["version"]):
             try:
-                output = subprocess.run(
-                    [path, *flag],
-                    capture_output=True,
-                    text=True,
-                    timeout=3,
-                    check=False,
-                )
+                output = run_bounded_command([path, *flag], Path.cwd(), 3, 16_384)
                 if output.returncode == 0:
                     version = (output.stdout or output.stderr).strip().splitlines()[0][:160]
                     break
             except (OSError, subprocess.TimeoutExpired, IndexError):
                 pass
-        return ToolStatus(name=self.name, available=True, version=version)
+        return ToolStatus(
+            name=self.name,
+            available=True,
+            version=version,
+            network_required=self.network_required,
+            recommended_version=self.recommended_version,
+            requires_project_trust=self.executes_project_code,
+        )
 
     def command(self, root: Path) -> list[str]:
-        return [self.executable, *self.args]
+        return [getattr(self, "_resolved_executable", self.executable), *self.args]
 
     def parse(self, result: CommandResult, root: Path) -> list[Finding]:
         return self.parser(result, root, self)
 
 
-def _priority(severity: str) -> str:
-    return {"critical": "P0", "high": "P1", "medium": "P2", "low": "P3", "info": "P3"}.get(
-        severity, "P2"
+def _priority(severity: str) -> Priority:
+    return cast(
+        Priority,
+        {"critical": "P0", "high": "P1", "medium": "P2", "low": "P3", "info": "P3"}.get(
+            severity, "P2"
+        ),
     )
 
 
@@ -183,11 +245,12 @@ def finding(
         rule_id=rule_id or f"{adapter.name}/{category}",
         source=adapter.name,
         sources=[adapter.name],
-        severity=normalized,
+        severity=cast(Severity, normalized),
         priority=_priority(normalized),
         file=normalized_file,
         range=FileRange(start_line=line) if line else None,
         evidence=evidence or [],
+        tool_metadata={"adapter": adapter.name, "original_severity": severity},
         message=message[:1000],
         recommendation=recommendation,
         verification=f"rerun {adapter.name}",

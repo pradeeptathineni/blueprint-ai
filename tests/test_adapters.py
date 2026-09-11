@@ -25,6 +25,7 @@ def test_ruff_parser_normalizes_location(tmp_path: Path) -> None:
     ]
     findings = adapter.parse(CommandResult([], 1, json.dumps(payload), ""), tmp_path)
     assert findings[0].message == "E501: too long"
+    assert findings[0].range is not None
     assert findings[0].range.start_line == 7
 
 
@@ -63,6 +64,7 @@ def test_terraform_parser_handles_diagnostics(tmp_path: Path) -> None:
     }
     findings = adapter.parse(CommandResult([], 1, json.dumps(payload), ""), tmp_path)
     assert findings[0].severity == "high"
+    assert findings[0].range is not None
     assert findings[0].range.start_line == 2
 
 
@@ -100,4 +102,5 @@ def test_checkov_parser_normalizes_failed_checks(tmp_path: Path) -> None:
     }
     finding = adapter.parse(CommandResult([], 1, json.dumps(payload), ""), tmp_path)[0]
     assert finding.file == "main.tf"
+    assert finding.range is not None
     assert finding.range.start_line == 4

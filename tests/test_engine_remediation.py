@@ -46,7 +46,12 @@ exit 1
     (python_project / ".blueprint-ai.yml").write_text(
         f"tool_overrides:\n  ruff: {fake}\nminimum_severity: medium\n"
     )
-    context, _ = make_context(python_project, blueprints=["code-quality"], model_mode="off")
+    context, _ = make_context(
+        python_project,
+        blueprints=["code-quality"],
+        model_mode="off",
+        trust_project_executables=True,
+    )
     result = review(context).results[0]
     assert result.status == "findings"
     assert result.findings[0].source == "ruff"

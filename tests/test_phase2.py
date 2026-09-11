@@ -65,9 +65,11 @@ def test_applicability_reports_state_and_reason(python_project: Path) -> None:
         model_mode="off",
     )
     results = review(context).results
+    assert results[0].applicability is not None
     assert results[0].applicability.state == "partial"
     assert "machine-readable API contract" in results[0].applicability.reason
     assert results[1].status == "not_applicable"
+    assert results[1].applicability is not None
     assert results[1].applicability.reason
 
 
@@ -110,6 +112,7 @@ def test_mixed_platform_discovery_and_deterministic_findings(tmp_path: Path) -> 
 def test_baseline_and_reasoned_suppression_lifecycle(python_project: Path) -> None:
     context, settings = make_context(python_project, blueprints=["repository"], model_mode="off")
     first = review(context)
+    assert settings.baseline_path is not None
     baseline_path = python_project / settings.baseline_path
     write_baseline(first, baseline_path)
     second = review(context)
@@ -128,6 +131,7 @@ def test_baseline_and_reasoned_suppression_lifecycle(python_project: Path) -> No
     )
     suppressed = review(suppressed_context)
     assert suppressed.suppressed_findings
+    assert suppressed.suppressed_findings[0].suppression is not None
     assert suppressed.suppressed_findings[0].suppression.reason == "owned by platform migration"
 
 
@@ -149,6 +153,7 @@ def test_capability_kit_apply_idempotency_and_safe_rollback(tmp_path: Path) -> N
     first = apply_kit(tmp_path, facts, "observability")
     assert len(first.changed) == 1
     assert first.manifest_path
+    assert first.operation_id is not None
     second = apply_kit(tmp_path, facts, "observability")
     assert second.changed == []
     rolled_back = rollback_operation(tmp_path, first.operation_id)
@@ -158,6 +163,7 @@ def test_capability_kit_apply_idempotency_and_safe_rollback(tmp_path: Path) -> N
 
 def test_rollback_preserves_post_apply_user_edits(tmp_path: Path) -> None:
     result = apply_kit(tmp_path, discover_project(tmp_path), "container")
+    assert result.operation_id is not None
     target = tmp_path / ".dockerignore"
     target.write_text(target.read_text() + "custom\n")
     rolled_back = rollback_operation(tmp_path, result.operation_id)
@@ -243,6 +249,7 @@ def test_sarif_and_junit_parser_goldens(tmp_path: Path) -> None:
         CommandResult([], 1, json.dumps(payload), ""), tmp_path, sarif_adapter
     )[0]
     assert sarif_finding.file == "ci.yml"
+    assert sarif_finding.range is not None
     assert sarif_finding.range.start_line == 4
 
     junit_adapter = ExternalToolAdapter("tests", "testing", [], parse_junit)
@@ -267,6 +274,7 @@ def test_tool_timeout_is_a_tool_error(tmp_path: Path) -> None:
     status, findings, error = adapter.run(tmp_path, timeout=0.05)
     assert status.outcome == "tool_error"
     assert status.exit_code == 124
+    assert error is not None
     assert error.startswith("timed out")
     assert findings == []
 
@@ -279,7 +287,12 @@ def test_generated_test_failure_remains_a_product_finding(python_project: Path) 
     )
     fake_pytest.chmod(fake_pytest.stat().st_mode | stat.S_IXUSR)
     (python_project / ".blueprint-ai.yml").write_text(f"tool_overrides:\n  pytest: {fake_pytest}\n")
-    context, _ = make_context(python_project, blueprints=["testing"], model_mode="off")
+    context, _ = make_context(
+        python_project,
+        blueprints=["testing"],
+        model_mode="off",
+        trust_project_executables=True,
+    )
     before = review(context)
     applied = apply_findings(python_project, before.facts, before.active_findings)
     assert applied.changed[0].target == "tests/test_smoke.py"

@@ -20,15 +20,19 @@ never suppress deterministic results.
 
 ## Budgets, cache, and reproducibility
 
-`.blueprint-ai.yml` controls a per-run model budget and optional per-blueprint budgets. The context
+`.blueprint-ai.yml` controls a per-run model token budget, per-blueprint budgets, maximum uncached
+calls, and `read-write`, `read-only`, `refresh`, or `off` cache behavior. The context
 contains compact facts, normalized findings, an index, a symbol/dependency map, and only ranked
 snippets. Git changed-file mode prioritizes relevant diffs. Cache keys include the model, system
-contract, blueprint, and exact redacted content hash. Reports expose estimated/actual token metrics
-when available. Cached model output is validated against the same strict `Finding` schema.
+contract and prompt version, provider/model, blueprint, and exact redacted content hash. Reports
+expose the reason for each model call, files/bytes read, estimated/actual tokens, cache state, and cost
+when available. Cached model output is size-bounded and validated against a versioned strict schema;
+malformed entries are recomputed atomically. Offline mode makes no model calls.
 
 ## Evaluation
 
 Unit tests use a deterministic fake provider to verify structured requests, cache behavior,
-provenance, token bounds, secret redaction, and provider failure isolation. Versioned review cases in
-`tests/evals/review_cases.json` record representative and adversarial expectations. Changes to prompt,
-selection, redaction, or schemas must keep those cases and the full regression suite green.
+provenance, token bounds, secret redaction, injection isolation, and provider failure handling.
+Versioned property/rubric cases in `tests/evals/review_cases.json` cover architecture, documentation,
+naming, testing, AI context, reliability, and security. Prompt/context changes must compare rubric
+quality and total token use; exact prose is deliberately not an assertion.

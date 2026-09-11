@@ -14,9 +14,11 @@ from pathlib import Path
 
 import yaml
 
+from blueprint_ai.config import load_yaml_mapping
 from blueprint_ai.core import Applicability, Finding, ProjectFacts
-from blueprint_ai.core.models import FileRange, Remediation
+from blueprint_ai.core.models import FileRange, Priority, Remediation, Severity
 from blueprint_ai.discovery import iter_project_files
+from blueprint_ai.safety import read_text_bounded
 
 Check = Callable[[Path, ProjectFacts], list[Finding]]
 Predicate = Callable[[ProjectFacts], bool]
@@ -47,8 +49,8 @@ def _finding(
     message: str,
     recommendation: str,
     *,
-    severity: str = "medium",
-    priority: str | None = None,
+    severity: Severity = "medium",
+    priority: Priority | None = None,
     file: str | None = None,
     line: int | None = None,
     evidence: list[str] | None = None,
@@ -56,7 +58,13 @@ def _finding(
     verification: str = "rerun blueprint",
     rule_id: str | None = None,
 ) -> Finding:
-    derived = {"critical": "P0", "high": "P1", "medium": "P2", "low": "P3", "info": "P3"}
+    derived: dict[Severity, Priority] = {
+        "critical": "P0",
+        "high": "P1",
+        "medium": "P2",
+        "low": "P3",
+        "info": "P3",
+    }
     return Finding(
         blueprint=blueprint,
         category=category,
@@ -248,6 +256,7 @@ def code_design_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         except (OSError, SyntaxError):
             continue
         module = rel.removesuffix(".py").replace("/", ".").removeprefix("src.")
+        module = module.removesuffix(".__init__")
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 end = getattr(node, "end_lineno", node.lineno)
@@ -297,10 +306,7 @@ def code_design_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     local = set(imports)
     for module, dependencies in imports.items():
         for dependency in dependencies:
-            candidates = {
-                item for item in local if item == dependency or item.startswith(dependency + ".")
-            }
-            if any(module in imports.get(candidate, set()) for candidate in candidates):
+            if dependency in local and module in imports.get(dependency, set()):
                 pair = sorted([module, dependency])
                 findings.append(
                     _finding(
@@ -363,7 +369,7 @@ def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 
 def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     present = set(facts.test_capabilities)
-    required: list[tuple[str, str, str]] = [("unit", "high", "core behavior")]
+    required: list[tuple[str, Severity, str]] = [("unit", "high", "core behavior")]
     types = set(facts.project_types)
     if types & {"api", "backend-service", "full-stack"}:
         required.append(("integration", "medium", "service boundaries"))
@@ -423,8 +429,12 @@ def api_data_config_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     for rel in facts.api_specs:
         path = root / rel
         try:
-            raw = path.read_text(encoding="utf-8")
-            data = json.loads(raw) if path.suffix == ".json" else yaml.safe_load(raw)
+            raw = read_text_bounded(path, 2_000_000, root=root)
+            data = (
+                json.loads(raw)
+                if path.suffix == ".json"
+                else load_yaml_mapping(path, root, label=rel)
+            )
         except (OSError, ValueError, yaml.YAMLError) as exc:
             findings.append(
                 _finding(
@@ -530,7 +540,7 @@ def supply_chain_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 def iac_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     findings = []
     if "terraform" in facts.iac:
-        tf_files = list(root.rglob("*.tf"))
+        tf_files = [path for path in iter_project_files(root)[0] if path.suffix == ".tf"]
         combined = "\n".join(path.read_text(errors="ignore")[:100_000] for path in tf_files)
         if "required_version" not in combined:
             findings.append(
@@ -601,7 +611,7 @@ def container_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 
 def kubernetes_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     findings = []
-    rules = (
+    rules: tuple[tuple[str, str, str, str, Severity], ...] = (
         (
             "privileged-workload",
             r"(?m)^\s*privileged:\s*true\s*$",
@@ -657,10 +667,13 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     workflow_dir = root / ".github" / "workflows"
     workflow_texts = []
     for workflow in workflow_dir.glob("*.y*ml") if workflow_dir.is_dir() else []:
-        text = workflow.read_text(encoding="utf-8", errors="ignore")
+        try:
+            text = read_text_bounded(workflow, 2_000_000, root=root, errors="ignore")
+        except (OSError, ValueError):
+            continue
         workflow_texts.append(text)
         try:
-            loaded = yaml.safe_load(text)
+            loaded = load_yaml_mapping(workflow, root, label=workflow.relative_to(root).as_posix())
             if not isinstance(loaded, dict):
                 raise ValueError("workflow root is not a mapping")
         except (ValueError, yaml.YAMLError) as exc:

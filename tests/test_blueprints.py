@@ -35,6 +35,7 @@ def test_repository_and_testing_offer_safe_remediation(python_project: Path) -> 
         ".editorconfig",
         ".pre-commit-config.yaml",
     }
+    assert testing[0].remediation is not None
     assert testing[0].remediation.target == "tests/test_smoke.py"
 
 

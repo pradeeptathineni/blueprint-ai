@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import subprocess
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -11,6 +10,7 @@ from pathlib import Path
 from pathspec import PathSpec
 
 from blueprint_ai.core import ProjectFacts
+from blueprint_ai.safety import MAX_CONFIG_BYTES, read_text_bounded, run_process_bytes
 
 SKIP_DIRS = {
     ".git",
@@ -29,6 +29,7 @@ SKIP_DIRS = {
     "vendor",
 }
 GENERATED_SUFFIXES = {".min.js", ".min.css", ".map", ".lockb"}
+MAX_PROJECT_FILES = 250_000
 LANGUAGE_SUFFIXES = {
     ".py": "Python",
     ".pyi": "Python",
@@ -55,11 +56,21 @@ LANGUAGE_SUFFIXES = {
 }
 
 
+def _git_run(root: Path, *arguments: str, timeout: float = 5):
+    return run_process_bytes(_git_command(root, *arguments), root, timeout, output_limit=8_000_000)
+
+
 def _ignore_spec(root: Path, extra: Iterable[str]) -> PathSpec:
     patterns = list(extra)
     ignore = root / ".gitignore"
     if ignore.is_file():
-        patterns.extend(ignore.read_text(encoding="utf-8", errors="ignore").splitlines())
+        try:
+            patterns.extend(
+                read_text_bounded(ignore, MAX_CONFIG_BYTES, root=root, errors="ignore").splitlines()
+            )
+        except (OSError, ValueError):
+            pass
+    patterns = [pattern for pattern in patterns[:10_000] if len(pattern) <= 1_000]
     return PathSpec.from_lines("gitwildmatch", patterns)
 
 
@@ -67,10 +78,18 @@ def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[l
     spec = _ignore_spec(root, extra_ignores)
     git_files = _git_files(root)
     if git_files is not None:
-        found = []
+        if len(git_files) > MAX_PROJECT_FILES:
+            raise ValueError(f"repository exceeds the {MAX_PROJECT_FILES}-file discovery limit")
+        git_found = []
+        ignored = 0
         for rel in git_files:
+            relative = Path(rel)
+            if relative.is_absolute() or ".." in relative.parts:
+                ignored += 1
+                continue
             path = root / rel
             if any(part in SKIP_DIRS for part in Path(rel).parts) or spec.match_file(rel):
+                ignored += 1
                 continue
             try:
                 if (
@@ -79,17 +98,15 @@ def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[l
                     and path.stat().st_size <= 2_000_000
                     and not any(path.name.endswith(s) for s in GENERATED_SUFFIXES)
                 ):
-                    found.append(path)
+                    git_found.append(path)
+                else:
+                    ignored += 1
             except OSError:
+                ignored += 1
                 continue
-        ignored_process = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-oi", "--exclude-standard", "-z"],
-            capture_output=True,
-            timeout=5,
-            check=False,
-        )
-        ignored = len([item for item in ignored_process.stdout.split(b"\0") if item])
-        return sorted(set(found)), ignored
+        ignored_process = _git_run(root, "ls-files", "-oi", "--exclude-standard", "-z")
+        ignored += len([item for item in ignored_process.stdout.split(b"\0") if item])
+        return sorted(set(git_found)), ignored
     found: list[Path] = []
     ignored = 0
     for current, dirs, files in os.walk(root):
@@ -117,57 +134,38 @@ def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[l
                 ignored += 1
                 continue
             found.append(path)
+            if len(found) > MAX_PROJECT_FILES:
+                raise ValueError(f"repository exceeds the {MAX_PROJECT_FILES}-file discovery limit")
     return sorted(found), ignored
 
 
 def _git_files(root: Path) -> list[str] | None:
-    probe = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        timeout=3,
-        check=False,
-    )
-    if probe.returncode != 0 or Path(probe.stdout.strip()).resolve() != root.resolve():
+    probe = _git_run(root, "rev-parse", "--show-toplevel", timeout=3)
+    if (
+        probe.returncode != 0
+        or probe.output_truncated
+        or Path(probe.stdout.decode(errors="replace").strip()).resolve() != root.resolve()
+    ):
         return None
-    listed = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "-co", "--exclude-standard", "-z"],
-        capture_output=True,
-        timeout=5,
-        check=False,
-    )
-    if listed.returncode != 0:
+    listed = _git_run(root, "ls-files", "-co", "--exclude-standard", "-z")
+    if listed.returncode != 0 or listed.output_truncated:
         return None
     return [item.decode(errors="replace") for item in listed.stdout.split(b"\0") if item]
 
 
 def _git_facts(root: Path) -> tuple[bool, str | None, bool]:
-    probe = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        timeout=3,
-        check=False,
-    )
-    if probe.returncode != 0 or Path(probe.stdout.strip()).resolve() != root.resolve():
+    probe = _git_run(root, "rev-parse", "--show-toplevel", timeout=3)
+    if (
+        probe.returncode != 0
+        or probe.output_truncated
+        or Path(probe.stdout.decode(errors="replace").strip()).resolve() != root.resolve()
+    ):
         return False, None, False
-    branch = (
-        subprocess.run(
-            ["git", "-C", str(root), "branch", "--show-current"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        ).stdout.strip()
-        or None
-    )
+    branch_result = _git_run(root, "branch", "--show-current", timeout=3)
+    branch = branch_result.stdout.decode(errors="replace").strip() or None
     dirty = bool(
-        subprocess.run(
-            ["git", "-C", str(root), "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
+        _git_run(
+            root, "status", "--porcelain", "--untracked-files=normal", timeout=3
         ).stdout.strip()
     )
     return True, branch, dirty
@@ -178,23 +176,22 @@ def _git_changed_files(root: Path, base_ref: str | None = None) -> list[str]:
     compare = base_ref or "HEAD"
     commands = [
         [
-            "git",
-            "-C",
-            str(root),
             "diff",
+            "--no-ext-diff",
             "--name-only",
             "--diff-filter=ACMR",
+            "--end-of-options",
             compare,
             "--",
         ],
-        ["git", "-C", str(root), "status", "--porcelain", "-z"],
+        ["status", "--porcelain", "-z", "--untracked-files=normal"],
     ]
     for index, command in enumerate(commands):
         try:
-            result = subprocess.run(command, capture_output=True, timeout=5, check=False)
-        except (OSError, subprocess.TimeoutExpired):
+            result = _git_run(root, *command)
+        except OSError:
             continue
-        if result.returncode != 0:
+        if result.returncode != 0 or result.output_truncated:
             continue
         if index == 1:
             for item in result.stdout.split(b"\0"):
@@ -205,6 +202,19 @@ def _git_changed_files(root: Path, base_ref: str | None = None) -> list[str]:
                 item.decode(errors="replace") for item in result.stdout.splitlines() if item
             )
     return sorted(changed)
+
+
+def _git_command(root: Path, *arguments: str) -> list[str]:
+    return [
+        "git",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "diff.external=",
+        "-C",
+        str(root),
+        *arguments,
+    ]
 
 
 def _package_json_hints(path: Path) -> tuple[list[str], list[str]]:

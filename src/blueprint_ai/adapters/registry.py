@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from blueprint_ai.core import ProjectFacts
+from blueprint_ai.discovery import iter_project_files
 
 from .base import (
     ExternalToolAdapter,
@@ -24,17 +25,27 @@ from .base import (
 
 def known_tools() -> list[ExternalToolAdapter]:
     """Return replaceable tool definitions; selection happens from discovered evidence."""
-    return [
+    tools = [
         ExternalToolAdapter(
             "ruff", "code-quality", ["check", ".", "--output-format", "json"], parse_ruff
         ),
         ExternalToolAdapter(
-            "mypy", "code-quality", [".", "--show-error-codes", "--no-error-summary"], parse_lines
+            "mypy",
+            "code-quality",
+            [".", "--show-error-codes", "--no-error-summary"],
+            parse_lines,
+            executes_project_code=True,
         ),
         ExternalToolAdapter(
             "biome", "code-quality", ["check", ".", "--reporter=json"], parse_json_list
         ),
-        ExternalToolAdapter("eslint", "code-quality", [".", "--format", "json"], parse_json_list),
+        ExternalToolAdapter(
+            "eslint",
+            "code-quality",
+            [".", "--format", "json"],
+            parse_json_list,
+            executes_project_code=True,
+        ),
         ExternalToolAdapter("tsc", "code-quality", ["--noEmit", "--pretty", "false"], parse_lines),
         ExternalToolAdapter(
             "go-vet", "code-quality", ["vet", "./..."], parse_lines, executable="go"
@@ -48,6 +59,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             ["clippy", "--message-format=short", "--", "-D", "warnings"],
             parse_lines,
             executable="cargo",
+            executes_project_code=True,
         ),
         ExternalToolAdapter("shellcheck", "code-quality", ["--format=json"], parse_json_list),
         ExternalToolAdapter(
@@ -72,13 +84,18 @@ def known_tools() -> list[ExternalToolAdapter]:
             parse_json_list,
         ),
         ExternalToolAdapter(
-            "osv-scanner", "supply-chain", ["scan", "--format", "json", "-r", "."], parse_osv
+            "osv-scanner",
+            "supply-chain",
+            ["scan", "--format", "json", "-r", "."],
+            parse_osv,
+            network_required=True,
         ),
         ExternalToolAdapter(
             "trivy",
             "supply-chain",
             ["fs", "--format", "json", "--scanners", "vuln,misconfig,secret", "."],
             parse_trivy,
+            network_required=True,
         ),
         ExternalToolAdapter(
             "syft",
@@ -87,8 +104,16 @@ def known_tools() -> list[ExternalToolAdapter]:
             parse_json_list,
             expected_codes={0},
         ),
-        ExternalToolAdapter("grype", "supply-chain", ["dir:.", "-o", "json"], parse_grype),
-        ExternalToolAdapter("terraform", "iac", ["validate", "-json"], parse_terraform),
+        ExternalToolAdapter(
+            "grype", "supply-chain", ["dir:.", "-o", "json"], parse_grype, network_required=True
+        ),
+        ExternalToolAdapter(
+            "terraform",
+            "iac",
+            ["validate", "-json"],
+            parse_terraform,
+            executes_project_code=True,
+        ),
         ExternalToolAdapter(
             "terraform-fmt",
             "iac",
@@ -96,7 +121,13 @@ def known_tools() -> list[ExternalToolAdapter]:
             parse_lines,
             executable="terraform",
         ),
-        ExternalToolAdapter("tflint", "iac", ["--format", "json"], parse_json_list),
+        ExternalToolAdapter(
+            "tflint",
+            "iac",
+            ["--format", "json"],
+            parse_json_list,
+            executes_project_code=True,
+        ),
         ExternalToolAdapter("checkov", "iac", ["-d", ".", "-o", "json", "--quiet"], parse_checkov),
         ExternalToolAdapter("cfn-lint", "iac", ["--format", "json"], parse_json_list),
         ExternalToolAdapter("hadolint", "containers", ["--format", "json"], parse_json_list),
@@ -119,27 +150,88 @@ def known_tools() -> list[ExternalToolAdapter]:
             "zizmor", "ci-cd", ["--format", "sarif", ".github/workflows"], parse_sarif
         ),
         ExternalToolAdapter(
-            "spectral", "api-data-config", ["lint", "--format", "json"], parse_json_list
+            "spectral",
+            "api-data-config",
+            ["lint", "--format", "json"],
+            parse_json_list,
+            executes_project_code=True,
         ),
         ExternalToolAdapter(
-            "markdownlint-cli2", "documentation", ["**/*.md", "#node_modules"], parse_lines
+            "markdownlint-cli2",
+            "documentation",
+            ["**/*.md", "#node_modules"],
+            parse_lines,
+            executes_project_code=True,
         ),
         ExternalToolAdapter(
-            "lychee", "documentation", ["--format", "json", "**/*.md"], parse_json_list
+            "lychee",
+            "documentation",
+            ["--format", "json", "**/*.md"],
+            parse_json_list,
+            network_required=True,
         ),
-        ExternalToolAdapter("pytest", "testing", ["-q"], parse_lines, executable="pytest"),
         ExternalToolAdapter(
-            "npm-test", "testing", ["test", "--", "--run"], parse_lines, executable="npm"
+            "pytest",
+            "testing",
+            ["-q"],
+            parse_lines,
+            executable="pytest",
+            executes_project_code=True,
         ),
-        ExternalToolAdapter("go-test", "testing", ["test", "./..."], parse_lines, executable="go"),
         ExternalToolAdapter(
-            "cargo-test", "testing", ["test", "--quiet"], parse_lines, executable="cargo"
+            "npm-test",
+            "testing",
+            ["test", "--", "--run"],
+            parse_lines,
+            executable="npm",
+            executes_project_code=True,
         ),
-        ExternalToolAdapter("maven-test", "testing", ["test", "-q"], parse_lines, executable="mvn"),
         ExternalToolAdapter(
-            "gradle-test", "testing", ["test", "--console=plain"], parse_lines, executable="gradle"
+            "go-test",
+            "testing",
+            ["test", "./..."],
+            parse_lines,
+            executable="go",
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "cargo-test",
+            "testing",
+            ["test", "--quiet"],
+            parse_lines,
+            executable="cargo",
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "maven-test",
+            "testing",
+            ["test", "-q"],
+            parse_lines,
+            executable="mvn",
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "gradle-test",
+            "testing",
+            ["test", "--console=plain"],
+            parse_lines,
+            executable="gradle",
+            executes_project_code=True,
         ),
     ]
+    recommended = {
+        "ruff": ">=0.13,<1",
+        "pytest": ">=9.0.3,<10",
+        "semgrep": ">=1,<2",
+        "gitleaks": ">=8,<9",
+        "osv-scanner": ">=2,<3",
+        "trivy": ">=0.60,<1",
+        "syft": ">=1,<2",
+        "grype": ">=0.90,<1",
+    }
+    for tool in tools:
+        tool.recommended_version = recommended.get(tool.name)
+    return tools
 
 
 def _configured(root: Path, names: tuple[str, ...]) -> bool:
@@ -147,7 +239,10 @@ def _configured(root: Path, names: tuple[str, ...]) -> bool:
 
 
 def _quality_route(
-    facts: ProjectFacts, root: Path, tools: dict[str, ExternalToolAdapter]
+    facts: ProjectFacts,
+    root: Path,
+    tools: dict[str, ExternalToolAdapter],
+    allow_project_executables: bool = False,
 ) -> list[str]:
     languages = set(facts.languages)
     names: list[str] = []
@@ -172,8 +267,8 @@ def _quality_route(
         names.append("go-vet")
         go_files = [
             path.relative_to(root).as_posix()
-            for path in root.rglob("*.go")
-            if ".git" not in path.parts
+            for path in iter_project_files(root)[0]
+            if path.suffix == ".go"
         ]
         if go_files:
             tools["gofmt"] = ExternalToolAdapter(
@@ -184,30 +279,40 @@ def _quality_route(
         names.extend(["cargo-fmt", "cargo-clippy"])
     if "Java" in languages:
         if (root / "pom.xml").is_file():
-            maven = str(root / "mvnw") if (root / "mvnw").is_file() else "mvn"
+            maven = (
+                str(root / "mvnw")
+                if allow_project_executables and (root / "mvnw").is_file()
+                else "mvn"
+            )
             tools["maven-check"] = ExternalToolAdapter(
                 "maven-check",
                 "code-quality",
                 ["verify", "-DskipTests", "-q"],
                 parse_lines,
                 executable=maven,
+                executes_project_code=True,
             )
             names.append("maven-check")
         if _configured(root, ("build.gradle", "build.gradle.kts")):
-            gradle = str(root / "gradlew") if (root / "gradlew").is_file() else "gradle"
+            gradle = (
+                str(root / "gradlew")
+                if allow_project_executables and (root / "gradlew").is_file()
+                else "gradle"
+            )
             tools["gradle-check"] = ExternalToolAdapter(
                 "gradle-check",
                 "code-quality",
                 ["check", "-x", "test", "--console=plain"],
                 parse_lines,
                 executable=gradle,
+                executes_project_code=True,
             )
             names.append("gradle-check")
     if "Shell" in languages:
         shell_files = [
             path.relative_to(root).as_posix()
-            for path in root.rglob("*.sh")
-            if not set(path.parts) & {".git", ".venv", "node_modules", "vendor"}
+            for path in iter_project_files(root)[0]
+            if path.suffix == ".sh"
         ]
         tools["shellcheck"].args.extend(shell_files)
         names.append("shellcheck")
@@ -215,7 +320,10 @@ def _quality_route(
 
 
 def _testing_route(
-    facts: ProjectFacts, root: Path, tools: dict[str, ExternalToolAdapter]
+    facts: ProjectFacts,
+    root: Path,
+    tools: dict[str, ExternalToolAdapter],
+    allow_project_executables: bool = False,
 ) -> list[str]:
     if not facts.tests:
         return []
@@ -238,11 +346,11 @@ def _testing_route(
         names.append("cargo-test")
     if "Java" in languages:
         if (root / "pom.xml").is_file():
-            if (root / "mvnw").is_file():
+            if allow_project_executables and (root / "mvnw").is_file():
                 tools["maven-test"].executable = str(root / "mvnw")
             names.append("maven-test")
         else:
-            if (root / "gradlew").is_file():
+            if allow_project_executables and (root / "gradlew").is_file():
                 tools["gradle-test"].executable = str(root / "gradlew")
             names.append("gradle-test")
     return names
@@ -271,12 +379,13 @@ def _ecosystem_route(
         if "terraform" in facts.iac:
             names.extend(["terraform-fmt", "terraform", "tflint", "checkov"])
         if "cloudformation" in facts.iac:
-            cloudformation = [
-                path.relative_to(root).as_posix()
-                for path in root.rglob("*.y*ml")
-                if "AWSTemplateFormatVersion" in path.read_text(encoding="utf-8", errors="ignore")
-                or "AWS::Serverless-2016-10-31" in path.read_text(encoding="utf-8", errors="ignore")
-            ]
+            cloudformation = []
+            for path in iter_project_files(root)[0]:
+                if path.suffix not in {".yaml", ".yml"}:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="ignore")[:100_000]
+                if "AWSTemplateFormatVersion" in text or "AWS::Serverless-2016-10-31" in text:
+                    cloudformation.append(path.relative_to(root).as_posix())
             tools["cfn-lint"].args.extend(cloudformation)
             names.extend(["cfn-lint", "checkov"])
     elif blueprint == "containers":
@@ -330,13 +439,15 @@ def applicable_adapters(
     overrides: dict[str, str] | None = None,
     *,
     authorized_target: str | None = None,
+    offline: bool = False,
+    allow_project_executables: bool = False,
 ) -> list[ExternalToolAdapter]:
     root = Path(facts.path)
     tools = {adapter.name: adapter for adapter in known_tools()}
     if blueprint == "code-quality":
-        names = _quality_route(facts, root, tools)
+        names = _quality_route(facts, root, tools, allow_project_executables)
     elif blueprint == "testing":
-        names = _testing_route(facts, root, tools)
+        names = _testing_route(facts, root, tools, allow_project_executables)
     else:
         names = _ecosystem_route(facts, blueprint, root, tools)
 
@@ -351,14 +462,25 @@ def applicable_adapters(
             install=(
                 "install OWASP ZAP's official baseline script or use its pinned container image"
             ),
+            network_required=True,
         )
         names.append("zap-baseline")
 
     selected = [tools[name] for name in dict.fromkeys(names)]
     for adapter in selected:
+        if offline and adapter.network_required:
+            adapter.disabled_reason = "disabled by offline mode because the adapter may use network"
+            continue
+        if adapter.executes_project_code and not allow_project_executables:
+            adapter.disabled_reason = (
+                "disabled for an untrusted repository; pass --trust-project-executables "
+                "after reviewing the target"
+            )
+            continue
         local = root / "node_modules" / ".bin" / Path(adapter.executable).name
-        if local.is_file() and adapter.name not in {"npm-test"}:
+        if allow_project_executables and local.is_file() and adapter.name not in {"npm-test"}:
             adapter.executable = str(local)
-        if overrides and adapter.name in overrides:
-            adapter.executable = overrides[adapter.name]
+        if allow_project_executables and overrides and adapter.name in overrides:
+            override = Path(overrides[adapter.name])
+            adapter.executable = str(override if override.is_absolute() else root / override)
     return selected

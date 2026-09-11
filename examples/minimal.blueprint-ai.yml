@@ -1,0 +1,4 @@
+# Copy to .blueprint-ai.yml only when defaults need adjustment.
+model_mode: off
+offline: true
+fail_on_priority: P1

@@ -19,8 +19,13 @@ jobs:
       - run: uv sync --extra dev --locked
       - run: uv run ruff check src tests
       - run: uv run ruff format --check src tests
+      - run: uv run mypy src
       - run: uv run pytest --cov=blueprint_ai --cov-report=term-missing
-      - run: uv run blueprint-ai review . --profile production --model off --format sarif > blueprint-ai.sarif
+      - run: uv run pip-audit
+      - run: uv build
+      - run: uv run blueprint-ai schema report > blueprint-ai-report.schema.json
+      - run: uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format sarif > blueprint-ai.sarif
+      - run: uv run blueprint-ai review . --profile production --no-model --format junit > blueprint-ai.junit.xml
       - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .

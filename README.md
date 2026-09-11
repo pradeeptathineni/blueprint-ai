@@ -32,23 +32,25 @@ export OPENAI_API_KEY=...
 
 ```bash
 blueprint-ai inspect [PATH]
-blueprint-ai blueprints [NAME] [--path PATH]
-blueprint-ai review [PATH] [--blueprint NAME] [--profile NAME] [--model auto|off|on]
+blueprint-ai review [PATH] [--blueprint NAME] [--profile NAME] [--model auto|off|on] [--no-model]
 blueprint-ai plan [PATH]
 blueprint-ai apply [PATH]
 blueprint-ai verify [PATH]
 blueprint-ai baseline [PATH]
-blueprint-ai kits
-blueprint-ai rollback OPERATION_ID [PATH]
-blueprint-ai bootstrap
 blueprint-ai doctor
 ```
 
-Use `--format json|markdown|sarif` on reviews (`--json` remains shorthand), and
+Use `blueprint-ai --help` for blueprint, kit, rollback, bootstrap, benchmark, and schema commands.
+Use `--format json|markdown|sarif|junit` on reviews (`--json` remains shorthand), and
 `--changed --base-ref REF` for a Git-aware regression review. Optional `.blueprint-ai.yml` can
 compose profiles, select blueprints, override tool paths, add ignores, set bounded workers/timeouts,
 set run/blueprint model limits, define reasoned expiring suppressions, and choose a baseline path.
 Defaults require no configuration.
+
+Project tool overrides, repository wrappers, and `node_modules/.bin` are never executed unless the
+operator passes `--trust-project-executables` after reviewing the repository. `offline: true` disables
+network-capable adapters and model calls while retaining deterministic analysis. `fail_on_priority`
+provides a stable CI exit policy; only new, unsuppressed findings count.
 
 DAST is opt-in: only an explicit credential-free `authorized_target` enables the bounded OWASP ZAP
 baseline adapter. Discovered URLs never authorize a scan.
@@ -72,7 +74,7 @@ Each blueprint uses native or mature OSS tools first, small Blueprint AI rules s
 
 ```bash
 blueprint-ai inspect ./service
-blueprint-ai review ./service --profile api,production --model off --format sarif > review.sarif
+blueprint-ai review ./service --profile api,production --no-model --format sarif > review.sarif
 blueprint-ai plan ./service --profile api --model off
 blueprint-ai apply ./service --profile api
 blueprint-ai verify ./service --profile api
@@ -87,3 +89,9 @@ capability kits. `apply --kit NAME` uses atomic create-only writes, preserves ex
 operation manifest, and is idempotent. `blueprint-ai rollback OPERATION_ID PATH` removes only
 unchanged files created by that operation. Generated tests are marked and immediately executed by the
 verification pass. `bootstrap` prints official install guidance and never downloads executables.
+
+Project-local extensions are strict declarative YAML under `.blueprint-ai/blueprints/`; they cannot
+define commands, imports, templates, or model calls. See [the extension contract](docs/extending.md).
+JSON run metadata records schema and application versions, configuration hash, tool versions,
+provider/model identity, prompt versions, mode, and elapsed time. Model context is bounded, redacted,
+cache-keyed by content and prompt version, and clearly marked as untrusted repository data.

@@ -4,8 +4,6 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
-import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +11,12 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from blueprint_ai.core import Finding, ProjectFacts
+from blueprint_ai.safety import (
+    MAX_MANIFEST_BYTES,
+    atomic_write_text,
+    read_text_bounded,
+    run_process,
+)
 
 TEMPLATES = {
     ".editorconfig": """root = true
@@ -254,22 +258,16 @@ def _safe_target(root: Path, value: str) -> Path | None:
         target.relative_to(root.resolve())
     except ValueError:
         return None
+    current = root.resolve()
+    for part in relative.parts[:-1]:
+        current = current / part
+        if current.is_symlink():
+            return None
     return target
 
 
-def _atomic_create(target: Path, content: str) -> str:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-    return hashlib.sha256(content.encode()).hexdigest()
+def _atomic_create(root: Path, target: Path, content: str) -> str:
+    return atomic_write_text(target, content, overwrite=False, root=root)
 
 
 def _content_for(root: Path, facts: ProjectFacts, kind: str, target: str) -> str | None:
@@ -286,15 +284,37 @@ def _record_manifest(root: Path, result: ApplyResult) -> None:
     if not result.changed or not result.operation_id:
         return
     relative = Path(".blueprint-ai") / "operations" / f"{result.operation_id}.json"
-    target = root / relative
+    target = _operation_manifest_target(root, result.operation_id)
     payload = {
         "version": 1,
         "operation_id": result.operation_id,
         "created_at": datetime.now(UTC).isoformat(),
         "changes": [change.model_dump(mode="json") for change in result.changed],
     }
-    _atomic_create(target, json.dumps(payload, indent=2) + "\n")
+    _atomic_create(root, target, json.dumps(payload, indent=2) + "\n")
     result.manifest_path = relative.as_posix()
+
+
+def _operation_manifest_target(root: Path, operation_id: str) -> Path:
+    relative = Path(".blueprint-ai") / "operations" / f"{operation_id}.json"
+    target = _safe_target(root, relative.as_posix())
+    if target is None:
+        raise OSError("operation manifest path crosses a symlink boundary")
+    return target
+
+
+def _commit_manifest_or_rollback(root: Path, result: ApplyResult) -> None:
+    try:
+        _record_manifest(root, result)
+    except OSError:
+        for change in result.changed:
+            target = _safe_target(root, change.target)
+            if target and target.is_file() and not target.is_symlink():
+                if hashlib.sha256(target.read_bytes()).hexdigest() == change.sha256:
+                    target.unlink()
+                    change.status = "rolled_back"
+                    change.detail = "write rolled back because the operation manifest failed"
+        raise
 
 
 def _verify_kit(root: Path, kit: CapabilityKit, result: ApplyResult) -> None:
@@ -310,16 +330,8 @@ def _verify_kit(root: Path, kit: CapabilityKit, result: ApplyResult) -> None:
             )
             continue
         try:
-            completed = subprocess.run(
-                [executable, *command[1:]],
-                cwd=root,
-                capture_output=True,
-                text=True,
-                errors="replace",
-                timeout=120,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+            completed = run_process([executable, *command[1:]], root, 120)
+        except OSError as exc:
             result.verifications.append(
                 Verification(command=command, status="tool_error", detail=str(exc)[:500])
             )
@@ -341,31 +353,46 @@ def _apply_files(
     files: dict[str, str],
     detail: str,
 ) -> None:
+    planned: list[tuple[str, Path, str]] = []
+    conflict = False
+    for relative, content in files.items():
+        target = _safe_target(root, relative)
+        if target is None:
+            conflict = True
+            result.changes.append(
+                Change(
+                    target=relative,
+                    status="conflicted",
+                    blueprint=blueprint,
+                    detail="target or parent symlink escapes the project safety boundary",
+                )
+            )
+        elif os.path.lexists(target):
+            result.changes.append(
+                Change(
+                    target=relative,
+                    status="skipped",
+                    blueprint=blueprint,
+                    detail="existing path preserved",
+                )
+            )
+        else:
+            planned.append((relative, target, content))
+    if conflict:
+        for relative, _target, _content in planned:
+            result.changes.append(
+                Change(
+                    target=relative,
+                    status="conflicted",
+                    blueprint=blueprint,
+                    detail="transaction aborted during preflight",
+                )
+            )
+        return
     created: list[Path] = []
     try:
-        for relative, content in files.items():
-            target = _safe_target(root, relative)
-            if target is None:
-                result.changes.append(
-                    Change(
-                        target=relative,
-                        status="conflicted",
-                        blueprint=blueprint,
-                        detail="target escapes the project",
-                    )
-                )
-                continue
-            if target.exists():
-                result.changes.append(
-                    Change(
-                        target=relative,
-                        status="skipped",
-                        blueprint=blueprint,
-                        detail="existing file preserved",
-                    )
-                )
-                continue
-            digest = _atomic_create(target, content)
+        for relative, target, content in planned:
+            digest = _atomic_create(root, target, content)
             created.append(target)
             result.changes.append(
                 Change(
@@ -376,10 +403,22 @@ def _apply_files(
                     sha256=digest,
                 )
             )
-    except OSError:
+    except OSError as exc:
         for target in reversed(created):
             target.unlink(missing_ok=True)
-        raise
+        created_targets = {target.relative_to(root).as_posix() for target in created}
+        for change in result.changes:
+            if change.status == "changed" and change.target in created_targets:
+                change.status = "rolled_back"
+                change.detail = "transaction rolled back after a later write conflict"
+        result.changes.append(
+            Change(
+                target=relative,
+                status="conflicted",
+                blueprint=blueprint,
+                detail=f"transaction rolled back after write conflict: {str(exc)[:200]}",
+            )
+        )
 
 
 def apply_kit(root: Path, facts: ProjectFacts, name: str) -> ApplyResult:
@@ -387,7 +426,8 @@ def apply_kit(root: Path, facts: ProjectFacts, name: str) -> ApplyResult:
         kit = KITS[name]
     except KeyError as exc:
         raise ValueError(f"unknown capability kit: {name}") from exc
-    result = ApplyResult(operation_id=uuid.uuid4().hex)
+    operation_id = uuid.uuid4().hex
+    result = ApplyResult(operation_id=operation_id)
     required_language = {
         "testing-python": "Python",
         "testing-javascript": "JavaScript",
@@ -407,15 +447,20 @@ def apply_kit(root: Path, facts: ProjectFacts, name: str) -> ApplyResult:
             )
         )
         return result
+    _operation_manifest_target(root, operation_id)
     _apply_files(root, result, f"kit:{name}", kit.files, f"apply {name} kit v{kit.version}")
     if result.changed:
         _verify_kit(root, kit, result)
-    _record_manifest(root, result)
+    _commit_manifest_or_rollback(root, result)
+    if not result.changed:
+        result.operation_id = None
     return result
 
 
 def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> ApplyResult:
-    result = ApplyResult(operation_id=uuid.uuid4().hex)
+    operation_id = uuid.uuid4().hex
+    result = ApplyResult(operation_id=operation_id)
+    _operation_manifest_target(root, operation_id)
     seen: set[str] = set()
     for finding in findings:
         remediation = finding.remediation
@@ -461,26 +506,31 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
             {remediation.target: content},
             remediation.description,
         )
-    _record_manifest(root, result)
+    _commit_manifest_or_rollback(root, result)
     if not result.changed:
         result.operation_id = None
     return result
 
 
 def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
-    if not operation_id or not operation_id.isalnum():
+    if not __import__("re").fullmatch(r"[0-9a-f]{32}", operation_id):
         raise ValueError("invalid operation id")
     manifest = root / ".blueprint-ai" / "operations" / f"{operation_id}.json"
     if not manifest.is_file():
         raise ValueError(f"unknown operation: {operation_id}")
-    data = json.loads(manifest.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(read_text_bounded(manifest, MAX_MANIFEST_BYTES, root=root))
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise ValueError(f"invalid operation manifest: {exc}") from exc
+    if data.get("version") != 1 or data.get("operation_id") != operation_id:
+        raise ValueError("operation manifest identity or version does not match")
     result = ApplyResult(
         operation_id=operation_id, manifest_path=manifest.relative_to(root).as_posix()
     )
     for row in reversed(data.get("changes", [])):
         relative = str(row.get("target", ""))
         target = _safe_target(root, relative)
-        if target is None or not target.is_file():
+        if target is None or target.is_symlink() or not target.is_file():
             result.changes.append(
                 Change(
                     target=relative,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-from blueprint_ai.core.models import Finding
+from blueprint_ai.core.models import Finding, Priority, Severity
 
 ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 ISSUE_ID = re.compile(
@@ -11,10 +11,15 @@ ISSUE_ID = re.compile(
 )
 
 
-def derive_priority(finding: Finding, project_types: list[str]) -> str:
-    base = {"critical": "P0", "high": "P1", "medium": "P2", "low": "P3", "info": "P3"}[
-        finding.severity
-    ]
+def derive_priority(finding: Finding, project_types: list[str]) -> Priority:
+    priorities: dict[Severity, Priority] = {
+        "critical": "P0",
+        "high": "P1",
+        "medium": "P2",
+        "low": "P3",
+        "info": "P3",
+    }
+    base = priorities[finding.severity]
     exposed = bool(set(project_types) & {"api", "web-app", "production", "iac"})
     if exposed and finding.blueprint in {"security", "ci-cd", "iac"} and base == "P2":
         return "P1"
@@ -38,7 +43,7 @@ def deduplicate(findings: list[Finding], project_types: list[str]) -> list[Findi
             set(previous.evidence + item.evidence + [f"also reported by {item.source}"])
         )
         previous.sources = sorted(set(previous.sources + item.sources + [item.source]))
-        if ORDER[item.priority] < ORDER[previous.priority]:
+        if ORDER[item.priority or "P3"] < ORDER[previous.priority or "P3"]:
             previous.priority = item.priority
             previous.severity = item.severity
         previous.confidence = max(previous.confidence, item.confidence)

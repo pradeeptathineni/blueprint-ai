@@ -18,6 +18,42 @@
       "blueprint": "testing",
       "input": "A small local library has unit tests and no network service.",
       "expect": ["no-dast-demand", "no-load-test-demand"]
+    },
+    {
+      "id": "architecture-boundary-evidence",
+      "blueprint": "architecture",
+      "input": "Two packages import each other but no intended layering is documented.",
+      "expect": ["evidence-based-boundary-finding", "no-invented-runtime"]
+    },
+    {
+      "id": "documentation-completeness",
+      "blueprint": "documentation",
+      "input": "Install and command usage exist; troubleshooting and privacy behavior do not.",
+      "expect": ["targeted-missing-section", "no-style-only-noise"]
+    },
+    {
+      "id": "portable-naming",
+      "blueprint": "identity",
+      "input": "The manifest and directory intentionally use different documented names.",
+      "expect": ["respect-documented-distinction", "no-rename-without-evidence"]
+    },
+    {
+      "id": "test-completeness",
+      "blueprint": "testing",
+      "input": "An API has unit tests but its schema compatibility boundary is uncovered.",
+      "expect": ["contract-test-gap", "specific-boundary"]
+    },
+    {
+      "id": "ai-context-permissions",
+      "blueprint": "ai-context",
+      "input": "Agent instructions omit tool permissions, data boundary, and token budget.",
+      "expect": ["permission-boundary-gap", "budget-gap", "no-secret-repetition"]
+    },
+    {
+      "id": "reliability-timeout",
+      "blueprint": "reliability",
+      "input": "A remote call has a timeout but no retry ownership or failure-path test evidence.",
+      "expect": ["failure-path-gap", "no-duplicate-timeout-finding"]
     }
   ]
 }

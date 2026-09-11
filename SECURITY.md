@@ -14,7 +14,10 @@ five business days and coordinate disclosure after a fix is available.
 
 ## Trust boundaries
 
-Blueprint AI treats analyzed repositories and tool output as untrusted data. Tool commands are fixed
-argument arrays and run locally with timeouts. Model review is optional, receives redacted bounded
-context, and cannot apply changes. Intrusive/network security testing is never inferred from project
-content and requires an explicitly authorized target adapter.
+Blueprint AI treats analyzed repositories, Git metadata, config, filenames, local executables, model
+context, and tool output as untrusted data. Tool commands are fixed argument arrays and run with an
+isolated home, constrained environment, bounded sanitized output, and process-group timeouts. Tools
+that execute target code or executable configuration require `--trust-project-executables`.
+Model review is optional, receives redacted bounded context, and cannot apply changes. Network DAST
+is never authorized by project content; the operator must repeat the exact scope with
+`--authorize-target`. See [the threat model](docs/threat-model.md) for controls and residual risk.

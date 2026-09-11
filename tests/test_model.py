@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 from blueprint_ai.core import Finding
 from blueprint_ai.discovery import discover_project
@@ -86,7 +87,7 @@ def test_openai_provider_uses_bounded_nonstored_structured_response() -> None:
 
     class Responses:
         def __init__(self) -> None:
-            self.arguments = {}
+            self.arguments: dict[str, Any] = {}
 
         def create(self, **kwargs):
             self.arguments = kwargs

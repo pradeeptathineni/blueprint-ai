@@ -52,6 +52,7 @@ class Finding(BaseModel):
     file: str | None = None
     range: FileRange | None = None
     evidence: list[str] = Field(default_factory=list)
+    tool_metadata: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
     message: str
     recommendation: str
     remediation: Remediation | None = None
@@ -119,6 +120,10 @@ class ToolStatus(BaseModel):
     command: list[str] = Field(default_factory=list)
     exit_code: int | None = None
     duration_ms: int | None = None
+    output_truncated: bool = False
+    network_required: bool = False
+    recommended_version: str | None = None
+    requires_project_trust: bool = False
 
 
 class Applicability(BaseModel):
@@ -143,18 +148,36 @@ class RunContext(BaseModel):
     selected_blueprints: list[str] = Field(default_factory=list)
     model_mode: Literal["auto", "off", "on"] = "auto"
     model_budget: int = Field(default=12_000, ge=512)
-    output_mode: Literal["human", "json", "markdown", "sarif"] = "human"
+    output_mode: Literal["human", "json", "markdown", "sarif", "junit"] = "human"
     changed_only: bool = False
     base_ref: str | None = None
     config: dict[str, Any] = Field(default_factory=dict)
     cache_dir: Path | None = None
+    trust_project_executables: bool = False
+
+
+class RunMetadata(BaseModel):
+    schema_version: str = "1.0.0"
+    blueprint_ai_version: str
+    config_sha256: str
+    started_at: datetime
+    finished_at: datetime
+    duration_ms: int
+    offline: bool = False
+    model_mode: str
+    model_provider: str | None = None
+    model_name: str | None = None
+    prompt_versions: dict[str, str] = Field(default_factory=dict)
+    tool_versions: dict[str, str | None] = Field(default_factory=dict)
 
 
 class RunReport(BaseModel):
+    schema_version: str = "1.0.0"
     facts: ProjectFacts
     profile: str
     results: list[BlueprintResult]
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    metadata: RunMetadata | None = None
 
     @property
     def findings(self) -> list[Finding]:
