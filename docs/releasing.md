@@ -19,7 +19,14 @@ uv run blueprint-ai support --markdown > /tmp/blueprint-support.md
 cmp docs/support.md /tmp/blueprint-support.md
 uv run blueprint-ai doctor --json
 uv run blueprint-ai schema sandbox-policy
+uv run blueprint-ai schema evolution-plan
+uv run blueprint-ai schema evolution-report
+uv run blueprint-ai schema transformation
 uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format json
+PYTHONPATH=src uv run python benchmarks/phase7_migrations.py \
+  --output /tmp/blueprint-phase7-migrations.json \
+  --require python/ruff-pyupgrade --require go/native-fix \
+  --require terraform/native-format
 ```
 
 Run Actionlint and Zizmor against every workflow. For the live OCI boundary, explicitly acquire the
@@ -42,17 +49,17 @@ The Python distribution is `blueprint-ai-cli`; it installs the `blueprint-ai` ex
 `blueprint_ai` import. Build in an unused directory so stale files cannot enter verification:
 
 ```bash
-uv build --out-dir /tmp/blueprint-0.6.2-dist
+uv build --out-dir /tmp/blueprint-0.7.0-dist
 uv run python benchmarks/verify_distribution.py \
-  --dist /tmp/blueprint-0.6.2-dist --tag 0.6.2
+  --dist /tmp/blueprint-0.7.0-dist --tag 0.7.0
 uv venv /tmp/blueprint-wheel
 uv pip install --python /tmp/blueprint-wheel/bin/python \
-  /tmp/blueprint-0.6.2-dist/blueprint_ai_cli-0.6.2-py3-none-any.whl
+  /tmp/blueprint-0.7.0-dist/blueprint_ai_cli-0.7.0-py3-none-any.whl
 env -u PYTHONPATH /tmp/blueprint-wheel/bin/python benchmarks/release_smoke.py \
   --output /tmp/blueprint-wheel.json
 uv venv /tmp/blueprint-sdist
 uv pip install --python /tmp/blueprint-sdist/bin/python \
-  /tmp/blueprint-0.6.2-dist/blueprint_ai_cli-0.6.2.tar.gz
+  /tmp/blueprint-0.7.0-dist/blueprint_ai_cli-0.7.0.tar.gz
 env -u PYTHONPATH /tmp/blueprint-sdist/bin/python benchmarks/release_smoke.py \
   --output /tmp/blueprint-sdist.json
 ```
@@ -71,10 +78,10 @@ creating and pushing an annotated tag on that commit:
 ```bash
 git status --porcelain
 git push origin main
-git tag -a 0.6.2 -m 'Blueprint AI 0.6.2'
-git cat-file -t 0.6.2
-git rev-parse '0.6.2^{commit}'
-git push origin 0.6.2
+git tag -a 0.7.0 -m 'Blueprint AI 0.7.0'
+git cat-file -t 0.7.0
+git rev-parse '0.7.0^{commit}'
+git push origin 0.7.0
 ```
 
 CI and Release both run on the tag. Release builds the wheel and source archive once, verifies fresh
@@ -88,11 +95,11 @@ Verify each hosted artifact after downloading it:
 
 ```bash
 sha256sum -c SHA256SUMS
-gh attestation verify blueprint_ai_cli-0.6.2-py3-none-any.whl \
+gh attestation verify blueprint_ai_cli-0.7.0-py3-none-any.whl \
   -R pradeeptathineni/blueprint-ai
-gh attestation verify blueprint_ai_cli-0.6.2.tar.gz \
+gh attestation verify blueprint_ai_cli-0.7.0.tar.gz \
   -R pradeeptathineni/blueprint-ai
-gh attestation verify blueprint_ai_cli-0.6.2-py3-none-any.whl \
+gh attestation verify blueprint_ai_cli-0.7.0-py3-none-any.whl \
   -R pradeeptathineni/blueprint-ai --predicate-type https://spdx.dev/Document/v2.3
 ```
 

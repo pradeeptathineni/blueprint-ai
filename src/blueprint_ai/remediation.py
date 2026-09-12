@@ -8,6 +8,7 @@ import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,9 @@ from blueprint_ai.safety import (
     read_bytes_bounded,
     read_text_bounded,
 )
+
+if TYPE_CHECKING:
+    from blueprint_ai.evolution.models import EvolutionReport
 
 TEMPLATES = {
     ".editorconfig": """root = true
@@ -726,7 +730,7 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
     return result
 
 
-def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
+def rollback_operation(root: Path, operation_id: str) -> ApplyResult | EvolutionReport:
     if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
         raise ValueError("invalid operation id")
     manifest = root / ".blueprint-ai" / "operations" / f"{operation_id}.json"
@@ -736,6 +740,10 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
         data = json.loads(read_text_bounded(manifest, MAX_MANIFEST_BYTES, root=root))
     except (OSError, ValueError, UnicodeError) as exc:
         raise ValueError(f"invalid operation manifest: {exc}") from exc
+    if isinstance(data, dict) and data.get("version") == 3 and data.get("kind") == "evolution":
+        from blueprint_ai.evolution import rollback_evolution
+
+        return rollback_evolution(root, operation_id)
     if (
         not isinstance(data, dict)
         or type(data.get("version")) is not int

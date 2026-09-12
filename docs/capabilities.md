@@ -33,5 +33,6 @@ Security policy and release documentation are prompts for the project's maintain
 A dependency-update config does not install or activate a hosting app. A secret/SAST config does not
 prove a scan ran. The Dev Container kit adds configuration; editor attachment is a separate workflow.
 The container kit adds ignore rules, while fresh API genesis owns executable service Dockerfiles.
-General merges into existing manifests, codemods, migrations, and credential/service activation are
-outside this release's create-only boundary.
+General merges into existing manifests and credential/service activation remain outside this
+create-only boundary. Supported bounded codemods and migrations use the separate
+[project evolution](evolution.md) plan, staged-verification, publication, and exact-rollback contract.

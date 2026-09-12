@@ -62,9 +62,14 @@ def main() -> None:
             "genesis-plan",
             "project-graph",
             "sandbox-policy",
+            "evolution-plan",
+            "evolution-report",
+            "transformation",
         ):
             assert json.loads(cli("schema", schema))["schema"]
         assert json.loads(cli("support"))["families"]
+        evolution_catalog = json.loads(cli("evolve", "catalog"))["transformations"]
+        assert evolution_catalog["container/maintainer-to-oci-label"]["maturity"] == "supported"
         assert json.loads(cli("tools", "install", "ruff", "--dry-run"))["command"]
         identity = json.loads(cli("name", "Windows Service", "--ecosystem", "python"))
         assert identity["package"] == "windows-service" and identity["module"] == "windows_service"
@@ -89,6 +94,66 @@ def main() -> None:
         assert any(c["status"] == "changed" for c in added["changes"]) and added["operation_id"]
         cli("rollback", added["operation_id"], str(project), "--json")
         assert snapshot(project) == before
+
+        evolution = root / "evolution"
+        evolution.mkdir()
+        dockerfile = evolution / "Dockerfile"
+        original_dockerfile = "FROM scratch\nMAINTAINER Release Smoke <smoke@example.invalid>\n"
+        dockerfile.write_text(original_dockerfile)
+        subprocess.run(["git", "-C", str(evolution), "init", "-q", "-b", "smoke"], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(evolution),
+                "-c",
+                "user.name=Blueprint Smoke",
+                "-c",
+                "user.email=smoke@invalid",
+                "add",
+                ".",
+            ],
+            check=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(evolution),
+                "-c",
+                "user.name=Blueprint Smoke",
+                "-c",
+                "user.email=smoke@invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ],
+            check=True,
+        )
+        plan = cli(
+            "evolve",
+            "plan",
+            str(evolution),
+            "--target",
+            "container/maintainer-to-oci-label",
+        )
+        plan_file = root / "evolution-plan.json"
+        plan_file.write_text(plan)
+        preview = json.loads(cli("evolve", "apply", str(plan_file), str(evolution), "--dry-run"))
+        assert preview["status"] == "dry_run" and dockerfile.read_text() == original_dockerfile
+        evolved = json.loads(cli("evolve", "apply", str(plan_file), str(evolution)))
+        assert evolved["status"] == "verified" and evolved["operation_id"]
+        assert "org.opencontainers.image.authors" in dockerfile.read_text()
+        restored = json.loads(cli("rollback", evolved["operation_id"], str(evolution), "--json"))
+        assert restored["status"] == "rolled_back" and dockerfile.read_text() == original_dockerfile
+        clean = subprocess.run(
+            ["git", "-C", str(evolution), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert not clean.stdout
         if args.image:
             isolated = json.loads(
                 cli("sandbox", str(project), args.image, "--", "python", "--version")

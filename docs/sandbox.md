@@ -42,6 +42,12 @@ use 240 seconds, 1 GiB scratch and 2 GiB memory; Terraform/OpenTofu provider ins
 No daemon socket enters the sandbox, so nested Docker/Dev Container image builds are unavailable
 in strict OCI generation. Trusted host generation retains the existing local image-build path.
 
+Evolution also uses a writable disposable stage even when the operator selects trusted host
+execution. The native tool sees the staged tracked/unignored source, not the real worktree; only
+scope-checked verified results are published afterward. Existing ignored dependency directories are
+not copied. Migration caches are empty, external, and network-disabled, so dependency-bearing native
+verification must use vendored inputs or fail explicitly.
+
 ## Network
 
 `none` uses the container's private network namespace without egress or host-loopback access. An

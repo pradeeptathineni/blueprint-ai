@@ -39,6 +39,14 @@ jobs:
       - run: uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format sarif > blueprint-ai.sarif
       - run: uv run blueprint-ai review . --profile production --no-model --format junit > blueprint-ai.junit.xml
       - run: uv run blueprint-ai support --markdown > blueprint-support.md && cmp docs/support.md blueprint-support.md
+      - name: Deterministic evolution corpus
+        run: >-
+          uv run python benchmarks/phase7_migrations.py
+          --output phase7-migrations.json
+          --only python/ruff-pyupgrade
+          --only container/maintainer-to-oci-label
+          --only github-actions/pin-official-actions
+          --require python/ruff-pyupgrade
       - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           path: .

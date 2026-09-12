@@ -454,7 +454,7 @@ def rollback(
     path: PathArg = Path("."),
     json_output: JsonOption = False,
 ) -> None:
-    """Remove unchanged files created by one apply operation."""
+    """Reverse one unchanged remediation or evolution operation."""
     try:
         result = rollback_operation(path.resolve(), operation_id)
     except ValueError as exc:
@@ -551,13 +551,14 @@ def schema_command(
         typer.Argument(
             help=(
                 "settings, report, custom-blueprint, intent, genesis-plan, project-graph, "
-                "sandbox-policy"
+                "sandbox-policy, evolution-plan, evolution-report, or transformation"
             )
         ),
     ] = "report",
 ) -> None:
     """Print stable machine-readable JSON schemas for integrations and extensions."""
     from blueprint_ai.core.project import ProjectGraph
+    from blueprint_ai.evolution.models import EvolutionPlan, EvolutionReport, TransformationSpec
     from blueprint_ai.genesis.models import GenesisPlanPreview, IntentSpec
     from blueprint_ai.sandbox import SandboxPolicy
 
@@ -569,6 +570,9 @@ def schema_command(
         "genesis-plan": GenesisPlanPreview.model_json_schema(),
         "project-graph": ProjectGraph.model_json_schema(),
         "sandbox-policy": SandboxPolicy.model_json_schema(),
+        "evolution-plan": EvolutionPlan.model_json_schema(),
+        "evolution-report": EvolutionReport.model_json_schema(),
+        "transformation": TransformationSpec.model_json_schema(),
     }
     if name not in schemas:
         raise typer.BadParameter("schema must be one of " + ", ".join(schemas))
@@ -747,6 +751,107 @@ def support_command(markdown: Annotated[bool, typer.Option()] = False) -> None:
         typer.echo(support_markdown(), nl=False)
     else:
         _dump(support_data())
+
+
+evolve_app = typer.Typer(help="Plan and transactionally apply deterministic project evolution.")
+app.add_typer(evolve_app, name="evolve")
+
+
+@evolve_app.command("catalog")
+def evolution_catalog() -> None:
+    """List canonical supported, partial, experimental, and deferred transformations."""
+    from blueprint_ai.evolution import catalog_data
+
+    _dump(catalog_data())
+
+
+@evolve_app.command("plan")
+def evolution_plan_command(
+    path: PathArg = Path("."),
+    target: Annotated[
+        list[str] | None,
+        typer.Option("--target", "-t", help="Canonical transformation ID; repeat to select."),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(help="Optional new JSON plan file; .blueprint-ai/plans is recommended."),
+    ] = None,
+) -> None:
+    """Inspect current state and emit a sealed, non-mutating desired-state plan."""
+    from blueprint_ai.evolution import plan_evolution
+    from blueprint_ai.safety import atomic_write_text
+
+    try:
+        plan = plan_evolution(path, target)
+        text = plan.model_dump_json(indent=2) + "\n"
+        if output:
+            destination = output.expanduser().resolve()
+            if destination.exists():
+                raise ValueError(f"plan output already exists: {destination}")
+            atomic_write_text(destination, text, overwrite=False)
+            typer.echo(str(destination))
+        else:
+            typer.echo(text, nl=False)
+    except (ValueError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@evolve_app.command("apply")
+def evolution_apply_command(
+    plan_file: Annotated[Path, typer.Argument(exists=True, file_okay=True, dir_okay=False)],
+    path: PathArg = Path("."),
+    dry_run: Annotated[
+        bool, typer.Option(help="Exercise previews and emit diffs without mutation.")
+    ] = False,
+    allow_dirty: Annotated[
+        bool, typer.Option(help="Accept the exact dirty state sealed into the plan.")
+    ] = False,
+    allow_main: Annotated[
+        bool, typer.Option(help="Explicitly permit mutation of a branch named main.")
+    ] = False,
+    trust_project_executables: TrustOption = False,
+    sandbox: Annotated[
+        str, typer.Option(help="auto, docker, podman, gvisor, or trusted host")
+    ] = "auto",
+    sandbox_image: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Apply a sealed plan with scope enforcement, verification, and exact rollback."""
+    from blueprint_ai.evolution import TRANSFORMATIONS, apply_evolution, load_plan
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    try:
+        plan = load_plan(plan_file)
+        needs_tool = any(
+            TRANSFORMATIONS[step.recipe_id].spec.tool
+            for step in plan.steps
+            if step.status == "ready"
+        )
+        policy = (
+            SandboxPolicy.model_validate(
+                {
+                    "backend": sandbox,
+                    "image": sandbox_image,
+                    "trusted": trust_project_executables,
+                    "writable": trust_project_executables and not dry_run,
+                    "timeout": 300,
+                }
+            )
+            if needs_tool
+            else SandboxPolicy()
+        )
+        result = apply_evolution(
+            path,
+            plan,
+            dry_run=dry_run,
+            allow_dirty=allow_dirty,
+            allow_main=allow_main,
+            policy=policy,
+        )
+        _dump(result)
+    except (ValueError, OSError, RuntimeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
 
 
 tools_app = typer.Typer(help="Inspect and explicitly acquire optional tools.")

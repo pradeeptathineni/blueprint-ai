@@ -1,6 +1,6 @@
 # Tool research
 
-Snapshot: 2026-09-11. This refresh uses upstream documentation and repositories rather than
+Snapshot: 2026-09-12. This refresh uses upstream documentation and repositories rather than
 memory. The actively maintained [static-analysis](https://github.com/analysis-tools-dev/static-analysis)
 and [dynamic-analysis](https://github.com/analysis-tools-dev/dynamic-analysis) catalogs were checked
 again for language/ecosystem gaps. Their stale/archive markers are useful discovery evidence, but a
@@ -10,6 +10,35 @@ Selection weights maintenance, meaningful adoption, OSI license, machine-readabl
 local execution, CI suitability, startup/runtime cost, macOS/Linux/Windows availability, overlap,
 configuration burden, and false-positive behavior. Tools remain optional CLIs; none of their code is
 redistributed. Blueprint AI never silently downloads a tool.
+
+## Phase 7 transformation refresh — 2026-09-12
+
+Migration selection was refreshed from primary vendor/project sources. Catalog metadata is canonical;
+this table records why the 0.7.0 executable boundary is intentionally narrower than discovery.
+
+| Ecosystem | Decision | Evidence and boundary |
+| --- | --- | --- |
+| Python syntax | wrap [Ruff UP](https://docs.astral.sh/ruff/rules/#pyupgrade-up) | Stable automatic fixes can be previewed, scoped, parsed, rerun for idempotency, and bound to `project.requires-python`. 0.7.0 runs Ruff isolated from repository lint policy. |
+| Python packaging | partial adapt from [uv's pip-to-project guide](https://docs.astral.sh/uv/guides/migration/pip-to-project/) | Indexes, requirement groups, editable/path sources, build metadata, and application versus package intent cannot be safely inferred from a requirements file alone. |
+| Go | wrap native [Go 1.26 `go fix`](https://go.dev/blog/gofix) | The version-gated modernizers expose `-diff`, skip generated files, and preserve compiler ownership. Apply is limited to selected package directories and followed by offline `go test ./...`. |
+| Rust | partial adapt from [Cargo `fix --edition`](https://doc.rust-lang.org/cargo/commands/cargo-fix.html) | Cargo supplies compiler suggestions but deliberately does not update `Cargo.toml`; inactive cfg/features and manifest intent remain unresolved. |
+| Java/JDK | partial wrap of [OpenRewrite runners](https://docs.openrewrite.org/running-recipes/getting-started) | Maven/Gradle execution and target JDK selection are authoritative, but exact recipes and build prerequisites need explicit selection. Core availability does not license every recipe. |
+| Spring | defer under [OpenRewrite licensing](https://docs.openrewrite.org/licensing/openrewrite-licensing) | Current modules/recipes span Apache, source-available, and commercial terms. Blueprint AI neither bundles nor executes a recipe on ecosystem name alone. |
+| React/CRA | partial planning from [React's CRA sunset guidance](https://react.dev/blog/2025/02/14/sunsetting-create-react-app) and [React 19 guide](https://react.dev/blog/2024/04/25/react-19-upgrade-guide) | React recommends frameworks for many apps and build tools such as Vite/Parcel/Rsbuild for others; routing, rendering, data, deployment, and dependency intent determine the destination. React-recommended codemods remain preferred once an explicit target is supported. |
+| Next.js | partial wrap of [official codemods](https://nextjs.org/docs/app/guides/upgrading/codemods) | Native upgrade/codemod dry-run facilities are preferred, but interactive dependency and semantic version transitions are not yet adapted to the transaction contract. |
+| .NET | defer to the [official modernization successor](https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview) | Upgrade Assistant is deprecated. The GitHub Copilot modernization agent is an external authorized-agent workflow, not a deterministic CLI Blueprint AI can silently substitute. |
+| Terraform | wrap native [fmt](https://developer.hashicorp.com/terraform/cli/commands/fmt) only | Native HCL formatting has clear scope and idempotency. Provider/module/backend/state upgrade claims require initialization and project-specific verification, so they remain outside the supported formatter. |
+| OpenTofu | defer following the [official migration guide](https://opentofu.org/docs/intro/migration/) | State backup, backend/provider compatibility, and remote-state dependency order make Terraform-to-OpenTofu a stateful platform migration, not a textual rename. |
+| Kubernetes | partial wrap candidate under the [API deprecation guide](https://kubernetes.io/docs/reference/using-api/deprecation-guide/) | API conversion must target a known cluster version and can select non-ideal defaults; no automatic apply is exposed. |
+| Dockerfile | native deterministic from [Docker's deprecation guidance](https://docs.docker.com/reference/build-checks/maintainer-deprecated/) | Single-line `MAINTAINER` has a direct OCI authors-label replacement. Existing labels and multiline values are rejected instead of merged or guessed. |
+| GitHub Actions | native schema-aware scalar edit under [GitHub secure-use guidance](https://docs.github.com/en/actions/reference/security/secure-use) | Only reviewed `actions/*` major tags with registry full SHAs are changed. The major is preserved; unknown, third-party, expression, quoted, and reusable workflow references remain untouched. |
+| Generic structural tools | experimental adapt of [ast-grep rewrite](https://ast-grep.github.io/guide/rewrite-code.html) | It is preferred over textual replacement for a reviewed project-specific JS/TS syntax rule, but Blueprint AI does not infer a universal old/new pattern. jscodeshift, LibCST, compiler APIs, and Tree-sitter remain future recipe-specific options, not a universal AST subsystem. |
+| Codex | researched [App Server and exec](https://openai.com/index/unlocking-the-codex-harness/) but defer implementation | App Server is the rich bidirectional JSONL-over-stdio and approval surface; exec fits one-shot automation. No supported step has residual semantic implementation, so 0.7.0 adds neither agent authority nor an unused integration abstraction. |
+
+Semgrep autofix is rejected as a general migration authority: it is useful only with an explicitly
+reviewed rule and cannot replace framework/compiler migration semantics. Schema parsers already in the
+runtime handle the two bounded config transforms, so adding a Tree-sitter, CST, or TOML/YAML rewriting
+dependency without another proven recipe would not earn its cost.
 
 The Phase 4 refresh rechecked the actively changing defaults against upstream releases and then ran
 the priority tools against controlled defects. Ruff remains

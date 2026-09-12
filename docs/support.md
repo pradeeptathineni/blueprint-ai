@@ -128,3 +128,24 @@ Recognition, initialization and verification are separate claims. External tools
 | sast | .semgrep.yml | .semgrep.yaml | bounded structural validation |
 | devcontainer | .devcontainer/devcontainer.json | .devcontainer.json | bounded structural validation |
 | release-checklist | docs/releasing.md | same-path conflicts | bounded structural validation |
+
+## Evolution transformations
+
+| Transformation | Mechanism / provider | Maturity | Dry run / rollback | Boundary |
+| --- | --- | --- | --- | --- |
+| python/ruff-pyupgrade | official-native; Ruff | supported | yes / yes | Does not change declared Python or dependency versions |
+| go/native-fix | official-native; Go toolchain | supported | yes / yes | Build-tagged configurations need separate runs; the isolated module cache starts empty |
+| terraform/native-format | official-native; Terraform CLI | supported | yes / yes | Formatting is not a provider, module, backend, or state migration |
+| container/maintainer-to-oci-label | builtin-structural; Blueprint AI structural transform | supported | yes / yes | Multiline instructions are rejected rather than guessed |
+| github-actions/pin-official-actions | builtin-structural; Blueprint AI schema-aware YAML scalar transform | supported | yes / yes | Preserves major compatibility target and never resolves unknown or third-party tags |
+| python/requirements-to-uv-project | official-native; uv | partial | no / no | Requirement classification, indexes, editable sources, and build metadata need operator intent |
+| java/openrewrite-lts | established-codemod; OpenRewrite Maven/Gradle plugin | partial | no / no | Recipe artifacts, licenses, build plugins, and target JDK must be selected explicitly |
+| java/spring-openrewrite | established-codemod; OpenRewrite/Moderne recipes | deferred | no / no | No source-available or proprietary recipe is bundled or exposed as Blueprint-managed execution |
+| react/create-react-app-foundation | manual; React migration guidance plus chosen foundation tooling | partial | no / no | The destination depends on routing, rendering, data, deployment, and project intent; Blueprint AI will not guess Vite versus a framework |
+| react/19-official-codemods | established-codemod; React-recommended Codemod registry recipe | partial | no / no | Dependency compatibility and runtime behavior require an explicit version target and project tests |
+| next/official-upgrade-codemod | official-native; @next/codemod | partial | no / no | Interactive dependency and semantic upgrade choices are not yet transactionally adapted |
+| rust/edition | official-native; cargo fix --edition | partial | no / no | Cargo does not update Cargo.toml and inactive cfg/features can retain manual work |
+| dotnet/modernization-agent | agent-implementation; GitHub Copilot modernization agent | deferred | no / no | Upgrade Assistant is deprecated; the successor requires an authorized external agent workflow |
+| kubernetes/api-convert | official-native; kubectl convert plugin | partial | no / no | Conversion can choose non-ideal defaults and must be checked against the target cluster version |
+| iac/terraform-to-opentofu | official-native; OpenTofu CLI and migration guide | deferred | no / no | State, backend, provider, remote-state dependency order, and rollback are not textual changes |
+| generic/ast-grep | established-codemod; ast-grep | experimental | no / no | No universal recipe is inferred; a reviewed project-specific structural rule is required |

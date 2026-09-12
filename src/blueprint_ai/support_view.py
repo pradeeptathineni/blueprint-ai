@@ -9,6 +9,7 @@ def support_data() -> dict:
     from blueprint_ai.adapters.registry import known_tools
     from blueprint_ai.discovery.graph import MANIFEST_LANGUAGES
     from blueprint_ai.discovery.project import LANGUAGE_SUFFIXES
+    from blueprint_ai.evolution.catalog import catalog_data
     from blueprint_ai.genesis.capabilities import CAPABILITIES
     from blueprint_ai.remediation import KITS
 
@@ -47,6 +48,7 @@ def support_data() -> dict:
             }
             for k, v in KITS.items()
         },
+        "evolution": catalog_data()["transformations"],
     }
 
 
@@ -118,5 +120,19 @@ def support_markdown() -> str:
             f"| {name} | {', '.join(kit['files'])} | "
             f"{', '.join(alternatives) or 'same-path conflicts'} | "
             f"{verification or 'bounded structural validation'} |"
+        )
+    lines += [
+        "",
+        "## Evolution transformations",
+        "",
+        "| Transformation | Mechanism / provider | Maturity | Dry run / rollback | Boundary |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for recipe in data["evolution"].values():
+        boundary = "; ".join(recipe["limitations"]) or "catalog contract"
+        lines.append(
+            f"| {recipe['id']} | {recipe['mechanism']}; {recipe['provider']} | "
+            f"{recipe['maturity']} | {'yes' if recipe['dry_run'] else 'no'} / "
+            f"{'yes' if recipe['reversible'] else 'no'} | {boundary} |"
         )
     return "\n".join(lines) + "\n"
