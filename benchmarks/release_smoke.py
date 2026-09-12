@@ -49,7 +49,7 @@ def main() -> None:
             rows.append({"command": list(arguments), "exit_code": process.returncode})
             return process.stdout
 
-        version = importlib.metadata.version("blueprint-ai")
+        version = importlib.metadata.version("blueprint-ai-cli")
         assert version in cli("--version")
         assert "Usage" in cli("--help")
         assert json.loads(cli("doctor", "--json"))["runtime_ok"]

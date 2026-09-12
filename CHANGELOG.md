@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2 — 2026-09-12
+
+- Publish tag-built wheel and source archives with SHA-256 checksums, an SPDX SBOM, GitHub build/SBOM
+  attestations, and a GitHub Release whose failures remain visible.
+- Adopt the available `blueprint-ai-cli` Python distribution name while preserving the repository,
+  `blueprint-ai` executable, and `blueprint_ai` import.
+- Prepare secretless PyPI Trusted Publishing behind the dedicated `pypi` environment and an explicit
+  repository opt-in; artifacts are built once and shared across release and publication jobs.
+- Verify archive contents, metadata/version consistency, fresh wheel/sdist installs, no-model
+  behavior, and the existing bounded OpenAI Responses provider contract without adding an agent
+  backend.
+
 ## 0.6.1 — 2026-09-12
 
 - Make hosted CI observable for `main`, release tags, manual dispatch, Linux sandbox checks, and a

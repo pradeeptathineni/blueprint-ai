@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and attest distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Sign attestations with GitHub's short-lived OIDC identity.
+      attestations: write # Store build-provenance and SBOM attestations.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev --locked
+      - name: Verify tag and source versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: test "$RELEASE_TAG" = "$(uv run blueprint-ai --version)"
+      - run: uv build --out-dir dist
+      - name: Verify distribution contents and metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: uv run python benchmarks/verify_distribution.py --dist dist --tag "$RELEASE_TAG"
+      - name: Smoke test wheel
+        run: |
+          uv venv /tmp/blueprint-wheel
+          uv pip install --python /tmp/blueprint-wheel/bin/python dist/*.whl
+          env -u PYTHONPATH /tmp/blueprint-wheel/bin/python benchmarks/release_smoke.py \
+            --output /tmp/blueprint-wheel.json
+      - name: Smoke test source distribution
+        run: |
+          uv venv /tmp/blueprint-sdist
+          uv pip install --python /tmp/blueprint-sdist/bin/python dist/*.tar.gz
+          env -u PYTHONPATH /tmp/blueprint-sdist/bin/python benchmarks/release_smoke.py \
+            --output /tmp/blueprint-sdist.json
+      - name: Generate SHA-256 checksums
+        working-directory: dist
+        run: sha256sum -- ./*.whl ./*.tar.gz > SHA256SUMS
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attest build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+      - name: Attest SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+          sbom-path: sbom.spdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-package-distributions
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: |
+            dist/SHA256SUMS
+            sbom.spdx.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  github-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Create the release and attach its verified assets.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download Python distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-package-distributions
+          path: release-assets
+      - name: Download checksums and SBOM
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata
+          path: release-assets
+      - name: Publish immutable GitHub Release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" \
+            release-assets/*.whl \
+            release-assets/*.tar.gz \
+            release-assets/SHA256SUMS \
+            release-assets/sbom.spdx.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Blueprint AI $RELEASE_TAG" \
+            --notes-file "docs/release-notes-$RELEASE_TAG.md"
+
+  publish-pypi:
+    name: Publish to PyPI
+    if: vars.BLUEPRINT_PUBLISH_PYPI == 'true'
+    needs: [build, github-release]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/blueprint-ai-cli
+    permissions:
+      id-token: write # Exchange the job identity for a short-lived PyPI token.
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-package-distributions
+          path: dist
+      - name: Publish distribution to PyPI with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
