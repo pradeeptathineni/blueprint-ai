@@ -84,6 +84,8 @@ class Finding(BaseModel):
             "file": self.file,
             "line": self.range.start_line if self.range else None,
         }
+        if self.provenance == "model":
+            material["provenance"] = "model"
         if self.category == "dependency-vulnerability":
             material.update(
                 {
@@ -143,6 +145,9 @@ class ToolStatus(BaseModel):
     requires_project_trust: bool = False
     working_directory: str | None = None
     analysis_state: str | None = None
+    sandbox: dict[str, Any] | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    output_evidence: dict[str, Any] = Field(default_factory=dict)
 
 
 class Applicability(BaseModel):
@@ -175,6 +180,7 @@ class RunContext(BaseModel):
     config: dict[str, Any] = Field(default_factory=dict)
     cache_dir: Path | None = None
     trust_project_executables: bool = False
+    sandbox: dict[str, Any] = Field(default_factory=dict)
 
 
 class RunMetadata(BaseModel):

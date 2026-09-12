@@ -115,8 +115,23 @@ class ProjectGraph(BaseModel):
 
 
 def path_scope(path: str) -> Scope:
-    parts = {part.lower() for part in PurePosixPath(path).parts}
-    name = PurePosixPath(path).name.lower()
+    relative = PurePosixPath(path)
+    segments = [part.lower() for part in relative.parts]
+    # Maven and Gradle Java source roots separate repository directories from package
+    # namespaces. A package named `example`, `fixtures` or `test` does not change the
+    # source role, while an enclosing example/fixture project retains its exclusion.
+    for index in range(len(segments) - 2):
+        if (
+            segments[index] == "src"
+            and segments[index + 1] in {"main", "test"}
+            and segments[index + 2] == "java"
+        ):
+            enclosing = path_scope(PurePosixPath(*relative.parts[:index]).as_posix())
+            if enclosing != "runtime":
+                return enclosing
+            return "test" if segments[index + 1] == "test" else "runtime"
+    parts = set(segments)
+    name = relative.name.lower()
     if ".terraform" in parts:
         return "remote-module"
     if parts & {"vendor", "node_modules", "third_party", "third-party", ".venv"}:

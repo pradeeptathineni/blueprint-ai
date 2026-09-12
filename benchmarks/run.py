@@ -23,6 +23,9 @@ def main() -> None:
                     f"def value_{index}():\n    return {index}\n"
                 )
             results.append(benchmark_repository(project, repeats=3).model_dump(mode="json"))
+    for result in results:
+        assert result["files_read"] <= 24 and result["estimated_model_input_tokens"] <= 12_000
+        assert result["peak_memory_bytes"] <= 64 * 1024 * 1024 and result["model_calls"] == 0
     print(json.dumps({"schema_version": 1, "results": results}, indent=2))
 
 

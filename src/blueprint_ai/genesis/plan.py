@@ -3,145 +3,16 @@
 from __future__ import annotations
 
 from blueprint_ai.core.project import Component
+from blueprint_ai.genesis.capabilities import CAPABILITIES as CAPABILITIES
+from blueprint_ai.genesis.capabilities import resolve_capabilities
 from blueprint_ai.genesis.models import (
     ArtifactClaim,
-    Capability,
     GenesisPlan,
     IntentSpec,
     Operation,
-    Provider,
 )
 from blueprint_ai.naming import resolve_identity
-from blueprint_ai.remediation import KITS
-
-PROVIDERS = {
-    "docker": Provider(
-        id="docker",
-        executable="docker",
-        supported_versions=">=24",
-        source="https://docs.docker.com/",
-        license="Apache-2.0",
-        network=True,
-        executes_code=True,
-    ),
-    "builtin": Provider(id="builtin", source="blueprint-ai", license="MIT"),
-    "uv": Provider(
-        id="uv",
-        executable="uv",
-        supported_versions=">=0.8,<1",
-        source="https://docs.astral.sh/uv/",
-        license="MIT OR Apache-2.0",
-        executes_code=True,
-    ),
-    "npm": Provider(
-        id="npm",
-        executable="npm",
-        supported_versions=">=9,<12",
-        source="https://docs.npmjs.com/cli/",
-        license="Artistic-2.0",
-        executes_code=True,
-    ),
-    "vite": Provider(
-        id="vite",
-        executable="npm",
-        supported_versions=">=9,<12",
-        package="create-vite",
-        version="9.2.1",
-        registry_integrity="sha512-nE710dPFzm9CavJw4PtpOLQpNBiOzFV+tGbwcmBdg1A3TWgFkqypDmjt44oV0jvvQEdGsvFAvQ5pUnKrdcwciw==",
-        source="https://github.com/vitejs/vite",
-        license="MIT",
-        network=True,
-        executes_code=True,
-    ),
-    "openapi-typescript": Provider(
-        id="openapi-typescript",
-        executable="npm",
-        supported_versions=">=9,<12",
-        package="openapi-typescript",
-        version="7.13.0",
-        registry_integrity="sha512-EFP392gcqXS7ntPvbhBzbF8TyBA+baIYEm791Hy5YkjDYKTnk/Tn5OQeKm5BIZvJihpp8Zzr4hzx0Irde1LNGQ==",
-        source="https://github.com/openapi-ts/openapi-typescript",
-        license="MIT",
-        network=True,
-        executes_code=True,
-    ),
-}
-
-CAPABILITIES = {
-    "repository": Capability(
-        id="repository", provider="builtin", description="Repository baseline"
-    ),
-    "python": Capability(
-        id="python", provider="uv", requires=["repository"], description="Python package"
-    ),
-    "typescript": Capability(
-        id="typescript", provider="npm", requires=["repository"], description="TypeScript package"
-    ),
-    "react": Capability(
-        id="react", provider="vite", requires=["repository"], description="React TypeScript SPA"
-    ),
-    "api": Capability(
-        id="api", provider="builtin", requires=["repository"], description="Health API and contract"
-    ),
-    "api-client": Capability(
-        id="api-client",
-        provider="openapi-typescript",
-        requires=["api", "react"],
-        description="Generated OpenAPI types",
-    ),
-    "container": Capability(
-        id="container", provider="builtin", requires=["api"], description="Service container"
-    ),
-    "ci": Capability(
-        id="ci",
-        provider="builtin",
-        requires=["repository"],
-        description="GitHub verification workflow",
-    ),
-    "devcontainer": Capability(
-        id="devcontainer",
-        provider="builtin",
-        requires=["repository"],
-        description="Development container configuration",
-    ),
-}
-# Existing kits remain the authority for reusable augmentation assets.
-for _name, _kit in KITS.items():
-    CAPABILITIES["kit:" + _name] = Capability(
-        id="kit:" + _name,
-        provider="builtin",
-        requires=["repository"],
-        description=f"Existing {_name} capability kit v{_kit.version}",
-    )
-
-
-def resolve_capabilities(
-    requested: list[str], catalog: dict[str, Capability] | None = None
-) -> list[str]:
-    catalog = catalog or CAPABILITIES
-    ordered: list[str] = []
-    visiting: list[str] = []
-
-    def visit(name: str) -> None:
-        if name in ordered:
-            return
-        if name not in catalog:
-            raise ValueError(f"unknown capability: {name}")
-        if name in visiting:
-            raise ValueError("capability cycle: " + " -> ".join([*visiting, name]))
-        visiting.append(name)
-        for requirement in catalog[name].requires:
-            visit(requirement)
-        visiting.pop()
-        ordered.append(name)
-
-    for name in requested:
-        visit(name)
-    for name in ordered:
-        conflicts = set(catalog[name].conflicts) & set(ordered)
-        if conflicts:
-            raise ValueError(f"{name} conflicts with {', '.join(sorted(conflicts))}")
-    return ordered
+from blueprint_ai.support import FAMILIES, PROVIDERS
 
 
 def validate_claims(claims: list[ArtifactClaim]) -> None:
@@ -162,6 +33,12 @@ def validate_claims(claims: list[ArtifactClaim]) -> None:
 
 
 def plan_project(intent: IntentSpec) -> GenesisPlan:
+    from blueprint_ai.genesis.families import NATIVE_FAMILIES, native_plan
+
+    if intent.kind not in FAMILIES or not FAMILIES[intent.kind].initialize:
+        raise ValueError("unsupported initialization family")
+    if intent.kind in NATIVE_FAMILIES:
+        return native_plan(intent)
     python = (
         intent.kind.startswith("python")
         or intent.kind == "full-stack"

@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   quality:
+    strategy:
+      matrix:
+        python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -18,11 +21,12 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+          python-version: ${{ matrix.python }}
       - run: uv sync --extra dev --locked
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
-      - run: uv run mypy src
-      - run: uv run pytest --cov=blueprint_ai --cov-report=term-missing
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy .
+      - run: uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
       - run: uv run pip-audit
       - run: uv build
       - run: uv run blueprint-ai schema report > blueprint-ai-report.schema.json
@@ -33,3 +37,18 @@ jobs:
           path: .
           format: spdx-json
           output-file: sbom.spdx.json
+
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev --locked
+      - run: docker pull python:3.12-slim-bookworm
+      - run: uv run pytest tests/test_phase6.py -W error::DeprecationWarning
+        env:
+          BLUEPRINT_SANDBOX_TEST_IMAGE: python:3.12-slim-bookworm

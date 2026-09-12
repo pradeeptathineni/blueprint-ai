@@ -1,8 +1,9 @@
-"""Pinned external regression corpus; never executes target tests/build scripts.
+"""Pinned external regression corpus; never executes target code on the host.
 
 Usage: python benchmarks/corpus.py --output /tmp/blueprint-corpus [--clones PATH] [--review]
 With --clones, repositories must already exist at owner_repo under PATH at exact SHAs.
-Without it, fresh shallow clones are obtained from GitHub. Target code is never vendored.
+Without it, fresh shallow clones are obtained from GitHub. Target code is never vendored;
+optional native checks remain inside OCI.
 """
 
 from __future__ import annotations

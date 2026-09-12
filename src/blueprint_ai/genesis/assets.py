@@ -5,17 +5,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from blueprint_ai.genesis.files import json_file, write
 from blueprint_ai.genesis.models import GenesisPlan
 from blueprint_ai.remediation import KITS, TEMPLATES
-from blueprint_ai.safety import atomic_write_text
-
-
-def write(root: Path, rel: str, text: str) -> None:
-    atomic_write_text(root / rel, text, root=root)
-
-
-def json_file(root: Path, rel: str, data: object) -> None:
-    write(root, rel, json.dumps(data, indent=2) + "\n")
 
 
 def contract(name: str) -> dict:
@@ -504,7 +496,12 @@ export default defineConfig({
 
 
 def strengthen(root: Path, plan: GenesisPlan) -> None:
-    for component in plan.components:
+    from blueprint_ai.genesis.families import NATIVE_FAMILIES, strengthen_family
+
+    native = plan.intent.kind in NATIVE_FAMILIES
+    if native:
+        strengthen_family(root, plan)
+    for component in [] if native else plan.components:
         component_root = root / component.root
         if "Python" in component.languages:
             _python(component_root, plan, component.roles)
@@ -574,6 +571,13 @@ def strengthen(root: Path, plan: GenesisPlan) -> None:
         root,
         ".gitignore",
         (
+            "target/\n"
+            "bin/\n"
+            "obj/\n"
+            ".next/\n"
+            ".blueprint-state/\n"
+            ".terraform/\n"
+            "*.tfstate*\n"
             ".venv/\n"
             "node_modules/\n"
             "dist/\n"
@@ -633,7 +637,7 @@ def strengthen(root: Path, plan: GenesisPlan) -> None:
             "LICENSE",
             "All rights reserved. No license to redistribute is granted by this project.\n",
         )
-    if "ci" in plan.capabilities:
+    if "ci" in plan.capabilities and not native:
         _ci(root, plan)
     if plan.intent.devcontainer:
         _devcontainer(root, plan)
@@ -823,23 +827,19 @@ HEALTHCHECK --interval=30s --timeout=3s CMD python -c \\
 CMD ["uvicorn", "{plan.identity.module}.app:app", "--host", "0.0.0.0", "--port", "8000"]
 '''
     else:
-        docker = """FROM node:24-bookworm-slim AS build
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --ignore-scripts
-COPY tsconfig.json ./
-COPY src ./src
-RUN npm run build && npm prune --omit=dev --ignore-scripts
-FROM node:24-bookworm-slim AS runtime
-WORKDIR /app
-COPY --from=build --chown=node:node /app/dist ./dist
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --from=build --chown=node:node /app/package.json ./
-USER node
-EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=3s CMD node -e "fetch('http://127.0.0.1:8000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-CMD ["node", "dist/server.js"]
-"""
+        docker = (
+            "FROM node:24-bookworm-slim AS build\nWORKDIR /app\nCOPY packag"
+            "e*.json ./\nRUN npm ci --ignore-scripts\nCOPY tsconfig.json ./"
+            "\nCOPY src ./src\nRUN npm run build && npm prune --omit=dev --"
+            "ignore-scripts\nFROM node:24-bookworm-slim AS runtime\nWORKDIR"
+            " /app\nCOPY --from=build --chown=node:node /app/dist ./dist\nC"
+            "OPY --from=build --chown=node:node /app/node_modules ./node_"
+            "modules\nCOPY --from=build --chown=node:node /app/package.jso"
+            "n ./\nUSER node\nEXPOSE 8000\nHEALTHCHECK --interval=30s --time"
+            "out=3s CMD node -e \"fetch('http://127.0.0.1:8000/api/health'"
+            ").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+            '"\nCMD ["node", "dist/server.js"]\n'
+        )
     write(target, "Dockerfile", docker)
     write(
         target,

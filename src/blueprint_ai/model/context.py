@@ -9,13 +9,17 @@ from blueprint_ai.core import Finding, ProjectFacts
 from blueprint_ai.discovery import iter_project_files
 from blueprint_ai.safety import MAX_MODEL_FILE_BYTES, read_text_bounded, sanitize_label
 
+SECRET_ASSIGNMENTS = re.compile(r"(?<![\w.-])(?P<key>[\w.-]+)['\"]?\s*[:=]\s*")
+SECRET_VALUE = re.compile(r"""(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\s,'"}\]]+)""")
+SECRET_NAME = re.compile(r"(?i)api[_-]?key|secret|token|password")
 SECRET_PATTERNS = [
-    re.compile(r"(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*['\"]?[^\s'\"]+"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
+    re.compile(
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|\Z)"
+    ),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     re.compile(r"\bgh[opsu]_[A-Za-z0-9]{20,255}\b"),
     re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{12,}"),
-    re.compile(r"(?i)https?://[^\s/@:]+:[^\s/@]+@"),
+    re.compile(r"(?i)(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"),
 ]
 TEXT_SUFFIXES = {
     ".py",
@@ -63,6 +67,17 @@ BLUEPRINT_HINTS = {
 
 
 def redact_secrets(text: str) -> str:
+    # Tokenize assignment keys once; overlapping key/secret/suffix searches are quadratic.
+    chunks = []
+    end = 0
+    for match in SECRET_ASSIGNMENTS.finditer(text):
+        if match.start() < end or not SECRET_NAME.search(match["key"]):
+            continue
+        value = SECRET_VALUE.match(text, match.end())
+        if value:
+            chunks.extend([text[end : match.start()], "[REDACTED]"])
+            end = value.end()
+    text = "".join(chunks) + text[end:]
     for pattern in SECRET_PATTERNS:
         text = pattern.sub("[REDACTED]", text)
     return text

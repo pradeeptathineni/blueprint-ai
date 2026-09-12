@@ -183,6 +183,9 @@ def test_tool_output_is_bounded_and_terminal_controls_are_removed(tmp_path: Path
         "noisy", "security", [], parse_lines, executable=str(executable), expected_codes={0, 2}
     )
     adapter.max_output_bytes = 16_384
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    adapter.sandbox = SandboxPolicy(backend="host", trusted=True)
     status, findings, error = adapter.run(tmp_path, timeout=2)
     assert status.output_truncated
     assert status.outcome == "tool_error"
@@ -202,6 +205,9 @@ def test_crashing_parser_degrades_to_tool_error(tmp_path: Path) -> None:
     adapter = ExternalToolAdapter(
         "broken", "security", [], broken_parser, executable=str(executable), expected_codes={0}
     )
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    adapter.sandbox = SandboxPolicy(backend="host", trusted=True)
     status, findings, error = adapter.run(tmp_path)
     assert status.outcome == "tool_error"
     assert findings == []
@@ -232,6 +238,9 @@ def test_missing_terraform_initialization_is_incomplete_not_a_finding(tmp_path: 
         executable=str(executable),
         expected_codes={0, 1},
     )
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    adapter.sandbox = SandboxPolicy(backend="host", trusted=True)
     status, findings, error = adapter.run(tmp_path)
     assert status.outcome == "tool_error"
     assert findings == []

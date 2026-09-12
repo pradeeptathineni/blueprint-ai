@@ -1,0 +1,636 @@
+{
+  "schema_version": 1,
+  "classification": "RELEASE READY WITH DOCUMENTED LIMITATIONS",
+  "git": {
+    "starting_candidate": "6c376b9c4ee10eaf7ec8f63c580db18b8003de43",
+    "branch": "codex/phase-6-ecosystem-sandbox",
+    "main": "60e0c41732e513d54353933c3e2882b54161e340",
+    "retained_tag_object": "ecd146d4890e5b1829c200e90c3683d962cc9c66",
+    "retained_tag_commit": "6c376b9c4ee10eaf7ec8f63c580db18b8003de43",
+    "tag_state": "stale; intentionally unchanged",
+    "pushed": false,
+    "published": false,
+    "final_commit_location": "audit completion commit; exact identity retained with final distribution verification and final response"
+  },
+  "corrected_analyzer_source_sha256": "d5986b3139552a5310ef83071c5590b949873b1c72c7dfac97df0cb6679f193c",
+  "quality": {
+    "native_tests": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "0",
+      "tests": "382",
+      "time": "77.873",
+      "timestamp": "2026-09-12T11:12:33.705198-04:00",
+      "hostname": "MacBook-Pro.local"
+    },
+    "coverage": {
+      "covered_lines": 4747,
+      "num_statements": 5820,
+      "percent_covered": 81.56357388316151,
+      "percent_covered_display": "82",
+      "missing_lines": 1073,
+      "excluded_lines": 16,
+      "percent_statements_covered": 81.56357388316151,
+      "percent_statements_covered_display": "82"
+    },
+    "audit": "No known vulnerabilities; only unpublished blueprint-ai itself is absent from PyPI",
+    "format": "passed",
+    "lint": "passed",
+    "types": "passed",
+    "schemas": [
+      {
+        "schema": "report",
+        "passed": true
+      },
+      {
+        "schema": "settings",
+        "passed": true
+      },
+      {
+        "schema": "custom-blueprint",
+        "passed": true
+      },
+      {
+        "schema": "intent",
+        "passed": true
+      },
+      {
+        "schema": "genesis-plan",
+        "passed": true
+      },
+      {
+        "schema": "project-graph",
+        "passed": true
+      },
+      {
+        "schema": "sandbox-policy",
+        "passed": true
+      }
+    ],
+    "build": "wheel and sdist passed"
+  },
+  "platforms": {
+    "linux_suites": [
+      {
+        "environment": "suite-linux-3.12",
+        "passed": true,
+        "python": "3.12.14",
+        "tests": {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "7",
+          "tests": "382",
+          "time": "21.642",
+          "timestamp": "2026-09-12T15:13:09.517859+00:00",
+          "hostname": "05e4dc72dd1c"
+        },
+        "teardown": true,
+        "temporary_tag_removed": true
+      },
+      {
+        "environment": "suite-linux-3.13",
+        "passed": true,
+        "python": "3.13.15",
+        "tests": {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "7",
+          "tests": "382",
+          "time": "26.058",
+          "timestamp": "2026-09-12T15:14:35.344605+00:00",
+          "hostname": "142e786f0ebf"
+        },
+        "teardown": true,
+        "temporary_tag_removed": true
+      },
+      {
+        "environment": "suite-linux-3.14",
+        "passed": true,
+        "python": "3.14.7",
+        "tests": {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "7",
+          "tests": "382",
+          "time": "25.619",
+          "timestamp": "2026-09-12T15:16:14.607817+00:00",
+          "hostname": "c28c767a27c4"
+        },
+        "teardown": true,
+        "temporary_tag_removed": true
+      }
+    ],
+    "install_checks": [
+      {
+        "environment": "install-linux-3.12-.whl",
+        "artifact": "blueprint_ai-0.6.0-py3-none-any.whl",
+        "passed": true,
+        "python": "3.12.14",
+        "checks": 21
+      },
+      {
+        "environment": "install-linux-3.12-.gz",
+        "artifact": "blueprint_ai-0.6.0.tar.gz",
+        "passed": true,
+        "python": "3.12.14",
+        "checks": 21
+      },
+      {
+        "environment": "install-linux-3.13-.whl",
+        "artifact": "blueprint_ai-0.6.0-py3-none-any.whl",
+        "passed": true,
+        "python": "3.13.15",
+        "checks": 21
+      },
+      {
+        "environment": "install-linux-3.13-.gz",
+        "artifact": "blueprint_ai-0.6.0.tar.gz",
+        "passed": true,
+        "python": "3.13.15",
+        "checks": 21
+      },
+      {
+        "environment": "install-linux-3.14-.whl",
+        "artifact": "blueprint_ai-0.6.0-py3-none-any.whl",
+        "passed": true,
+        "python": "3.14.7",
+        "checks": 21
+      },
+      {
+        "environment": "install-linux-3.14-.gz",
+        "artifact": "blueprint_ai-0.6.0.tar.gz",
+        "passed": true,
+        "python": "3.14.7",
+        "checks": 21
+      },
+      {
+        "environment": "install-darwin-3.12-.whl",
+        "artifact": "blueprint_ai-0.6.0-py3-none-any.whl",
+        "passed": true,
+        "python": "3.12.10",
+        "checks": 21
+      },
+      {
+        "environment": "install-darwin-3.12-.gz",
+        "artifact": "blueprint_ai-0.6.0.tar.gz",
+        "passed": true,
+        "python": "3.12.10",
+        "checks": 21
+      },
+      {
+        "environment": "install-darwin-3.13-.whl",
+        "artifact": "blueprint_ai-0.6.0-py3-none-any.whl",
+        "passed": true,
+        "python": "3.13.7",
+        "checks": 21
+      },
+      {
+        "environment": "install-darwin-3.13-.gz",
+        "artifact": "blueprint_ai-0.6.0.tar.gz",
+        "passed": true,
+        "python": "3.13.7",
+        "checks": 21
+      },
+      {
+        "environment": "install-darwin-3.14-.whl",
+        "artifact": "blueprint_ai-0.6.0-py3-none-any.whl",
+        "passed": true,
+        "python": "3.14.7",
+        "checks": 21
+      },
+      {
+        "environment": "install-darwin-3.14-.gz",
+        "artifact": "blueprint_ai-0.6.0.tar.gz",
+        "passed": true,
+        "python": "3.14.7",
+        "checks": 21
+      }
+    ],
+    "windows": "native unavailable; not inferred from Linux or mocks",
+    "installation_evidence_scope": "Precommit artifact checkpoint; final rebuilt distributions are independently rerun and bound to exact commit/hashes in dist/validation.json."
+  },
+  "families": {
+    "repository": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "python-library": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "python-cli": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "python-api": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "typescript-library": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "typescript-cli": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "node-api": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "react": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "full-stack": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "openapi": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "go-library": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "go-cli": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "go-api": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "rust-library": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "rust-cli": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "csharp-library": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "csharp-cli": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "dotnet-api": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "vue": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "svelte": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "django": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "flask": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "terraform": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "opentofu": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "kubernetes": {
+      "classification": "partial",
+      "boundary": "Namespace-only generation and built-in structural validation; no workload, live API-server, cluster or deployment verification"
+    },
+    "helm": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "kustomize": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "java-library": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "spring-boot": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "nextjs": {
+      "classification": "supported",
+      "boundary": "native checks; optional scanner availability reported independently"
+    },
+    "pulumi": {
+      "classification": "partial",
+      "boundary": "generate-only empty program and selected cloud SDK installation; no SDK resource API, preview, state or deployment verification"
+    }
+  },
+  "genesis": {
+    "matrix_cases": 45,
+    "matrix_statuses": {
+      "verified": 45
+    },
+    "declared_operations": 282,
+    "corrected_django_reruns": {
+      "django": 10,
+      "django-ci": 10
+    },
+    "source_trees": 48,
+    "matched_source_files": 684,
+    "extra_container_devcontainer": "Partial nested OCI verification; two external image builds and controlled runtime checks passed",
+    "test_route_inventory": {
+      "path": "/tmp/blueprint-redteam-genesis-testing-route-final.json",
+      "sha256": "71793a3fcca88bd5a0b8adbae615cc6a954d1a92f8d2b875834176296037b80d"
+    },
+    "affected_rust_rerun": {
+      "cases": 2,
+      "operations": 12,
+      "source_hashes_matched": 17
+    }
+  },
+  "tools": {
+    "registered_ids": 52,
+    "integration_roles": {
+      "review": 47,
+      "deferred": 2,
+      "genesis": 1,
+      "toolchain": 1,
+      "capability-kit": 1
+    },
+    "managed_ids": 26,
+    "unique_managed_images": 17,
+    "mutation_cycles": 14,
+    "docker_scanner_executions": 36,
+    "trusted_host_scanner_executions": 6,
+    "inventory": "redteam-tool-inventory.json"
+  },
+  "kits": {
+    "count": 16,
+    "statuses": {
+      "passed": 16
+    },
+    "native_passed": [
+      "pytest",
+      "Node test",
+      "terraform fmt",
+      "terraform validate"
+    ],
+    "native_incomplete": [
+      "pre-commit",
+      "Spectral"
+    ]
+  },
+  "browser": [
+    {
+      "kind": "react",
+      "status": "passed",
+      "url": "http://127.0.0.1:18081",
+      "browser": "152.0.7977.83",
+      "duration_ms": 3340,
+      "real_backend": false,
+      "page_errors": []
+    },
+    {
+      "kind": "full-stack",
+      "status": "passed",
+      "url": "http://127.0.0.1:18082",
+      "browser": "152.0.7977.83",
+      "duration_ms": 1335,
+      "real_backend": true,
+      "page_errors": []
+    }
+  ],
+  "sandbox": {
+    "live_backend": "Docker Desktop 29.1.3; Linux amd64 VM on macOS",
+    "hostile_boundary_process_cases": 13,
+    "podman": "unavailable; contract/source tested",
+    "runsc": "not configured; contract/source tested",
+    "network": "none/loopback deny egress; explicit normal network permits private destinations",
+    "limits": "Default 4 MB per stream; no writable-target total disk quota",
+    "host": "explicit trust only; OCI guarantees not asserted",
+    "additional_live_policy_environment_checks": 3
+  },
+  "ai": {
+    "live_calls": 0,
+    "credential": "supported provider API credential absent",
+    "controlled_provider": "structured-output/cache/budget/redaction/injection-data/authority/degradation regressions passed",
+    "quality_increment": "not measured live"
+  },
+  "corpus": [
+    {
+      "repo": "fastapi/full-stack-fastapi-template",
+      "sha": "cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7",
+      "findings": 29,
+      "duration_ms": 7495,
+      "discovery_ms": 625,
+      "unchanged": true
+    },
+    {
+      "repo": "open-telemetry/opentelemetry-demo",
+      "sha": "9bfe486ff48ee8a6ea942be74171342cb71a9327",
+      "findings": 206,
+      "duration_ms": 19046,
+      "discovery_ms": 1263,
+      "unchanged": true
+    },
+    {
+      "repo": "terraform-aws-modules/terraform-aws-vpc",
+      "sha": "cf0e3ca46fd51f47bf095957f2a6ac6127c89045",
+      "findings": 54,
+      "duration_ms": 7975,
+      "discovery_ms": 2931,
+      "unchanged": true
+    },
+    {
+      "repo": "isovalent/terraform-aws-vpc",
+      "sha": "2bb6b130d0d884808fce9590a5a6c47dd931596d",
+      "findings": 13,
+      "duration_ms": 2816,
+      "discovery_ms": 247,
+      "unchanged": true
+    },
+    {
+      "repo": "astral-sh/ruff",
+      "sha": "4188373bdd5e3d0b05bbe254f98fd763b37519d6",
+      "findings": 105,
+      "duration_ms": 204973,
+      "discovery_ms": 11160,
+      "unchanged": true
+    },
+    {
+      "repo": "pallets/flask",
+      "sha": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+      "findings": 23,
+      "duration_ms": 7364,
+      "discovery_ms": 706,
+      "unchanged": true
+    },
+    {
+      "repo": "open-webui/open-webui",
+      "sha": "0a7c15832fb30b1903753e83f81dc7d27e5b0944",
+      "findings": 2473,
+      "duration_ms": 80885,
+      "discovery_ms": 5450,
+      "unchanged": true
+    },
+    {
+      "repo": "facebook/create-react-app",
+      "sha": "6254386531d263688ccfa542d0e628fbc0de0b28",
+      "findings": 55,
+      "duration_ms": 27725,
+      "discovery_ms": 816,
+      "unchanged": true
+    },
+    {
+      "repo": "sindresorhus/awesome",
+      "sha": "bc98e517ddca672f55f9857d714fc3ea3c3540b2",
+      "findings": 21,
+      "duration_ms": 3479,
+      "discovery_ms": 228,
+      "unchanged": true
+    }
+  ],
+  "performance": [
+    {
+      "schema_version": 1,
+      "path": "/private/tmp/blueprint-redteam-genesis-20260912/openapi",
+      "repeats": 3,
+      "file_count": 6,
+      "discovery_ms_median": 51.264,
+      "context_ms_median": 2.996,
+      "peak_memory_bytes": 2022473,
+      "files_considered": 6,
+      "files_read": 2,
+      "bytes_read": 1170,
+      "estimated_model_input_tokens": 446,
+      "model_calls": 0,
+      "cache_hit_rate": 1.0,
+      "findings_count": null,
+      "case": "tiny"
+    },
+    {
+      "schema_version": 1,
+      "path": "/private/tmp/blueprint-redteam-genesis-20260912/python-api",
+      "repeats": 3,
+      "file_count": 14,
+      "discovery_ms_median": 62.651,
+      "context_ms_median": 9.499,
+      "peak_memory_bytes": 2046277,
+      "files_considered": 14,
+      "files_read": 7,
+      "bytes_read": 3256,
+      "estimated_model_input_tokens": 1149,
+      "model_calls": 0,
+      "cache_hit_rate": 1.0,
+      "findings_count": null,
+      "case": "normal-app"
+    },
+    {
+      "schema_version": 1,
+      "path": "/private/tmp/blueprint-ai-capability-audit.jJxr3g/repos/open-telemetry_opentelemetry-demo",
+      "repeats": 3,
+      "file_count": 603,
+      "discovery_ms_median": 1311.725,
+      "context_ms_median": 247.063,
+      "peak_memory_bytes": 4192308,
+      "files_considered": 591,
+      "files_read": 21,
+      "bytes_read": 55776,
+      "estimated_model_input_tokens": 12000,
+      "model_calls": 0,
+      "cache_hit_rate": 1.0,
+      "findings_count": null,
+      "case": "monorepo"
+    },
+    {
+      "schema_version": 1,
+      "path": "/private/tmp/blueprint-ai-capability-audit.jJxr3g/repos/astral-sh_ruff",
+      "repeats": 3,
+      "file_count": 10371,
+      "discovery_ms_median": 14605.264,
+      "context_ms_median": 3601.675,
+      "peak_memory_bytes": 24239316,
+      "files_considered": 3669,
+      "files_read": 19,
+      "bytes_read": 52023,
+      "estimated_model_input_tokens": 12000,
+      "model_calls": 0,
+      "cache_hit_rate": 1.0,
+      "findings_count": null,
+      "case": "large-public"
+    },
+    {
+      "schema_version": 1,
+      "path": "/private/tmp/blueprint-redteam-genesis-20260912/full-stack-python-client",
+      "repeats": 3,
+      "file_count": 40,
+      "discovery_ms_median": 145.983,
+      "context_ms_median": 45.286,
+      "peak_memory_bytes": 2209173,
+      "files_considered": 39,
+      "files_read": 23,
+      "bytes_read": 67644,
+      "estimated_model_input_tokens": 4322,
+      "model_calls": 0,
+      "cache_hit_rate": 1.0,
+      "findings_count": null,
+      "case": "generated-full-stack"
+    }
+  ],
+  "sandbox_startup": [
+    {
+      "backend": "host",
+      "median_ms": 75.382
+    },
+    {
+      "backend": "docker",
+      "median_ms": 774.072
+    }
+  ],
+  "local_artifacts": [
+    {
+      "path": "/tmp/blueprint-redteam/tests-final.xml",
+      "sha256": "4d9f52b9213d678b6af7426e289dcd8e074c90939aa1e4254c1ab1836a2ccc66"
+    },
+    {
+      "path": "/tmp/blueprint-redteam/coverage-final.json",
+      "sha256": "69e68c8a9f71ea7c74a120f1a2f43d6a60c3044790aa13a75422697bc09b0348"
+    },
+    {
+      "path": "/tmp/blueprint-redteam/linux-suite-final/summary.json",
+      "sha256": "0616f25a4fa82fbd8fe3480085c85025c8afa4306bb5aba4c963f4068325b2f5"
+    },
+    {
+      "path": "/tmp/blueprint-redteam/corpus-final/summary.json",
+      "sha256": "83e893dc0fc3b2e9cf378db0af696398435c2066789d95e58b7fec0314764548"
+    },
+    {
+      "path": "/tmp/blueprint-redteam-kits-final/summary.json",
+      "sha256": "e97938451179a61bed094c1f3b21edc6b0ba9008eb1b152910a63a1ba08a3e33"
+    },
+    {
+      "path": "/tmp/blueprint-redteam-tool-matrix-final.json",
+      "sha256": "1f1793d8ea0d562b95946ea094d270de4483868376c96d0e291b84265dd5f5e7"
+    },
+    {
+      "path": "/tmp/blueprint-redteam-native-matrix.json",
+      "sha256": "db1009ac115178286ff8cc0327ff6830c75718a9f6505d1cce12194e7517c39d"
+    }
+  ],
+  "interpretation": "Incremental audit evidence is retained at source checkpoints. Final distribution hashes and repeat install reports are external to the sdist to avoid a self-referential artifact hash; see dist/SHA256SUMS and final verification JSON.",
+  "corpus_comparison": "redteam-corpus.json"
+}

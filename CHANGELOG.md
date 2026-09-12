@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0 — 2026-09-12
+
+- Correct independently reproduced sandbox evidence, hostile-file reads, scanner parser/suppression, model authority/redaction/cache, and transactional rollback defects before publication.
+- Verify Django's installed wheel and both native test runners; correct Go/Django/NuGet discovery and complete real React/full-stack browser checks.
+- Distinguish 47 review integrations from acquisition/provider/kit/deferred registry entries and label Kubernetes Namespace-only support partial.
+
+- Add one support/tool/provider registry with generated documentation and explicit OCI acquisition.
+- Enforce a shared Docker/Podman/configured-gVisor policy for untrusted tools; host execution requires explicit trust.
+- Expand native genesis to 31 families, including Go, Rust, C#, Java, Django, Flask, Vue, Svelte, Next.js, and local infrastructure foundations across AWS/Azure/GCP.
+- Add create-only capability planning/apply, asset validation, and exact directory-aware rollback.
+- Integrate configured Conftest, ast-grep, and Buf; preserve Syft SBOM evidence and correct native scanner exits and offline startup.
+- Recognize Maven, .NET, Pulumi, and additional framework evidence; review published source without generation caches.
+- Add live hostile sandbox, archive, scanner mutation, generated-project, composition, public-corpus, and fresh-install verification.
+- Document explicit platform, optional-tool, model, deployment, and publishing limits.
+
 ## 0.5.0 — 2026-09-12
 
 - Share evidence-bearing component, scope, lifecycle, provenance, and verification graphs across review and project genesis.

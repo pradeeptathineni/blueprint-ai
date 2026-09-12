@@ -21,10 +21,25 @@ from blueprint_ai.adapters.base import _resolve_executable
 from blueprint_ai.core.project import Evidence, Relationship
 from blueprint_ai.discovery import discover_project, iter_project_files
 from blueprint_ai.engine import analyzer_identity, make_context, review
-from blueprint_ai.genesis.assets import json_file, strengthen
+from blueprint_ai.genesis.assets import strengthen
+from blueprint_ai.genesis.files import json_file
 from blueprint_ai.genesis.models import GenesisPlan, GenesisResult, Operation, OperationResult
 from blueprint_ai.genesis.plan import PROVIDERS, plan_project
-from blueprint_ai.safety import controlled_env, run_process
+from blueprint_ai.safety import (
+    MAX_MANIFEST_BYTES,
+    controlled_env,
+    read_bytes_bounded,
+    read_text_bounded,
+    run_process,
+)
+from blueprint_ai.sandbox import (
+    SandboxPolicy,
+    SandboxUnavailable,
+    execute,
+    image_identity,
+    resolve_backend,
+)
+from blueprint_ai.support import PROVIDER_IMAGES
 
 
 def _publish_fresh(source: Path, destination: Path) -> None:
@@ -70,8 +85,9 @@ def _probe(executable: str, requirement: str | None) -> tuple[str | None, str | 
     resolved = _resolve_executable(executable)
     if not resolved:
         return None, None, f"{executable} is not installed"
-    result = run_process([resolved, "--version"], Path(tempfile.gettempdir()), 5)
-    match = re.search(r"(?:^|\s|v)(\d+\.\d+\.\d+(?:[a-z0-9.+-]*))", result.stdout)
+    flag = ["version"] if executable in {"go", "helm", "kustomize"} else ["--version"]
+    result = run_process([resolved, *flag], Path(tempfile.gettempdir()), 5)
+    match = re.search(r"(?:^|\s|v|go)(\d+\.\d+\.\d+(?:[a-z0-9.+-]*))", result.stdout)
     if result.returncode or not match:
         return None, None, f"cannot determine {executable} version"
     version = match.group(1)
@@ -128,7 +144,15 @@ def preflight(
     return failures
 
 
-def _run(operation: Operation, stage: Path, cache: Path, allow_network: bool) -> OperationResult:
+def _run(
+    operation: Operation,
+    stage: Path,
+    cache: Path,
+    allow_network: bool,
+    sandbox: SandboxPolicy | None = None,
+) -> OperationResult:
+    if sandbox is not None and resolve_backend(sandbox) != "host":
+        return _run_sandboxed(operation, stage, allow_network, sandbox)
     if operation.network and not allow_network:
         return OperationResult(
             id=operation.id,
@@ -232,6 +256,12 @@ def _run(operation: Operation, stage: Path, cache: Path, allow_network: bool) ->
                 "UV_OFFLINE": "0" if allow_network else "1",
                 "npm_config_offline": "false" if allow_network else "true",
                 "PYTHONDONTWRITEBYTECODE": "1",
+                "GOCACHE": str(cache / "go-build"),
+                "GOMODCACHE": str(cache / "go-mod"),
+                "CARGO_TARGET_DIR": str(cache / "cargo-target"),
+                "DOTNET_CLI_HOME": str(cache / "dotnet"),
+                "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+                "NUGET_PACKAGES": str(cache / "nuget"),
                 "RUFF_CACHE_DIR": str(cache / "ruff"),
                 "MYPY_CACHE_DIR": str(cache / "mypy"),
                 "PYTEST_ADDOPTS": "-p no:cacheprovider",
@@ -272,23 +302,126 @@ def _run(operation: Operation, stage: Path, cache: Path, allow_network: bool) ->
     )
 
 
+def _run_sandboxed(
+    operation: Operation, stage: Path, allow_network: bool, policy: SandboxPolicy
+) -> OperationResult:
+    if operation.provider == "docker":
+        return OperationResult(
+            id=operation.id,
+            status="unavailable",
+            detail="nested image build is unsupported; no daemon socket enters the sandbox",
+        )
+    if operation.network and not allow_network:
+        return OperationResult(
+            id=operation.id,
+            status="unauthorized",
+            detail="network disabled; verification incomplete",
+        )
+    cwd = stage / operation.component
+    cwd.mkdir(parents=True, exist_ok=True)
+    chosen = SandboxPolicy.model_validate(
+        {
+            **policy.model_dump(),
+            "writable": True,
+            "trusted": True,
+            "image": policy.image or PROVIDER_IMAGES.get(operation.provider),
+            "network": "normal" if operation.network else "none",
+            "authorize_network": operation.network and allow_network,
+            "timeout": 240,
+            "scratch_mb": 1024,
+            "memory_mb": 4096 if operation.provider in {"terraform", "tofu"} else 2048,
+            "file_size_mb": 1024 if operation.provider in {"terraform", "tofu"} else 128,
+        }
+    )
+    try:
+        provider = PROVIDERS[operation.provider]
+        if provider.registry_integrity:
+            metadata = execute(
+                [
+                    operation.command[0],
+                    "view",
+                    f"{provider.package}@{provider.version}",
+                    "dist.integrity",
+                    "--json",
+                ],
+                stage,
+                chosen,
+                tool=provider.id,
+            )
+            if (
+                metadata.result.returncode
+                or json.loads(metadata.result.stdout) != provider.registry_integrity
+            ):
+                raise ValueError("pinned provider registry integrity could not be verified")
+        execution = execute(
+            operation.command, stage, chosen, cwd=operation.component, tool=provider.id
+        )
+        output = execution.result
+        expected = all(
+            (cwd / f).is_file() and not (cwd / f).is_symlink() for f in operation.expected_files
+        )
+        okay = (
+            output.returncode == 0
+            and not output.timed_out
+            and not output.output_truncated
+            and expected
+        )
+        return OperationResult(
+            id=operation.id,
+            component=operation.component,
+            status="passed" if okay else "failed",
+            command=operation.command,
+            version=execution.evidence.image_id,
+            evidence_sha256=hashlib.sha256(
+                (output.stdout + "\0" + output.stderr).encode()
+            ).hexdigest(),
+            duration_ms=execution.evidence.duration_ms,
+            sandbox=execution.evidence.model_dump(mode="json"),
+            detail="declared command and postconditions passed"
+            if okay
+            else (output.stderr + output.stdout)[-3000:]
+            or "provider failed/timed out or expected output missing",
+        )
+    except (SandboxUnavailable, OSError, ValueError) as exc:
+        return OperationResult(
+            id=operation.id,
+            component=operation.component,
+            status="unavailable" if isinstance(exc, SandboxUnavailable) else "failed",
+            command=operation.command,
+            detail=str(exc),
+        )
+
+
 def _inventory(stage: Path) -> dict[str, str]:
     # Native generator output is not trusted to be portable just because the command succeeded.
     for directory, dirs, files in os.walk(stage):
-        dirs[:] = [name for name in dirs if name not in {"node_modules", ".venv", ".git"}]
+        dirs[:] = [
+            name
+            for name in dirs
+            if name not in {"node_modules", ".venv", ".git", ".blueprint-state"}
+        ]
         for name in [*dirs, *files]:
             path = Path(directory) / name
             if path.is_symlink():
                 raise ValueError(f"provider generated a symbolic link: {path.relative_to(stage)}")
-    source_files, _ = iter_project_files(stage)
+            if not path.is_file() and not path.is_dir():
+                raise ValueError(f"provider generated a special file: {path.relative_to(stage)}")
+    source_files, _ = iter_project_files(stage, reject_oversized=True)
     return {
-        p.relative_to(stage).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        p.relative_to(stage).as_posix(): hashlib.sha256(
+            read_bytes_bounded(p, MAX_MANIFEST_BYTES, root=stage)
+        ).hexdigest()
         for p in source_files
     }
 
 
 def create_project(
-    path: Path, plan: GenesisPlan, *, allow_network: bool = False, trust_providers: bool = False
+    path: Path,
+    plan: GenesisPlan,
+    *,
+    allow_network: bool = False,
+    trust_providers: bool = False,
+    sandbox: SandboxPolicy | None = None,
 ) -> GenesisResult:
     started = time.monotonic()
     destination = _destination(path)
@@ -297,9 +430,47 @@ def create_project(
     if authoritative.digest() != plan.digest():
         raise ValueError("plan differs from the trusted resolver; regenerate it before execution")
     result = GenesisResult(status="failed", destination=str(destination), plan_sha256=plan.digest())
-    result.operations.extend(
-        preflight(plan, allow_network=allow_network, trust_providers=trust_providers)
+    policy = sandbox or SandboxPolicy(
+        backend="host" if trust_providers else "auto",
+        trusted=trust_providers,
+        writable=trust_providers,
     )
+    backend = "host"
+    if trust_providers and any(op.command for op in plan.operations):
+        try:
+            backend = resolve_backend(policy)
+        except (OSError, SandboxUnavailable) as exc:
+            result.operations.append(
+                OperationResult(id="preflight:sandbox", status="unavailable", detail=str(exc))
+            )
+            result.detail = "sandbox unavailable; destination unchanged"
+            return result
+    if not trust_providers and any(op.command for op in plan.operations):
+        result.operations.append(
+            OperationResult(
+                id="preflight:trust",
+                status="unauthorized",
+                detail="provider execution requires --trust-providers",
+            )
+        )
+    elif any(op.command for op in plan.operations) and backend != "host":
+        for provider in plan.providers:
+            if provider.executable and provider.id != "docker":
+                try:
+                    image_identity(
+                        backend,
+                        policy.image or PROVIDER_IMAGES.get(provider.id, ""),
+                    )
+                except SandboxUnavailable as exc:
+                    result.operations.append(
+                        OperationResult(
+                            id="preflight:" + provider.id, status="unavailable", detail=str(exc)
+                        )
+                    )
+    else:
+        result.operations.extend(
+            preflight(plan, allow_network=allow_network, trust_providers=trust_providers)
+        )
     if result.operations:
         result.detail = "preflight failed; destination unchanged"
         return result
@@ -325,12 +496,58 @@ def create_project(
                     )
                     continue
                 if not operation.command:
+                    if operation.id == "initialize:spring":
+                        if not allow_network:
+                            result.operations.append(
+                                OperationResult(
+                                    id=operation.id,
+                                    status="unauthorized",
+                                    detail="Initializr requires explicit network",
+                                )
+                            )
+                            result.detail = "initialization unauthorized; destination unchanged"
+                            return result
+                        from blueprint_ai.genesis.archive import initialize_spring
+
+                        archive_hash = initialize_spring(
+                            stage, plan.identity.package, plan.identity.module
+                        )
+                        _inventory(stage)
+                        result.operations.append(
+                            OperationResult(
+                                id=operation.id,
+                                status="passed",
+                                evidence_sha256=archive_hash,
+                                detail=(
+                                    "bounded official Initializr 4.1.1 archive; remote hooks not "
+                                    "executed"
+                                ),
+                            )
+                        )
+                        continue
+                    if operation.id == "verify:kubernetes":
+                        import yaml
+
+                        manifest = yaml.safe_load(
+                            read_text_bounded(
+                                stage / "namespace.yaml", MAX_MANIFEST_BYTES, root=stage
+                            )
+                        )
+                        if (
+                            manifest.get("kind") != "Namespace"
+                            or manifest.get("apiVersion") != "v1"
+                        ):
+                            raise ValueError("invalid namespace manifest")
                     if operation.id == "verify:openapi":
                         from openapi_spec_validator import validate
 
                         for spec in stage.rglob("openapi.json"):
                             if "node_modules" not in spec.parts and ".venv" not in spec.parts:
-                                validate(json.loads(spec.read_text()))
+                                validate(
+                                    json.loads(
+                                        read_text_bounded(spec, MAX_MANIFEST_BYTES, root=stage)
+                                    )
+                                )
                     result.operations.append(
                         OperationResult(
                             id=operation.id,
@@ -350,16 +567,25 @@ def create_project(
                         )
                     )
                     continue
-                receipt = _run(operation, stage, cache, allow_network)
+                receipt = _run(operation, stage, cache, allow_network, sandbox=policy)
                 result.operations.append(receipt)
+                if receipt.status == "passed" and operation.action == "initialize":
+                    _inventory(stage)
                 if receipt.status != "passed":
                     if operation.action == "initialize" or receipt.status == "failed":
                         result.detail = f"{operation.id} failed; staged output rolled back"
                         result.duration_ms = round((time.monotonic() - started) * 1000)
                         return result
                     blocked.add(operation.component)
-            _inventory(stage)
-            facts = discover_project(stage)
+            result.files = _inventory(stage)
+            # Review exactly the source that will be published, excluding build caches/dependencies.
+            publish = work / "publish"
+            publish.mkdir()
+            for rel in result.files:
+                target = publish / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(stage / rel, target)
+            facts = discover_project(publish)
             if plan.intent.api_client:
                 facts.graph.relationships.append(
                     Relationship(
@@ -373,23 +599,15 @@ def create_project(
                         ),
                     )
                 )
-            context, _ = make_context(stage, model_mode="off", trust_project_executables=False)
+            context, _ = make_context(publish, model_mode="off", trust_project_executables=False)
             context.config["offline"] = not allow_network
             report = review(context)
             report.facts.path = str(destination)
             result.review_summary = {r.blueprint: r.status for r in report.results}
-            result.files = _inventory(stage)
             owners = {
                 rel: (owner.id if (owner := facts.graph.owner(rel)) else ".")
                 for rel in result.files
             }
-            # Publish only source/lock/metadata, never staging environments with absolute shebangs.
-            publish = work / "publish"
-            publish.mkdir()
-            for rel in result.files:
-                target = publish / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(stage / rel, target)
             result.status = "partial" if blocked else "verified"
             if any(f.priority in {"P0", "P1"} for f in report.active_findings):
                 result.status = "partial"
@@ -403,7 +621,7 @@ def create_project(
                 {
                     "schema_version": "1.0",
                     "artifact_owners": owners,
-                    "isolation": "staged filesystem and controlled environment; no OS sandbox",
+                    "isolation": policy.model_dump(mode="json"),
                     "plan": plan.model_dump(mode="json"),
                     "result": result.model_dump(mode="json"),
                     "analyzer": analyzer_identity(),

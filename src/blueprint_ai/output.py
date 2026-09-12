@@ -21,6 +21,20 @@ def report_markdown(report: RunReport) -> str:
     for result in report.results:
         reason = f" — {result.applicability.reason}" if result.applicability else ""
         lines.extend([f"## {result.blueprint}: {result.status}{reason}", ""])
+        boundaries = sorted(
+            {
+                f"{tool.name}: {tool.sandbox.get('backend', 'unknown')}, "
+                f"network={tool.sandbox.get('policy', {}).get('network', 'unknown')}, "
+                f"read-only={tool.sandbox.get('target_read_only', False)}, "
+                f"isolated={tool.sandbox.get('isolated', False)}, "
+                f"trusted={tool.sandbox.get('policy', {}).get('trusted', False)}, "
+                f"limits-enforced={tool.sandbox.get('limits_enforced', False)}"
+                for tool in result.tools
+                if tool.sandbox
+            }
+        )
+        if boundaries:
+            lines.extend(["Execution: " + "; ".join(boundaries), ""])
         incomplete = [
             tool
             for tool in result.tools
@@ -138,6 +152,34 @@ def report_sarif(report: RunReport) -> dict:
                     }
                 },
                 "results": results,
+                "invocations": [
+                    {
+                        "executionSuccessful": all(
+                            result.status not in {"partial", "error"} for result in report.results
+                        ),
+                        "toolExecutionNotifications": [
+                            {
+                                "level": "warning",
+                                "message": {
+                                    "text": f"{result.blueprint}: {result.status}; "
+                                    + "; ".join(result.notes)
+                                },
+                            }
+                            for result in report.results
+                            if result.status in {"partial", "error"}
+                        ],
+                    }
+                ],
+                "properties": {
+                    "assessments": [
+                        {
+                            "blueprint": result.blueprint,
+                            "status": result.status,
+                            "tools": [tool.model_dump(mode="json") for tool in result.tools],
+                        }
+                        for result in report.results
+                    ]
+                },
             }
         ],
     }
@@ -149,9 +191,24 @@ def report_junit(report: RunReport) -> str:
         {
             "name": "blueprint-ai",
             "tests": str(len(report.results)),
-            "failures": str(sum(bool(r.findings) for r in report.results)),
+            "failures": str(
+                sum(
+                    r.status not in {"not_applicable", "error"}
+                    and any(f.disposition == "new" for f in r.findings)
+                    for r in report.results
+                )
+            ),
             "errors": str(sum(r.status == "error" for r in report.results)),
-            "skipped": str(sum(r.status == "not_applicable" for r in report.results)),
+            "skipped": str(
+                sum(
+                    r.status == "not_applicable"
+                    or (
+                        r.status == "partial"
+                        and not any(f.disposition == "new" for f in r.findings)
+                    )
+                    for r in report.results
+                )
+            ),
             "time": f"{(report.metadata.duration_ms if report.metadata else 0) / 1000:.3f}",
         },
     )
@@ -180,9 +237,18 @@ def report_junit(report: RunReport) -> str:
                 f"{finding.file or '-'}: {sanitize_label(finding.message, 1000)}"
                 for finding in active
             )
-        if result.notes:
+        elif result.status == "partial":
+            ET.SubElement(case, "skipped", {"message": "analysis incomplete"})
+        boundaries = [
+            f"{tool.name} sandbox: {json.dumps(tool.sandbox, sort_keys=True)}"
+            for tool in result.tools
+            if tool.sandbox
+        ]
+        if result.notes or boundaries:
             output = ET.SubElement(case, "system-out")
-            output.text = "\n".join(sanitize_label(note, 1000) for note in result.notes)
+            output.text = "\n".join(
+                [sanitize_label(note, 1000) for note in result.notes] + boundaries
+            )
     ET.indent(suite)
     return ET.tostring(suite, encoding="unicode", xml_declaration=True) + "\n"
 

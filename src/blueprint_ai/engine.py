@@ -84,6 +84,7 @@ def make_context(
     base_ref: str | None = None,
     trust_project_executables: bool = False,
     authorized_target: str | None = None,
+    sandbox: dict | None = None,
 ) -> tuple[RunContext, Settings]:
     root = path.expanduser().resolve()
     settings = load_settings(
@@ -125,6 +126,7 @@ def make_context(
         / "blueprint-ai-cache"
         / hashlib.sha256(str(root).encode()).hexdigest()[:20],
         trust_project_executables=trust_project_executables,
+        sandbox=sandbox or {},
     )
     return context, settings
 
@@ -184,6 +186,22 @@ def _classify(findings: list[Finding], baseline: set[str], settings: Settings) -
 
 
 def _run_tools(context: RunContext, settings: Settings, facts, blueprint: str):
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    policy = SandboxPolicy.model_validate(
+        {
+            "trusted": context.trust_project_executables,
+            "network": "normal"
+            if context.trust_project_executables and not settings.offline
+            else "none",
+            "authorize_network": context.trust_project_executables and not settings.offline,
+            **context.sandbox,
+        }
+    )
+    if settings.offline:
+        policy = SandboxPolicy.model_validate(
+            {**policy.model_dump(), "network": "none", "authorize_network": False}
+        )
     adapters = applicable_adapters(
         facts,
         blueprint,
@@ -191,12 +209,15 @@ def _run_tools(context: RunContext, settings: Settings, facts, blueprint: str):
         authorized_target=settings.authorized_target,
         offline=settings.offline,
         allow_project_executables=context.trust_project_executables,
+        sandboxed=policy.backend != "host"
+        and (not policy.trusted or bool(policy.image) or policy.backend != "auto"),
     )
     if not adapters:
         return []
     workers = min(settings.max_workers, len(adapters))
     for adapter in adapters:
         adapter.max_output_bytes = settings.max_tool_output_bytes
+        adapter.sandbox = policy
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="blueprint-tool") as pool:
         futures = []
         for adapter in adapters:
@@ -290,7 +311,7 @@ def _finalize_findings(
                 )
         scoped.append(item)
     findings = deduplicate(scoped, facts.project_types)
-    if context.changed_only and facts.changed_files:
+    if context.changed_only:
         changed = set(facts.changed_files)
         findings = [item for item in findings if item.file is None or item.file in changed]
     findings = _classify(findings, baseline, settings)
@@ -319,6 +340,9 @@ def _run_model_review(
 ) -> tuple[dict[str, int | float | str | None], int, int, int]:
     if settings.offline:
         notes.append("model review disabled by offline mode")
+        return {}, 1, 0, model_calls
+    if default_budget < 64:
+        notes.append("model review skipped because the allocated context budget is too small")
         return {}, 1, 0, model_calls
     if model_calls >= settings.model_max_calls:
         notes.append("model review skipped because the per-run call budget was exhausted")
@@ -371,7 +395,7 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
         if catalog[name].model_review and catalog[name].applicability(facts)
     ]
     allocated_calls = max(1, min(len(model_names), settings.model_max_calls))
-    default_budget = max((context.model_budget * 4 // 5) // allocated_calls, 64)
+    default_budget = max((context.model_budget * 4 // 5) // allocated_calls, 1)
     builder = ContextBuilder(context.root, default_budget, settings.ignores, facts.changed_files)
     baseline = _load_baseline(context.root, settings)
     results = []
@@ -389,12 +413,20 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
                 )
             )
             continue
-        findings = definition.check(context.root, facts)
+        check_error = None
+        try:
+            findings = definition.check(context.root, facts)
+        except (OSError, ValueError, RecursionError) as exc:
+            findings = []
+            check_error = f"Deterministic check incomplete: {exc}"
         if name == "completeness":
             findings.extend(_disabled_capability_findings(settings, facts))
         tools, notes, missing, errors = _collect_tool_results(
             context, settings, facts, name, findings
         )
+        if check_error:
+            notes.append(check_error)
+            errors += 1
         if (
             definition.model_review
             and context.model_mode == "off"
@@ -507,7 +539,10 @@ def analyzer_identity() -> dict[str, Any]:
         digest.update(file.read_bytes())
     commit = None
     if (source.parent.parent / ".git").exists():
-        result = run_process(["git", "rev-parse", "HEAD"], source.parent.parent, 3)
-        if result.returncode == 0:
-            commit = result.stdout.strip()
+        try:
+            result = run_process(["git", "rev-parse", "HEAD"], source.parent.parent, 3)
+            if result.returncode == 0:
+                commit = result.stdout.strip()
+        except FileNotFoundError:
+            pass  # Source identity still has the package source hash when Git is unavailable.
     return {"analyzer_commit": commit, "analyzer_source_sha256": digest.hexdigest()}

@@ -143,6 +143,7 @@ def test_checkov_discards_port_80_false_positive_for_security_group_reference(
                     "code_block": [
                         [4, 'resource "aws_vpc_security_group_ingress_rule" "from_alb" {'],
                         [5, "referenced_security_group_id = aws_security_group.alb.id"],
+                        [6, "}"],
                     ],
                 }
             ]

@@ -284,7 +284,9 @@ def test_review_is_read_only_with_real_ruff(tmp_path: Path) -> None:
     write(tmp_path, "pyproject.toml", '[project]\nname="sample"\n')
     write(tmp_path, "app.py", "import os\n")
     before = sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
-    context, _ = make_context(tmp_path, blueprints=["code-quality"], model_mode="off")
+    context, _ = make_context(
+        tmp_path, blueprints=["code-quality"], model_mode="off", trust_project_executables=True
+    )
     result = review(context)
     assert any(t.name == "ruff" and t.outcome == "finding" for r in result.results for t in r.tools)
     assert before == sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))

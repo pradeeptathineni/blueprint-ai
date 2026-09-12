@@ -5,9 +5,10 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from blueprint_ai.core import Finding
+from blueprint_ai.core.models import FileRange, Severity
 
 
 def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
@@ -41,6 +42,25 @@ class ModelResponse(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     cost_usd: float | None = None
+
+
+class _SemanticFinding(BaseModel):
+    """Only review evidence crosses the model boundary; authority is assigned locally."""
+
+    model_config = ConfigDict(extra="forbid")
+    category: str
+    severity: Severity
+    confidence: float = Field(ge=0, le=1)
+    file: str | None
+    line: int | None
+    message: str
+    recommendation: str
+    evidence: list[str]
+
+
+class _SemanticResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    findings: list[_SemanticFinding]
 
 
 class ModelProvider(ABC):
@@ -86,14 +106,7 @@ class OpenAIProvider(ModelProvider):
             from openai import OpenAI
 
             self._client = OpenAI(timeout=self.timeout, max_retries=self.max_retries)
-        schema = _strict_schema(
-            {
-                "type": "object",
-                "properties": {"findings": {"type": "array", "items": Finding.model_json_schema()}},
-                "required": ["findings"],
-                "additionalProperties": False,
-            }
-        )
+        schema = _strict_schema(_SemanticResponse.model_json_schema())
         response = self._client.responses.create(
             model=self.model,
             instructions=request.system,
@@ -110,8 +123,19 @@ class OpenAIProvider(ModelProvider):
                 }
             },
         )
-        payload = json.loads(response.output_text)
-        findings = [Finding.model_validate(item) for item in payload["findings"]]
+        if getattr(response, "status", "completed") != "completed":
+            raise ValueError("model response did not complete")
+        payload = _SemanticResponse.model_validate(json.loads(response.output_text))
+        findings = [
+            Finding(
+                **item.model_dump(exclude={"line"}),
+                blueprint=request.blueprint,
+                source=f"{self.name}:{self.model}",
+                provenance="model",
+                range=FileRange(start_line=item.line) if item.line is not None else None,
+            )
+            for item in payload.findings
+        ]
         usage = getattr(response, "usage", None)
         return ModelResponse(
             findings=findings,

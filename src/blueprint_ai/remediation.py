@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -14,8 +15,8 @@ from blueprint_ai.core import Finding, ProjectFacts
 from blueprint_ai.safety import (
     MAX_MANIFEST_BYTES,
     atomic_write_text,
+    read_bytes_bounded,
     read_text_bounded,
-    run_process,
 )
 
 TEMPLATES = {
@@ -49,6 +50,8 @@ class CapabilityKit(BaseModel):
     profiles: list[str] = Field(default_factory=list)
     files: dict[str, str]
     verification: list[list[str]] = Field(default_factory=list)
+    alternative_files: list[str] = Field(default_factory=list)
+    alternative_json_sections: dict[str, str] = Field(default_factory=dict)
 
 
 KITS: dict[str, CapabilityKit] = {
@@ -161,6 +164,76 @@ boundaries, eval datasets, token/cost budgets, caching, and reproducibility sett
 }
 
 
+# Small declarative kits; activation of services/accounts remains outside a local file mutation.
+KITS.update(
+    {
+        "security-policy": CapabilityKit(
+            name="security-policy",
+            files={
+                "SECURITY.md": (
+                    "# Security\n\nDocument supported versions and the private vuln"
+                    "erability reporting channel before publication.\n"
+                )
+            },
+        ),
+        "dependency-updates": CapabilityKit(
+            name="dependency-updates",
+            files={"renovate.json": '{"extends": ["config:recommended"]}\n'},
+            alternative_files=[
+                *[
+                    prefix + "renovate." + extension
+                    for prefix in ("", ".github/", ".gitlab/")
+                    for extension in ("json", "jsonc", "json5")
+                    if prefix or extension != "json"
+                ],
+                ".renovaterc",
+                ".renovaterc.json",
+                ".renovaterc.jsonc",
+                ".renovaterc.json5",
+            ],
+            alternative_json_sections={"package.json": "renovate"},
+        ),
+        "secret-scanning": CapabilityKit(
+            name="secret-scanning", files={".gitleaks.toml": "[extend]\nuseDefault = true\n"}
+        ),
+        "sast": CapabilityKit(
+            name="sast",
+            alternative_files=[".semgrep.yaml"],
+            files={
+                ".semgrep.yml": (
+                    "rules:\n  - id: unsafe-eval\n    languages: [python]\n    sever"
+                    "ity: ERROR\n    message: Review evaluation of dynamic code.\n "
+                    "   pattern: eval(...)\n"
+                )
+            },
+        ),
+        "devcontainer": CapabilityKit(
+            name="devcontainer",
+            alternative_files=[".devcontainer.json"],
+            files={
+                ".devcontainer/devcontainer.json": (
+                    '{"name":"Project workspace","image":"mcr.microsoft.com/devco'
+                    'ntainers/base:ubuntu","remoteUser":"vscode"}\n'
+                )
+            },
+        ),
+        "release-checklist": CapabilityKit(
+            name="release-checklist",
+            files={
+                "docs/releasing.md": (
+                    "# Releasing\n\n1. Review the version and changelog.\n2. Run the"
+                    " native build and tests from a clean checkout.\n3. Audit depe"
+                    "ndencies and inspect package contents.\n4. Test a fresh isola"
+                    "ted installation.\n5. Review the artifact digest and publishe"
+                    "r identity.\n6. Publish only with explicit release authorizat"
+                    "ion.\n"
+                )
+            },
+        ),
+    }
+)
+
+
 class Change(BaseModel):
     target: str
     status: str
@@ -173,6 +246,7 @@ class Verification(BaseModel):
     command: list[str]
     status: str
     detail: str
+    sandbox: dict | None = None
 
 
 class ApplyResult(BaseModel):
@@ -180,6 +254,7 @@ class ApplyResult(BaseModel):
     manifest_path: str | None = None
     changes: list[Change] = Field(default_factory=list)
     verifications: list[Verification] = Field(default_factory=list)
+    created_directories: list[str] = Field(default_factory=list)
 
     @property
     def changed(self) -> list[Change]:
@@ -201,15 +276,20 @@ See the source entry points for current usage.
 """
 
 
-def _test_scaffold(root: Path, target: str) -> str:
+def _test_scaffold(root: Path, target: str) -> str | None:
     if target.endswith(".py"):
         packages = []
         source = root / "src"
+        if source.is_symlink():
+            return None
         if source.is_dir():
             packages = [
                 path.name
                 for path in source.iterdir()
-                if path.is_dir() and (path / "__init__.py").is_file()
+                if not path.is_symlink()
+                and path.is_dir()
+                and not (path / "__init__.py").is_symlink()
+                and (path / "__init__.py").is_file()
             ]
         if packages:
             return f'''"""Generated by Blueprint AI; replace with behavior assertions."""
@@ -231,11 +311,14 @@ def test_project_manifest_exists() -> None:
 '''
     module = False
     package_json = root / "package.json"
-    if package_json.is_file():
+    if os.path.lexists(package_json):
         try:
-            module = json.loads(package_json.read_text(encoding="utf-8")).get("type") == "module"
-        except ValueError:
-            pass
+            package = json.loads(read_text_bounded(package_json, MAX_MANIFEST_BYTES, root=root))
+        except (OSError, ValueError, UnicodeError):
+            return None
+        if not isinstance(package, dict):
+            return None
+        module = package.get("type") == "module"
     if module:
         return """// Generated by Blueprint AI; replace with behavior assertions.
 import assert from "node:assert/strict";
@@ -255,17 +338,37 @@ def _safe_target(root: Path, value: str) -> Path | None:
     relative = Path(value)
     if relative.is_absolute() or ".." in relative.parts:
         return None
-    target = (root / relative).resolve()
+    current = root.resolve()
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            return None
+    target = current.resolve()
     try:
         target.relative_to(root.resolve())
     except ValueError:
         return None
-    current = root.resolve()
-    for part in relative.parts[:-1]:
-        current = current / part
-        if current.is_symlink():
-            return None
     return target
+
+
+def _kit_configuration_conflicts(root: Path, kit: CapabilityKit) -> list[str]:
+    conflicts = []
+    for relative in kit.alternative_files:
+        target = _safe_target(root, relative)
+        if target is None or os.path.lexists(target):
+            conflicts.append(relative)
+    for relative, section in kit.alternative_json_sections.items():
+        target = _safe_target(root, relative)
+        if target is None:
+            conflicts.append(relative)
+        elif os.path.lexists(target):
+            try:
+                content = json.loads(read_text_bounded(target, MAX_MANIFEST_BYTES, root=root))
+                if not isinstance(content, dict) or section in content:
+                    conflicts.append(relative + "#" + section)
+            except (OSError, ValueError, UnicodeError):
+                conflicts.append(relative)
+    return conflicts
 
 
 def _atomic_create(root: Path, target: Path, content: str) -> str:
@@ -282,13 +385,33 @@ def _content_for(root: Path, facts: ProjectFacts, kind: str, target: str) -> str
     return None
 
 
+def _remember_directories(root: Path, target: Path, result: ApplyResult) -> None:
+    for parent in reversed(target.parents):
+        if parent != root and parent.is_relative_to(root) and not parent.exists():
+            relative = parent.relative_to(root).as_posix()
+            if relative not in result.created_directories:
+                result.created_directories.append(relative)
+
+
+def _remove_empty_created_directories(root: Path, directories: list[str]) -> None:
+    for relative in sorted(directories, key=lambda p: len(Path(p).parts), reverse=True):
+        target = _safe_target(root, relative)
+        if target and target != root and not target.is_symlink():
+            try:
+                target.rmdir()
+            except OSError:
+                pass
+
+
 def _record_manifest(root: Path, result: ApplyResult) -> None:
     if not result.changed or not result.operation_id:
         return
     relative = Path(".blueprint-ai") / "operations" / f"{result.operation_id}.json"
     target = _operation_manifest_target(root, result.operation_id)
+    _remember_directories(root, target, result)
     payload = {
-        "version": 1,
+        "version": 2,
+        "created_directories": result.created_directories,
         "operation_id": result.operation_id,
         "created_at": datetime.now(UTC).isoformat(),
         "changes": [change.model_dump(mode="json") for change in result.changed],
@@ -309,20 +432,74 @@ def _commit_manifest_or_rollback(root: Path, result: ApplyResult) -> None:
     try:
         _record_manifest(root, result)
     except OSError:
-        for change in result.changed:
-            target = _safe_target(root, change.target)
-            if target and target.is_file() and not target.is_symlink():
-                if hashlib.sha256(target.read_bytes()).hexdigest() == change.sha256:
-                    target.unlink()
-                    change.status = "rolled_back"
-                    change.detail = "write rolled back because the operation manifest failed"
+        _rollback_created_changes(root, result, "operation manifest failed")
+        _remove_empty_created_directories(root, result.created_directories)
         raise
 
 
-def _verify_kit(root: Path, kit: CapabilityKit, result: ApplyResult) -> None:
+def _matches_created_file(root: Path, target: Path, digest: str | None) -> bool:
+    try:
+        return (
+            hashlib.sha256(read_bytes_bounded(target, MAX_MANIFEST_BYTES, root=root)).hexdigest()
+            == digest
+        )
+    except (OSError, ValueError):
+        return False
+
+
+def _rollback_created_changes(root: Path, result: ApplyResult, reason: str) -> None:
+    for change in result.changed:
+        target = _safe_target(root, change.target)
+        if target and _matches_created_file(root, target, change.sha256):
+            target.unlink()
+            change.status = "rolled_back"
+            change.detail = "transaction rolled back: " + reason
+        else:
+            change.status = "conflicted"
+            change.detail = "file changed during transaction; preserved after " + reason
+
+
+def _verify_kit(root: Path, kit: CapabilityKit, result: ApplyResult, sandbox=None) -> None:
+    import ast
+    import tomllib
+
+    import yaml
+
+    from blueprint_ai.sandbox import SandboxPolicy, SandboxUnavailable, execute
+
+    # Verify the bytes that were created, before any optional project-controlled verifier.
+    try:
+        for relative in (change.target for change in result.changed):
+            content = read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root)
+            extension = Path(relative).suffix
+            if extension == ".json":
+                json.loads(content)
+            elif extension in {".yaml", ".yml"}:
+                yaml.safe_load(content)
+            elif extension == ".toml":
+                tomllib.loads(content)
+            elif extension == ".py":
+                ast.parse(content)
+            if not content.strip():
+                raise ValueError("empty generated asset")
+    except (OSError, ValueError, SyntaxError, yaml.YAMLError) as exc:
+        result.verifications.append(
+            Verification(
+                command=["builtin:validate-assets"], status="failed", detail=str(exc)[:500]
+            )
+        )
+        return
+    result.verifications.append(
+        Verification(
+            command=["builtin:validate-assets"],
+            status="passed",
+            detail="Created text is readable; JSON/YAML/TOML/Python assets parse successfully",
+        )
+    )
+    policy = sandbox or SandboxPolicy()
     for command in kit.verification:
         executable = shutil.which(command[0])
-        if not executable:
+        if not executable and policy.trusted and policy.backend in {"auto", "host"}:
             result.verifications.append(
                 Verification(
                     command=command,
@@ -332,18 +509,32 @@ def _verify_kit(root: Path, kit: CapabilityKit, result: ApplyResult) -> None:
             )
             continue
         try:
-            completed = run_process([executable, *command[1:]], root, 120)
-        except OSError as exc:
+            execution = execute(
+                command,
+                root,
+                policy,
+                tool=command[0],
+            )
+            completed = execution.result
+        except (OSError, SandboxUnavailable) as exc:
             result.verifications.append(
                 Verification(command=command, status="tool_error", detail=str(exc)[:500])
             )
             continue
         detail = (completed.stdout + "\n" + completed.stderr).strip()[-500:]
+        okay = (
+            completed.returncode == 0 and not completed.timed_out and not completed.output_truncated
+        )
+        if completed.timed_out:
+            detail = "verifier timed out; " + detail
+        elif completed.output_truncated:
+            detail = "verifier output was truncated; " + detail
         result.verifications.append(
             Verification(
                 command=command,
-                status="passed" if completed.returncode == 0 else "failed",
+                status="passed" if okay else "failed",
                 detail=detail or f"exit {completed.returncode}",
+                sandbox=execution.evidence.model_dump(mode="json"),
             )
         )
 
@@ -354,9 +545,19 @@ def _apply_files(
     blueprint: str,
     files: dict[str, str],
     detail: str,
+    existing_configuration: list[str] | None = None,
 ) -> None:
     planned: list[tuple[str, Path, str]] = []
-    conflict = False
+    conflict = bool(existing_configuration)
+    for relative in existing_configuration or []:
+        result.changes.append(
+            Change(
+                target=relative,
+                status="conflicted",
+                blueprint=blueprint,
+                detail="equivalent existing configuration preserved; no duplicate asset created",
+            )
+        )
     for relative, content in files.items():
         target = _safe_target(root, relative)
         if target is None:
@@ -391,11 +592,10 @@ def _apply_files(
                 )
             )
         return
-    created: list[Path] = []
     try:
         for relative, target, content in planned:
+            _remember_directories(root, target, result)
             digest = _atomic_create(root, target, content)
-            created.append(target)
             result.changes.append(
                 Change(
                     target=relative,
@@ -406,13 +606,8 @@ def _apply_files(
                 )
             )
     except OSError as exc:
-        for target in reversed(created):
-            target.unlink(missing_ok=True)
-        created_targets = {target.relative_to(root).as_posix() for target in created}
-        for change in result.changes:
-            if change.status == "changed" and change.target in created_targets:
-                change.status = "rolled_back"
-                change.detail = "transaction rolled back after a later write conflict"
+        _rollback_created_changes(root, result, "a later write conflict")
+        _remove_empty_created_directories(root, result.created_directories)
         result.changes.append(
             Change(
                 target=relative,
@@ -423,7 +618,7 @@ def _apply_files(
         )
 
 
-def apply_kit(root: Path, facts: ProjectFacts, name: str) -> ApplyResult:
+def apply_kit(root: Path, facts: ProjectFacts, name: str, *, sandbox=None) -> ApplyResult:
     try:
         kit = KITS[name]
     except KeyError as exc:
@@ -450,9 +645,19 @@ def apply_kit(root: Path, facts: ProjectFacts, name: str) -> ApplyResult:
         )
         return result
     _operation_manifest_target(root, operation_id)
-    _apply_files(root, result, f"kit:{name}", kit.files, f"apply {name} kit v{kit.version}")
+    _apply_files(
+        root,
+        result,
+        f"kit:{name}",
+        kit.files,
+        f"apply {name} kit v{kit.version}",
+        _kit_configuration_conflicts(root, kit),
+    )
     if result.changed:
-        _verify_kit(root, kit, result)
+        _verify_kit(root, kit, result, sandbox=sandbox)
+        if any(v.status == "failed" for v in result.verifications):
+            _rollback_created_changes(root, result, "capability verification failed")
+            _remove_empty_created_directories(root, result.created_directories)
     _commit_manifest_or_rollback(root, result)
     if not result.changed:
         result.operation_id = None
@@ -488,7 +693,14 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
                     )
                 )
                 continue
-            _apply_files(root, result, finding.blueprint, kit.files, remediation.description)
+            _apply_files(
+                root,
+                result,
+                finding.blueprint,
+                kit.files,
+                remediation.description,
+                _kit_configuration_conflicts(root, kit),
+            )
             continue
         content = _content_for(root, facts, remediation.kind, remediation.target)
         if content is None:
@@ -515,7 +727,7 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
 
 
 def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
-    if not __import__("re").fullmatch(r"[0-9a-f]{32}", operation_id):
+    if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
         raise ValueError("invalid operation id")
     manifest = root / ".blueprint-ai" / "operations" / f"{operation_id}.json"
     if not manifest.is_file():
@@ -524,15 +736,47 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
         data = json.loads(read_text_bounded(manifest, MAX_MANIFEST_BYTES, root=root))
     except (OSError, ValueError, UnicodeError) as exc:
         raise ValueError(f"invalid operation manifest: {exc}") from exc
-    if data.get("version") != 1 or data.get("operation_id") != operation_id:
+    if (
+        not isinstance(data, dict)
+        or type(data.get("version")) is not int
+        or data.get("version") not in {1, 2}
+        or data.get("operation_id") != operation_id
+    ):
         raise ValueError("operation manifest identity or version does not match")
+    changes = data.get("changes")
+    directories = data.get("created_directories", [])
+    # Receipts are mutable project files. Validate every row before deleting any file.
+    if (
+        not isinstance(changes, list)
+        or any(
+            not isinstance(row, dict)
+            or not isinstance(row.get("target"), str)
+            or not isinstance(row.get("blueprint"), str)
+            or not isinstance(row.get("sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])
+            for row in changes
+        )
+        or not isinstance(directories, list)
+        or any(not isinstance(value, str) for value in directories)
+    ):
+        raise ValueError("invalid operation manifest changes or created directories")
     result = ApplyResult(
         operation_id=operation_id, manifest_path=manifest.relative_to(root).as_posix()
     )
-    for row in reversed(data.get("changes", [])):
+    for row in reversed(changes):
         relative = str(row.get("target", ""))
         target = _safe_target(root, relative)
-        if target is None or target.is_symlink() or not target.is_file():
+        if target is None:
+            result.changes.append(
+                Change(
+                    target=relative,
+                    status="conflicted",
+                    blueprint=str(row.get("blueprint", "rollback")),
+                    detail="unsafe target path or symbolic link preserved",
+                )
+            )
+            continue
+        if not target.is_file():
             result.changes.append(
                 Change(
                     target=relative,
@@ -542,8 +786,7 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
                 )
             )
             continue
-        digest = hashlib.sha256(target.read_bytes()).hexdigest()
-        if digest != row.get("sha256"):
+        if not _matches_created_file(root, target, row.get("sha256")):
             result.changes.append(
                 Change(
                     target=relative,
@@ -562,4 +805,7 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult:
                 detail="removed unchanged file created by operation",
             )
         )
+    if data.get("version") == 2 and not any(c.status == "conflicted" for c in result.changes):
+        manifest.unlink()
+        _remove_empty_created_directories(root, data.get("created_directories", []))
     return result

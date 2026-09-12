@@ -11,9 +11,17 @@ from pathspec import GitIgnoreSpec
 
 from blueprint_ai.core import ProjectFacts
 from blueprint_ai.discovery.graph import build_graph, graph_project_types
-from blueprint_ai.safety import MAX_CONFIG_BYTES, read_text_bounded, run_process_bytes
+from blueprint_ai.safety import (
+    MAX_CONFIG_BYTES,
+    RawProcessResult,
+    read_text_bounded,
+    run_process_bytes,
+    safe_regular_file,
+)
 
 SKIP_DIRS = {
+    ".blueprint-state",
+    ".next",
     ".git",
     ".blueprint-ai",
     ".mypy_cache",
@@ -59,7 +67,13 @@ LANGUAGE_SUFFIXES = {
 
 
 def _git_run(root: Path, *arguments: str, timeout: float = 5):
-    return run_process_bytes(_git_command(root, *arguments), root, timeout, output_limit=8_000_000)
+    try:
+        return run_process_bytes(
+            _git_command(root, *arguments), root, timeout, output_limit=8_000_000
+        )
+    except FileNotFoundError:
+        # Filesystem discovery and built-in genesis do not require an installed Git client.
+        return RawProcessResult(127, b"", b"Git client unavailable", False, False)
 
 
 def _ignore_spec(root: Path, extra: Iterable[str]) -> GitIgnoreSpec:
@@ -76,7 +90,9 @@ def _ignore_spec(root: Path, extra: Iterable[str]) -> GitIgnoreSpec:
     return GitIgnoreSpec.from_lines(patterns)
 
 
-def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[list[Path], int]:
+def iter_project_files(
+    root: Path, extra_ignores: Iterable[str] = (), *, reject_oversized: bool = False
+) -> tuple[list[Path], int]:
     spec = _ignore_spec(root, extra_ignores)
     git_files = _git_files(root)
     if git_files is not None:
@@ -95,8 +111,13 @@ def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[l
                 continue
             try:
                 if (
-                    path.is_file()
-                    and not path.is_symlink()
+                    reject_oversized
+                    and safe_regular_file(path, root)
+                    and path.stat().st_size > 2_000_000
+                ):
+                    raise ValueError(f"generated source exceeds the 2000000-byte limit: {rel}")
+                if (
+                    safe_regular_file(path, root)
                     and path.stat().st_size <= 2_000_000
                     and not any(path.name.endswith(s) for s in GENERATED_SUFFIXES)
                 ):
@@ -129,7 +150,13 @@ def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[l
                 ignored += 1
                 continue
             try:
-                if path.is_symlink() or path.stat().st_size > 2_000_000:
+                if (
+                    reject_oversized
+                    and safe_regular_file(path, root)
+                    and path.stat().st_size > 2_000_000
+                ):
+                    raise ValueError(f"generated source exceeds the 2000000-byte limit: {rel}")
+                if not safe_regular_file(path, root) or path.stat().st_size > 2_000_000:
                     ignored += 1
                     continue
             except OSError:
@@ -181,27 +208,33 @@ def _git_changed_files(root: Path, base_ref: str | None = None) -> list[str]:
             "diff",
             "--no-ext-diff",
             "--name-only",
+            "-z",
             "--diff-filter=ACMR",
             "--end-of-options",
             compare,
             "--",
         ],
-        ["status", "--porcelain", "-z", "--untracked-files=normal"],
+        ["status", "--porcelain", "-z", "--untracked-files=all"],
     ]
     for index, command in enumerate(commands):
         try:
             result = _git_run(root, *command)
-        except OSError:
-            continue
-        if result.returncode != 0 or result.output_truncated:
-            continue
+        except OSError as exc:
+            raise ValueError(f"changed-file inventory unavailable: {exc}") from exc
+        if result.returncode != 0 or result.output_truncated or result.timed_out:
+            raise ValueError("changed-file inventory incomplete; verify the Git comparison ref")
         if index == 1:
-            for item in result.stdout.split(b"\0"):
+            records = iter(result.stdout.split(b"\0"))
+            for item in records:
                 if len(item) > 3:
                     changed.add(item[3:].decode(errors="replace"))
+                    if b"R" in item[:2] or b"C" in item[:2]:
+                        next(
+                            records, None
+                        )  # porcelain -z rename/copy source follows the destination
         else:
             changed.update(
-                item.decode(errors="replace") for item in result.stdout.splitlines() if item
+                item.decode(errors="replace") for item in result.stdout.split(b"\0") if item
             )
     return sorted(changed)
 
@@ -219,7 +252,7 @@ def _git_command(root: Path, *arguments: str) -> list[str]:
     ]
 
 
-def _discover_kubernetes(files: list[Path], rels: list[str]) -> list[str]:
+def _discover_kubernetes(root: Path, files: list[Path], rels: list[str]) -> list[str]:
     kubernetes = []
     for path, rel in zip(files, rels, strict=True):
         lower = rel.lower()
@@ -229,8 +262,8 @@ def _discover_kubernetes(files: list[Path], rels: list[str]) -> list[str]:
         if path.suffix.lower() not in {".yaml", ".yml"}:
             continue
         try:
-            head = path.read_text(encoding="utf-8", errors="ignore")[:16_000]
-        except OSError:
+            head = read_text_bounded(path, 2_000_000, root=root, errors="ignore")[:16_000]
+        except (OSError, ValueError):
             continue
         if re.search(r"(?m)^apiVersion:\s*[^\s]+\s*$", head) and re.search(
             r"(?m)^kind:\s*[A-Za-z]+\s*$", head
@@ -241,8 +274,10 @@ def _discover_kubernetes(files: list[Path], rels: list[str]) -> list[str]:
     return sorted(set(kubernetes))
 
 
-def _discover_iac(files: list[Path], rels: list[str]) -> list[str]:
+def _discover_iac(root: Path, files: list[Path], rels: list[str]) -> list[str]:
     detected = {"terraform" for rel in rels if rel.endswith(".tf")}
+    if any(Path(rel).name == "Pulumi.yaml" for rel in rels):
+        detected.add("pulumi")
     for path, rel in zip(files, rels, strict=True):
         if "cloudformation" in rel.lower() or "sam-template" in rel.lower():
             detected.add("cloudformation")
@@ -250,8 +285,8 @@ def _discover_iac(files: list[Path], rels: list[str]) -> list[str]:
         if path.suffix.lower() not in {".yaml", ".yml", ".json"}:
             continue
         try:
-            head = path.read_text(encoding="utf-8", errors="ignore")[:16_000]
-        except OSError:
+            head = read_text_bounded(path, 2_000_000, root=root, errors="ignore")[:16_000]
+        except (OSError, ValueError):
             continue
         if "AWSTemplateFormatVersion" in head or "AWS::Serverless-2016-10-31" in head:
             detected.add("cloudformation")
@@ -262,9 +297,9 @@ def _discover_test_capabilities(root: Path, tests: list[str], rels: list[str]) -
     capabilities = set()
     javascript_cli_targets: set[str] = set()
     package_json = root / "package.json"
-    if package_json.is_file():
+    if "package.json" in rels:
         try:
-            package = json.loads(package_json.read_text(encoding="utf-8", errors="ignore"))
+            package = json.loads(read_text_bounded(package_json, 2_000_000, root=root))
             binaries = package.get("bin", {}) if isinstance(package, dict) else {}
             if isinstance(binaries, str):
                 javascript_cli_targets.add(binaries.removeprefix("./"))
@@ -296,8 +331,10 @@ def _discover_test_capabilities(root: Path, tests: list[str], rels: list[str]) -
     for rel in tests:
         lowered = rel.lower()
         try:
-            test_text = (root / rel).read_text(encoding="utf-8", errors="ignore")[:100_000]
-        except OSError:
+            test_text = read_text_bounded(root / rel, 2_000_000, root=root, errors="ignore")[
+                :100_000
+            ]
+        except (OSError, ValueError):
             test_text = ""
         matched = {
             capability
@@ -360,6 +397,7 @@ def discover_project(
         "pyproject.toml",
         "package.json",
         "package-lock.json",
+        "packages.lock.json",
         "pnpm-lock.yaml",
         "yarn.lock",
         "requirements.txt",
@@ -377,7 +415,9 @@ def discover_project(
         "composer.json",
         "composer.lock",
     }
-    manifests = sorted(rel for rel in rels if Path(rel).name in manifest_names)
+    manifests = sorted(
+        rel for rel in rels if Path(rel).name in manifest_names or rel.endswith(".csproj")
+    )
     managers = []
     for marker, manager in (
         ("uv.lock", "uv"),
@@ -401,7 +441,7 @@ def discover_project(
         }
     )
     project_types = graph_project_types(graph)
-    iac = _discover_iac(files, rels)
+    iac = _discover_iac(root, files, rels)
     containers = [
         rel
         for rel in rels
@@ -418,15 +458,7 @@ def discover_project(
         {"github-actions" for rel in rels if rel.startswith(".github/workflows/")}
         | {"gitlab-ci" for rel in rels if rel == ".gitlab-ci.yml"}
     )
-    tests = [
-        rel
-        for rel in rels
-        if rel.startswith(("tests/", "test/", "spec/", "__tests__/"))
-        or Path(rel).name.startswith("test_")
-        or rel.endswith(".tftest.hcl")
-        or ".test." in rel
-        or ".spec." in rel
-    ]
+    tests = [rel for rel in rels if graph.scope(rel) == "test"]
     docs = [rel for rel in rels if rel.lower().endswith(".md") or rel.startswith("docs/")]
     ai_names = {"AGENTS.md", "CLAUDE.md", ".cursorrules", "copilot-instructions.md"}
     ai_context = [
@@ -452,9 +484,9 @@ def discover_project(
             "asyncapi.yml",
             "schema.graphql",
         }
-        or rel.lower().endswith((".graphql", ".gql"))
+        or rel.lower().endswith((".graphql", ".gql", ".proto"))
     ]
-    kubernetes = _discover_kubernetes(files, rels)
+    kubernetes = _discover_kubernetes(root, files, rels)
     migrations = [
         rel
         for rel in rels
@@ -518,6 +550,9 @@ def discover_project(
                 ("hashicorp/aws", "aws"),
                 ("hashicorp/azurerm", "azure"),
                 ("hashicorp/google", "gcp"),
+                ("@pulumi/aws", "aws"),
+                ("@pulumi/azure-native", "azure"),
+                ("@pulumi/gcp", "gcp"),
             )
             if dep == token
         }
@@ -550,6 +585,8 @@ def discover_project(
         project_types.append("open-source")
     project_types = sorted(set(project_types))
     is_git, branch, dirty = _git_facts(root)
+    if changed_only and not is_git:
+        raise ValueError("changed-file review requires an available Git repository")
     changed_files = _git_changed_files(root, base_ref) if changed_only and is_git else []
     suggested_profiles = sorted(set(project_types)) or ["default"]
     return ProjectFacts(
