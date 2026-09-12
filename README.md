@@ -1,10 +1,10 @@
 # Blueprint AI
 
-Blueprint AI is a deterministic-first toolkit for inspecting, reviewing, strengthening, and extending software projects. It works on any folder; Git is useful but optional.
+Blueprint AI is a deterministic-first toolkit for creating, inspecting, reviewing, and strengthening software projects. It works on any folder; Git is useful but optional.
 
 ## Architecture
 
-The engine discovers compact `ProjectFacts`, selects applicable blueprints, runs native and OSS tools through typed adapters, normalizes and deduplicates `Finding` records, and only then uses optional bounded model judgment. Tool commands are implemented in code—not loaded from repository configuration. Safe remediations preserve existing files and are verified after application.
+A shared component, scope, lifecycle, provenance, and verification graph underlies creation and review. The engine derives `ProjectFacts` from that graph, selects applicable blueprints, runs native and OSS tools through typed adapters, normalizes and deduplicates `Finding` records, and only then uses optional bounded model judgment. Tool commands are implemented in code—not loaded from repository configuration. Safe remediations preserve existing files and are verified after application.
 
 ## Install
 
@@ -76,6 +76,24 @@ pytest, ESLint/Biome, TypeScript, Go, Rust, Java, ShellCheck, Spectral, Terrafor
 Kubernetes tools. Optional tools are never downloaded automatically. A tool that is missing,
 disabled by the trust boundary, offline, fails, or times out is shown as incomplete—not as a pass.
 
+## Create a project
+
+```bash
+blueprint-ai catalog
+blueprint-ai name "My Service" --ecosystem python
+blueprint-ai init ./my-service --kind python-api --dry-run --no-model
+blueprint-ai init ./my-service --kind python-api --trust-providers --allow-network --no-model
+blueprint-ai init ./my-app --kind full-stack --backend node --api-client --ci \
+  --trust-providers --allow-network --no-model
+```
+
+Genesis wraps `uv init`, `npm init`, and pinned `create-vite`, then composes native quality,
+test, contract, and optional delivery capabilities in staging. A new destination is required.
+Source, lockfiles, hash-bound provenance, verifier receipts, and the final review are published
+atomically. Verification environments remain disposable. `verified` means the declared generated
+project checks completed; the separate review can still be partial or contain improvement findings.
+See [genesis and its trust contract](docs/genesis.md) for all ten kinds, providers, schemas, and exits.
+
 ## End-to-end example
 
 ```bash
@@ -122,7 +140,7 @@ databases or reachable targets, and target-controlled linters/tests require the 
 Large legacy lockfiles can legitimately produce many advisories, so priority and aggregated sources
 should guide triage rather than raw finding count.
 
-The [Phase 4 validation report](docs/phase-4-validation.md) records the controlled fixtures,
+The [Phase 5 validation report](docs/phase-5-validation.md) records the controlled fixtures,
 six-repository matrix, real strengthening case study, benchmarks, and release decision. See
 [tool research](docs/tool-research.md), [the threat model](docs/threat-model.md), and
 [release verification](docs/releasing.md) for maintained operational detail.

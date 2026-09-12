@@ -40,7 +40,7 @@ def test_priority_adapter_commands_match_current_upstream_contracts() -> None:
     assert "--offline" in tools["zizmor"].args
     assert tools["lychee"].expected_codes == {0, 2}
     assert tools["lychee"].default_timeout == 30
-    assert "--exclude-loopback" in tools["lychee"].args
+    assert "--exclude-all-private" in tools["lychee"].args
 
 
 def test_trivy_scanner_scope_follows_blueprint_applicability(tmp_path: Path) -> None:

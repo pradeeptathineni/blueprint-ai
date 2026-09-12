@@ -52,12 +52,11 @@ def test_ci_pin_check(tmp_path: Path) -> None:
     assert findings[0].priority == "P1"
 
 
-def test_security_flags_visible_environment_file(tmp_path: Path) -> None:
+def test_security_does_not_flag_nonsecret_environment_defaults(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text("EXAMPLE=value\n")
     facts = discover_project(tmp_path)
     findings = BLUEPRINTS["security"].check(tmp_path, facts)
-    assert findings[0].category == "sensitive-file"
-    assert findings[0].severity == "high"
+    assert not findings
 
 
 def test_ai_context_detects_duplicate_and_oversized_instructions(tmp_path: Path) -> None:
@@ -109,3 +108,13 @@ def test_shell_only_code_design_is_partial_not_passable_by_empty_checks(tmp_path
     (tmp_path / "script.sh").write_text("#!/bin/sh\nexit 0\n")
     facts = discover_project(tmp_path)
     assert BLUEPRINTS["code-design"].assess(facts).state == "partial"
+
+
+def test_explicit_provider_placeholder_does_not_hide_a_realistic_secret(tmp_path: Path) -> None:
+    credential = "realistic-" + "credential-value-12345"
+    (tmp_path / "config.py").write_text(
+        f'token = "ghp_exampleabcdefghijklmnopqrstuv"\napi_key = "{credential}"\n'
+    )
+    findings = BLUEPRINTS["security"].check(tmp_path, discover_project(tmp_path))
+    assert len(findings) == 1
+    assert "api_key" in findings[0].message

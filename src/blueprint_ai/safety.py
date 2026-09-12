@@ -149,7 +149,7 @@ def run_process_bytes(
 ) -> RawProcessResult:
     isolated_home = tempfile.TemporaryDirectory(prefix="blueprint-ai-home-")
     if env is None:
-        cache = Path.home() / ".cache" / "blueprint-ai" / "tools"
+        cache = Path(isolated_home.name) / "cache"
         cache.mkdir(parents=True, exist_ok=True)
         env = controlled_env(
             {

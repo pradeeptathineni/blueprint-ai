@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-09-12
+
+- Share evidence-bearing component, scope, lifecycle, provenance, and verification graphs across review and project genesis.
+- Discover nested Python/npm/Cargo/Go components, parse HCL with python-hcl2, recognize inline/integration/fuzz/cassette tests, and scope compiler fixtures and generated artifacts.
+- Route native tools at module roots, preserve advisory/package identity, recognize valid local reusable workflows and conventional documentation, and distinguish incomplete concern analysis from individual passing checks.
+- Move read-only scanner caches outside targets, guard private link destinations and remote Terraform-module resolution, and report malformed/truncated output as incomplete.
+- Reserve bounded graph-ranked source evidence for model review, share retrieval caches, and enforce call limits without implicit malformed-response repair calls.
+- Add deterministic `name`, `catalog`, `init`, and intent/plan/graph schemas. Wrap uv, npm, pinned Vite and OpenAPI TypeScript providers in staged no-replace transactions with integrity, ownership, and verification receipts.
+- Generate repository, Python/TypeScript library/CLI/API, React, full-stack, and OpenAPI foundations; optionally compose CI, service containers, and verified development containers.
+- Add pinned external-corpus and real-provider matrix harnesses. Record verified coverage, operational boundaries, and deliberate cloud/template/evolution deferrals in the Phase 5 validation report.
+
 ## 0.4.2 — 2026-09-11
 
 - Validate every discovered Terraform root instead of accidentally passing an empty repository root,

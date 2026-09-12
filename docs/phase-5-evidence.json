@@ -1,0 +1,1420 @@
+{
+  "baseline_commit": "b3c5fc673a0741bdeec29eedc13b3485c564ad02",
+  "version": "0.5.0",
+  "corpus": [
+    {
+      "repo": "fastapi/full-stack-fastapi-template",
+      "sha": "cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7",
+      "discovery_ms": 389,
+      "types": [
+        "api",
+        "backend-service",
+        "container",
+        "frontend",
+        "full-stack",
+        "library",
+        "open-source",
+        "template-generator",
+        "web-app"
+      ],
+      "components": 4,
+      "lifecycle": "template-generator",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 247,
+          "files_read": 6,
+          "bytes_read": 15981,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "71b2580d228921c7350683e30900b991b188004067889df24b4bcbd57c4dee06"
+        },
+        "testing": {
+          "files_considered": 247,
+          "files_read": 12,
+          "bytes_read": 30894,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "79c93b5070dc5a8570b10352685b92580791c9fd4e22d463efa8b848ef0e1452"
+        },
+        "security": {
+          "files_considered": 247,
+          "files_read": 18,
+          "bytes_read": 40072,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "b0031d8a1a1714a5cc42775b3dcab6f4192c4fdd33b1d8c3b1612f3ca6edfd6d"
+        },
+        "api-data-config": {
+          "files_considered": 247,
+          "files_read": 24,
+          "bytes_read": 47975,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7876,
+          "sha256": "07a5add684e7ea68526a5345549698850b7326c45481629ae8b26ffa76316eb6"
+        },
+        "operations": {
+          "files_considered": 247,
+          "files_read": 29,
+          "bytes_read": 62886,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "39a8d8cb5d8f5b97514c118bdb498dd35b132ccd1cbe9c9ad5c57a37d116248d"
+        },
+        "documentation": {
+          "files_considered": 247,
+          "files_read": 34,
+          "bytes_read": 81222,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "b6ecc7280ff735d5905aeec90d18c26d732d3d384e9219ac37e46ac72243212f"
+        }
+      },
+      "findings": 21,
+      "duration_ms": 59087,
+      "statuses": {
+        "identity": "passed",
+        "repository": "findings",
+        "code-quality": "partial",
+        "code-design": "partial",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "documentation": "partial",
+        "completeness": "findings",
+        "architecture": "partial",
+        "ci-cd": "partial",
+        "api-data-config": "partial",
+        "reliability": "partial",
+        "operations": "partial",
+        "containers": "partial"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "open-telemetry/opentelemetry-demo",
+      "sha": "9bfe486ff48ee8a6ea942be74171342cb71a9327",
+      "discovery_ms": 782,
+      "types": [
+        "ai-agent",
+        "ai-app",
+        "ai-context",
+        "api",
+        "backend-service",
+        "cli",
+        "container",
+        "frontend",
+        "full-stack",
+        "library",
+        "open-source",
+        "web-app"
+      ],
+      "components": 20,
+      "lifecycle": "active-application",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 591,
+          "files_read": 4,
+          "bytes_read": 11482,
+          "files_included": 4,
+          "unique_snippets": 4,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "28cd037f563db7185767ee13f33daf92718a92ec414d6de97172123b29e1d481"
+        },
+        "testing": {
+          "files_considered": 591,
+          "files_read": 5,
+          "bytes_read": 13826,
+          "files_included": 4,
+          "unique_snippets": 4,
+          "new_files_read": 1,
+          "context_characters": 7998,
+          "sha256": "e65e4869b27dd205b09c30f48f2490f2936499efc5219721a8853a1c48af4f10"
+        },
+        "security": {
+          "files_considered": 591,
+          "files_read": 10,
+          "bytes_read": 34444,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "2ad50957e8ffac520fe794396e1b31c2436868f6a65ff8f3c1140fe8ee8c29e4"
+        },
+        "api-data-config": {
+          "files_considered": 591,
+          "files_read": 15,
+          "bytes_read": 43447,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "f03acdc3d723bb5dcdb9ecc73333ae083b312761edc7b5ed7ef394785059e0a7"
+        },
+        "operations": {
+          "files_considered": 591,
+          "files_read": 19,
+          "bytes_read": 57711,
+          "files_included": 4,
+          "unique_snippets": 4,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "42b885ffbefff2fc5c7c1a0b61c2796633b926c7be5e1f926b4f154348f61791"
+        },
+        "documentation": {
+          "files_considered": 591,
+          "files_read": 23,
+          "bytes_read": 77962,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "ebc5debf1fbb9167f43d338bc11e212dc967edbfa15f29db4e982575e926be4a"
+        }
+      },
+      "findings": 205,
+      "duration_ms": 138421,
+      "statuses": {
+        "ai-context": "partial",
+        "identity": "passed",
+        "repository": "findings",
+        "code-quality": "partial",
+        "code-design": "partial",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "documentation": "partial",
+        "completeness": "findings",
+        "architecture": "partial",
+        "api-data-config": "partial",
+        "ci-cd": "partial",
+        "reliability": "partial",
+        "operations": "partial",
+        "containers": "partial"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "terraform-aws-modules/terraform-aws-vpc",
+      "sha": "cf0e3ca46fd51f47bf095957f2a6ac6127c89045",
+      "discovery_ms": 2833,
+      "types": [
+        "iac",
+        "open-source",
+        "terraform"
+      ],
+      "components": 19,
+      "lifecycle": "reusable-infrastructure-module",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 111,
+          "files_read": 6,
+          "bytes_read": 216847,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "7daf5f0a07912de8ae858e36ce823d3962f94afd1fe84ef07adf76143b8ca880"
+        },
+        "testing": {
+          "files_considered": 111,
+          "files_read": 6,
+          "bytes_read": 216847,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "b5aae4e4bfca6f4af1723763eb0a861cf18e1bd70a8bd544a3252e7d0d8645af"
+        },
+        "security": {
+          "files_considered": 111,
+          "files_read": 11,
+          "bytes_read": 224645,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "ef0315654716edc1950bc202e0431a2e0bbfb9cbf2495e7ce45da9229fa2e346"
+        },
+        "api-data-config": {
+          "files_considered": 111,
+          "files_read": 16,
+          "bytes_read": 274520,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "5966522cc2a80617aca1ef44d48376d2011d33d638d57d7c61da4c89dffb34d4"
+        },
+        "operations": {
+          "files_considered": 111,
+          "files_read": 16,
+          "bytes_read": 274520,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "9dca5ff6494df5862276dcf84a1fd9c6a2a18c8c12fca4ff0aadb98d2c825356"
+        },
+        "documentation": {
+          "files_considered": 111,
+          "files_read": 20,
+          "bytes_read": 282757,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "f64cc38f047f61e5fb29249758bb30167d592a0d1c1185f27aaccd66b72c413c"
+        }
+      },
+      "findings": 37,
+      "duration_ms": 34100,
+      "statuses": {
+        "repository": "findings",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "iac": "partial",
+        "reliability": "partial",
+        "operations": "partial",
+        "ci-cd": "partial",
+        "documentation": "partial",
+        "completeness": "findings"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "isovalent/terraform-aws-vpc",
+      "sha": "2bb6b130d0d884808fce9590a5a6c47dd931596d",
+      "discovery_ms": 266,
+      "types": [
+        "iac",
+        "open-source",
+        "terraform"
+      ],
+      "components": 1,
+      "lifecycle": "reusable-infrastructure-module",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 12,
+          "files_read": 7,
+          "bytes_read": 28337,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 7,
+          "context_characters": 7998,
+          "sha256": "8574b501c79d778bcb94e983f678f164a3d068d97d6c7cb51405ca4c7b7fe9b0"
+        },
+        "testing": {
+          "files_considered": 12,
+          "files_read": 7,
+          "bytes_read": 28337,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "47a835965db62c86f86a89bba9e4e2d8adc900c279a8da39142fbc4b3d9b6f90"
+        },
+        "security": {
+          "files_considered": 12,
+          "files_read": 8,
+          "bytes_read": 29016,
+          "files_included": 8,
+          "unique_snippets": 8,
+          "new_files_read": 1,
+          "context_characters": 7998,
+          "sha256": "37649098f0b1fb85353ab66c95b0526c098904654e72be638c2474a4d63304f1"
+        },
+        "api-data-config": {
+          "files_considered": 12,
+          "files_read": 8,
+          "bytes_read": 29016,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "9e5811cbc34ac1b93d0a57a6568e2b0fea691c43bcad31ca33c5ff2097d6ebb0"
+        },
+        "operations": {
+          "files_considered": 12,
+          "files_read": 8,
+          "bytes_read": 29016,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "2b845b10003539fd36573a186b587c7890374ad744a83b24af5bcee1f65ae8a4"
+        },
+        "documentation": {
+          "files_considered": 12,
+          "files_read": 8,
+          "bytes_read": 29016,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "bbeac53e423397371b6dd4f9b46ce076a441ac9daa71ae642a00608779e948f2"
+        }
+      },
+      "findings": 11,
+      "duration_ms": 2185,
+      "statuses": {
+        "repository": "findings",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "iac": "partial",
+        "reliability": "partial",
+        "operations": "partial",
+        "ci-cd": "not_applicable",
+        "documentation": "partial",
+        "completeness": "findings"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "astral-sh/ruff",
+      "sha": "4188373bdd5e3d0b05bbe254f98fd763b37519d6",
+      "discovery_ms": 7432,
+      "types": [
+        "ai-context",
+        "cli",
+        "container",
+        "frontend",
+        "library",
+        "open-source",
+        "web-app"
+      ],
+      "components": 105,
+      "lifecycle": "library-framework",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 3669,
+          "files_read": 6,
+          "bytes_read": 12394,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "e758c42a3b9d0a388996beb8334c9a1659b31dc379291117434121f4ba82072a"
+        },
+        "testing": {
+          "files_considered": 3669,
+          "files_read": 11,
+          "bytes_read": 21996,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "5bb6f4c8769f5a65efae9d4ab6803540281515c426b4655016d13b68382c1424"
+        },
+        "security": {
+          "files_considered": 3669,
+          "files_read": 18,
+          "bytes_read": 28811,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 7,
+          "context_characters": 7998,
+          "sha256": "ed36167652869933227cb410460a5b83d3210d33775a8ba5519bea19b3502ccd"
+        },
+        "api-data-config": {
+          "files_considered": 3669,
+          "files_read": 25,
+          "bytes_read": 68917,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 7,
+          "context_characters": 7998,
+          "sha256": "91133d75c8a340b24fe0c9835e043cea962af70445416f8d293fd0b6c7890817"
+        },
+        "operations": {
+          "files_considered": 3669,
+          "files_read": 30,
+          "bytes_read": 128185,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "e2a1e26128b6c545a3f282fa3805aec4657b89768c64ba8053a226c59c54b02b"
+        },
+        "documentation": {
+          "files_considered": 3669,
+          "files_read": 33,
+          "bytes_read": 154478,
+          "files_included": 4,
+          "unique_snippets": 4,
+          "new_files_read": 3,
+          "context_characters": 7846,
+          "sha256": "083c915b85b0d075922a4106c303f4aad285724f67a471fc6f3c295150b162ed"
+        }
+      },
+      "findings": 108,
+      "duration_ms": 160680,
+      "statuses": {
+        "ai-context": "partial",
+        "identity": "passed",
+        "repository": "findings",
+        "code-quality": "partial",
+        "code-design": "partial",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "documentation": "partial",
+        "completeness": "findings",
+        "architecture": "partial",
+        "api-data-config": "partial",
+        "ci-cd": "partial",
+        "reliability": "partial",
+        "containers": "partial"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "pallets/flask",
+      "sha": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+      "discovery_ms": 381,
+      "types": [
+        "cli",
+        "library",
+        "open-source"
+      ],
+      "components": 4,
+      "lifecycle": "library-framework",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 236,
+          "files_read": 5,
+          "bytes_read": 14518,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "f5fce7a45c07f99d217273b8d32282a21faf60450f0484ccbc80595409130132"
+        },
+        "testing": {
+          "files_considered": 236,
+          "files_read": 10,
+          "bytes_read": 28243,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "68ed7ffb0f2be1b5c93babf22ed06681fe3a1f760e8036d71d8b2a762a6ee83f"
+        },
+        "security": {
+          "files_considered": 236,
+          "files_read": 12,
+          "bytes_read": 31461,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 2,
+          "context_characters": 7998,
+          "sha256": "8f0dc2853e0b7836f1fd8cbaa72f364e8b3cd0becca32dbb97f4c1828ccdc74c"
+        },
+        "api-data-config": {
+          "files_considered": 236,
+          "files_read": 15,
+          "bytes_read": 54943,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 3,
+          "context_characters": 7998,
+          "sha256": "adb7e4de12682073c30d0664ee5027c2563a37c58c129fec95a7d770cf3c5b7f"
+        },
+        "operations": {
+          "files_considered": 236,
+          "files_read": 19,
+          "bytes_read": 64223,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "ac3e0eef09b00f1086b9d2305c30020a8bdd88020f62b2f15ce8c6938021d269"
+        },
+        "documentation": {
+          "files_considered": 236,
+          "files_read": 22,
+          "bytes_read": 68788,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 3,
+          "context_characters": 7998,
+          "sha256": "8565f7c67ed3a5b79cf0b4fb9566f89d7ca91b4bfcb602a09f104b4b90a4b5ee"
+        }
+      },
+      "findings": 19,
+      "duration_ms": 29842,
+      "statuses": {
+        "identity": "passed",
+        "repository": "findings",
+        "code-quality": "partial",
+        "code-design": "partial",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "documentation": "partial",
+        "completeness": "findings",
+        "architecture": "partial",
+        "ci-cd": "partial",
+        "reliability": "not_applicable"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "open-webui/open-webui",
+      "sha": "0a7c15832fb30b1903753e83f81dc7d27e5b0944",
+      "discovery_ms": 5260,
+      "types": [
+        "ai-app",
+        "api",
+        "backend-service",
+        "cli",
+        "container",
+        "frontend",
+        "full-stack",
+        "open-source",
+        "web-app"
+      ],
+      "components": 2,
+      "lifecycle": "active-application",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 5053,
+          "files_read": 7,
+          "bytes_read": 126587,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 7,
+          "context_characters": 7998,
+          "sha256": "bb0753d8979e83c3bbffa49477a63f65793e7caa099d9de0f5cc9824663be460"
+        },
+        "testing": {
+          "files_considered": 5053,
+          "files_read": 11,
+          "bytes_read": 141972,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "8a4253601238d767cdb17ccad832622f3518f0c7ffb7544403a344b2b9439db4"
+        },
+        "security": {
+          "files_considered": 5053,
+          "files_read": 15,
+          "bytes_read": 173836,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "fba54b76b09dfd1870bf3fdc5bf832041539ec14ffc25e1e51d344df920ba836"
+        },
+        "api-data-config": {
+          "files_considered": 5053,
+          "files_read": 20,
+          "bytes_read": 303968,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 5,
+          "context_characters": 7998,
+          "sha256": "c9f198ca428e6ce3d5427005f595ab4f114b275eb324f0d7c1e4a48bd95ee1b4"
+        },
+        "operations": {
+          "files_considered": 5053,
+          "files_read": 23,
+          "bytes_read": 310184,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 3,
+          "context_characters": 7998,
+          "sha256": "0fbfe0dadeb7f26905a8bb2f45acb6cb06e99bb300f3f21bf11e5de9eb986c07"
+        },
+        "documentation": {
+          "files_considered": 5053,
+          "files_read": 27,
+          "bytes_read": 329409,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 4,
+          "context_characters": 7920,
+          "sha256": "f4e1e482edae2b2e4074ac7fc77772d661bb03b58f28ab91e75ddca87df765d5"
+        }
+      },
+      "findings": 2781,
+      "duration_ms": 174644,
+      "statuses": {
+        "identity": "passed",
+        "repository": "findings",
+        "code-quality": "partial",
+        "code-design": "partial",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "documentation": "partial",
+        "completeness": "passed",
+        "architecture": "partial",
+        "api-data-config": "partial",
+        "ci-cd": "partial",
+        "reliability": "partial",
+        "operations": "partial",
+        "ai-context": "partial",
+        "containers": "partial"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "facebook/create-react-app",
+      "sha": "6254386531d263688ccfa542d0e628fbc0de0b28",
+      "discovery_ms": 512,
+      "types": [
+        "cli",
+        "frontend",
+        "library",
+        "open-source",
+        "template-generator",
+        "web-app"
+      ],
+      "components": 26,
+      "lifecycle": "deprecated-maintenance",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 316,
+          "files_read": 4,
+          "bytes_read": 9981,
+          "files_included": 4,
+          "unique_snippets": 4,
+          "new_files_read": 4,
+          "context_characters": 7929,
+          "sha256": "fa5d5db8b7c3ac08d7a0a7984f1294df99ecad96379a29ddff8266c4242582a4"
+        },
+        "testing": {
+          "files_considered": 316,
+          "files_read": 10,
+          "bytes_read": 17908,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "2f597ea128fa20224017fba42441ed03338e6952250b79341fb0c466e84a683b"
+        },
+        "security": {
+          "files_considered": 316,
+          "files_read": 17,
+          "bytes_read": 28686,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 7,
+          "context_characters": 7998,
+          "sha256": "c722e11fdfb5ea9ccd7ff10dc5b6428fb8ec0e6d5b17273ae934d136ac691913"
+        },
+        "api-data-config": {
+          "files_considered": 316,
+          "files_read": 21,
+          "bytes_read": 41048,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "aabec9f247b3bc6eff5603cbc775520fbdfcc83e62ddc2dd31778c176d328dd2"
+        },
+        "operations": {
+          "files_considered": 316,
+          "files_read": 25,
+          "bytes_read": 70068,
+          "files_included": 5,
+          "unique_snippets": 5,
+          "new_files_read": 4,
+          "context_characters": 7998,
+          "sha256": "a421db72bd80541d1e7280fb4c7b0693a0b6cac4226645aec54b7d287218c2dd"
+        },
+        "documentation": {
+          "files_considered": 316,
+          "files_read": 29,
+          "bytes_read": 89525,
+          "files_included": 4,
+          "unique_snippets": 4,
+          "new_files_read": 4,
+          "context_characters": 7867,
+          "sha256": "d405ebb3e98fe9c674f2e1f313b11cb3c28cfa2dc63c65c2129234b7300eaaff"
+        }
+      },
+      "findings": 308,
+      "duration_ms": 67131,
+      "statuses": {
+        "identity": "passed",
+        "repository": "findings",
+        "code-quality": "partial",
+        "code-design": "partial",
+        "security": "partial",
+        "supply-chain": "partial",
+        "testing": "partial",
+        "documentation": "partial",
+        "completeness": "passed",
+        "architecture": "partial",
+        "ci-cd": "partial",
+        "api-data-config": "not_applicable",
+        "reliability": "not_applicable"
+      },
+      "unchanged": true
+    },
+    {
+      "repo": "sindresorhus/awesome",
+      "sha": "bc98e517ddca672f55f9857d714fc3ea3c3540b2",
+      "discovery_ms": 234,
+      "types": [
+        "documentation-project",
+        "open-source"
+      ],
+      "components": 1,
+      "lifecycle": "documentation-project",
+      "diagnostics": [],
+      "contexts": {
+        "architecture": {
+          "files_considered": 23,
+          "files_read": 6,
+          "bytes_read": 97661,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 6,
+          "context_characters": 7998,
+          "sha256": "ffd3f068c1f24ee35d07fc323ae0c40133f921af0c5284858dc8eb878723bed8"
+        },
+        "testing": {
+          "files_considered": 23,
+          "files_read": 6,
+          "bytes_read": 97661,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "33d2bbb1ff28127d47dd8b008761e453a7d37b966293c2b1b6ec8326422e2251"
+        },
+        "security": {
+          "files_considered": 23,
+          "files_read": 7,
+          "bytes_read": 97933,
+          "files_included": 7,
+          "unique_snippets": 7,
+          "new_files_read": 1,
+          "context_characters": 7998,
+          "sha256": "e2237adcb328889fe0bbe592e7ef34c0924f14e4802ea979d9ab39d204071f0b"
+        },
+        "api-data-config": {
+          "files_considered": 23,
+          "files_read": 7,
+          "bytes_read": 97933,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "3596bfa6b5c92c6f2bca772f9980ad74ddaf1940a2526ededff316a201f3aed8"
+        },
+        "operations": {
+          "files_considered": 23,
+          "files_read": 7,
+          "bytes_read": 97933,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "7b46eb3f4a96e4cf1bb4cbed2474f3288b54f92ab0831ba1c1bbf544ace65217"
+        },
+        "documentation": {
+          "files_considered": 23,
+          "files_read": 7,
+          "bytes_read": 97933,
+          "files_included": 6,
+          "unique_snippets": 6,
+          "new_files_read": 0,
+          "context_characters": 7998,
+          "sha256": "da1971cc6b248bd23656e6cf2fab17aa48ea0bc0a6fbba73cc307cfa92f13316"
+        }
+      },
+      "findings": 4,
+      "duration_ms": 31363,
+      "statuses": {
+        "repository": "findings",
+        "security": "partial",
+        "ci-cd": "partial",
+        "documentation": "partial"
+      },
+      "unchanged": true
+    }
+  ],
+  "genesis": [
+    {
+      "kind": "repository",
+      "status": "verified",
+      "duration_ms": 427,
+      "operations": 1,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "python-library",
+      "status": "verified",
+      "duration_ms": 67129,
+      "operations": 10,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "python-cli",
+      "status": "verified",
+      "duration_ms": 64172,
+      "operations": 10,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "python-api",
+      "status": "verified",
+      "duration_ms": 74977,
+      "operations": 11,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "typescript-library",
+      "status": "verified",
+      "duration_ms": 48139,
+      "operations": 7,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "typescript-cli",
+      "status": "verified",
+      "duration_ms": 68016,
+      "operations": 7,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "node-api",
+      "status": "verified",
+      "duration_ms": 85165,
+      "operations": 8,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "react",
+      "status": "verified",
+      "duration_ms": 80163,
+      "operations": 7,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "full-stack",
+      "status": "verified",
+      "duration_ms": 201438,
+      "operations": 18,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "openapi",
+      "status": "verified",
+      "duration_ms": 424,
+      "operations": 2,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    }
+  ],
+  "addons": [
+    {
+      "kind": "repository",
+      "status": "verified",
+      "duration_ms": 477,
+      "operations": 1,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "python-api-addons",
+      "status": "verified",
+      "duration_ms": 180676,
+      "operations": 13,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    },
+    {
+      "kind": "node-full-stack-addons",
+      "status": "verified",
+      "duration_ms": 187037,
+      "operations": 17,
+      "detail": "generated-project verifiers completed; review assurance is reported separately"
+    }
+  ],
+  "runtime_smoke": [
+    {
+      "kind": "python-api-addons",
+      "image": "sha256:baa22dac4e2430bf046569120f62e50426e213e76fca1612255db2c21ae63e63",
+      "user": "10001",
+      "health": "healthy",
+      "network": "none",
+      "filesystem": "read-only"
+    },
+    {
+      "kind": "node-full-stack-addons",
+      "image": "sha256:8ff717ccf92d97cc00c7d6970fbdb807c3d4028b91b81c78fcb11ef809a2b5fb",
+      "user": "node",
+      "health": "healthy",
+      "network": "none",
+      "filesystem": "read-only"
+    }
+  ],
+  "model_budget": {
+    "live_model_calls": 0,
+    "simulated_calls": 2,
+    "configured_context_token_budget": 12000,
+    "request_context_characters": [
+      19198,
+      19198
+    ],
+    "estimated_context_input_tokens": 9600,
+    "max_output_tokens": [
+      1200,
+      1200
+    ],
+    "skipped_due_to_call_cap": 4,
+    "metrics": [
+      {
+        "provider": "deterministic-meter",
+        "model": "no-live-model",
+        "cache": "miss",
+        "context_characters": 19198,
+        "context_sha256": "c254dbec400d241ea840a2accb9a27350b62665a29afbb3bade495e579b62219",
+        "estimated_input_tokens": 4800,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cost_usd": null,
+        "prompt_version": "phase5-review-v1",
+        "reason": "deterministic evidence could not fully evaluate this blueprint",
+        "files_considered": 5053,
+        "files_read": 10,
+        "bytes_read": 229968,
+        "files_included": 10,
+        "unique_snippets": 10,
+        "new_files_read": 10
+      },
+      {
+        "provider": "deterministic-meter",
+        "model": "no-live-model",
+        "cache": "miss",
+        "context_characters": 19198,
+        "context_sha256": "11deaa2a72b4bb44df0849383b0c625b99cdd1eedeae8cd1d9e3e61205432c85",
+        "estimated_input_tokens": 4800,
+        "input_tokens": null,
+        "output_tokens": null,
+        "cost_usd": null,
+        "prompt_version": "phase5-review-v1",
+        "reason": "deterministic evidence could not fully evaluate this blueprint",
+        "files_considered": 5053,
+        "files_read": 18,
+        "bytes_read": 253445,
+        "files_included": 9,
+        "unique_snippets": 9,
+        "new_files_read": 8
+      }
+    ]
+  },
+  "unit_coverage": {
+    "covered_lines": 3473,
+    "num_statements": 4378,
+    "percent_covered": 79.32846048423937,
+    "percent_covered_display": "79",
+    "missing_lines": 905,
+    "excluded_lines": 16,
+    "percent_statements_covered": 79.32846048423937,
+    "percent_statements_covered_display": "79"
+  },
+  "self_review": {
+    "metadata": {
+      "analyzer_commit": "b3c5fc673a0741bdeec29eedc13b3485c564ad02",
+      "analyzer_source_sha256": "99d42b2b8924c90fc6fa07f12d9e4fe531790c82e2585517b1921dab8916ec88",
+      "blueprint_ai_version": "0.5.0",
+      "config_sha256": "b989f3a9126f17a4787a0342bedd12f373073756b947e87bac77141baafd3571",
+      "duration_ms": 102542,
+      "finished_at": "2026-09-12T05:56:57.380144Z",
+      "model_mode": "off",
+      "model_name": null,
+      "model_provider": null,
+      "offline": false,
+      "prompt_versions": {
+        "ai-context": "phase5-review-v1",
+        "architecture": "phase5-review-v1",
+        "ci-cd": "phase5-review-v1",
+        "code-design": "phase5-review-v1",
+        "documentation": "phase5-review-v1",
+        "security": "phase5-review-v1",
+        "supply-chain": "phase5-review-v1",
+        "testing": "phase5-review-v1"
+      },
+      "schema_version": "1.0.0",
+      "started_at": "2026-09-12T05:55:14.872663Z",
+      "tool_versions": {
+        "actionlint": "1.7.12",
+        "gitleaks": "gitleaks version 8.30.1",
+        "lychee": "lychee 0.24.2",
+        "markdownlint-cli2": null,
+        "mypy": "mypy 2.3.1 (compiled: no)",
+        "osv-scanner": "osv-scanner version: 2.5.1",
+        "pytest": "pytest 9.1.1",
+        "ruff": "ruff 0.16.7",
+        "trivy": "Version: 0.74.0",
+        "zizmor": "zizmor 1.30.1"
+      }
+    },
+    "findings": 8,
+    "tools": [
+      [
+        "ruff",
+        "passed"
+      ],
+      [
+        "mypy",
+        "passed"
+      ],
+      [
+        "pytest",
+        "passed"
+      ],
+      [
+        "gitleaks",
+        "passed"
+      ],
+      [
+        "osv-scanner",
+        "passed"
+      ],
+      [
+        "trivy",
+        "passed"
+      ],
+      [
+        "actionlint",
+        "passed"
+      ],
+      [
+        "zizmor",
+        "passed"
+      ],
+      [
+        "markdownlint-cli2",
+        "tool_missing"
+      ],
+      [
+        "lychee",
+        "passed"
+      ]
+    ]
+  },
+  "implementation_source": {
+    "analyzer_commit": "b3c5fc673a0741bdeec29eedc13b3485c564ad02",
+    "analyzer_source_sha256": "99d42b2b8924c90fc6fa07f12d9e4fe531790c82e2585517b1921dab8916ec88"
+  },
+  "private_link_test": {
+    "tool": "lychee 0.24.2",
+    "requests_to_temporary_loopback_listener": 0,
+    "outcome": "passed",
+    "metadata_address_live_test": "not_run; automatic approval review required a safer alternative"
+  },
+  "release_finalization": {
+    "date": "2026-09-12",
+    "tag": "0.5.0",
+    "implementation_commit": "fd30f8004678ad0e9b50b646bd50dcf1f4f49a09",
+    "release_fixes_commit": "0793e15b76b888f77616ec12768de6c22912c9d6",
+    "analyzer_source_sha256": "a7623c451aa52f8f64974c69b03e21f596dd10773a73de5882b5acd9d46e0e84",
+    "main_base": "b3c5fc673a0741bdeec29eedc13b3485c564ad02",
+    "tests": 160,
+    "coverage": {
+      "covered_lines": 3506,
+      "num_statements": 4394,
+      "percent_covered": 79.79062357760583,
+      "percent_covered_display": "80",
+      "missing_lines": 888,
+      "excluded_lines": 16,
+      "percent_statements_covered": 79.79062357760583,
+      "percent_statements_covered_display": "80"
+    },
+    "deprecations_as_errors": true,
+    "genesis_matrix": [
+      {
+        "kind": "repository",
+        "status": "verified",
+        "duration_ms": 611,
+        "operations": 1,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-library",
+        "status": "verified",
+        "duration_ms": 72668,
+        "operations": 10,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-cli",
+        "status": "verified",
+        "duration_ms": 72279,
+        "operations": 10,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-api",
+        "status": "verified",
+        "duration_ms": 37781,
+        "operations": 11,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "typescript-library",
+        "status": "verified",
+        "duration_ms": 23821,
+        "operations": 7,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "typescript-cli",
+        "status": "verified",
+        "duration_ms": 47618,
+        "operations": 7,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "node-api",
+        "status": "verified",
+        "duration_ms": 67942,
+        "operations": 8,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "react",
+        "status": "verified",
+        "duration_ms": 60605,
+        "operations": 7,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "full-stack",
+        "status": "verified",
+        "duration_ms": 107769,
+        "operations": 18,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "openapi",
+        "status": "verified",
+        "duration_ms": 532,
+        "operations": 2,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-api-addons",
+        "status": "verified",
+        "duration_ms": 45977,
+        "operations": 13,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "node-full-stack-addons",
+        "status": "verified",
+        "duration_ms": 73461,
+        "operations": 17,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      }
+    ],
+    "service_runtime_checks": [
+      {
+        "case": "python-api-addons",
+        "image": "sha256:baa22dac4e2430bf046569120f62e50426e213e76fca1612255db2c21ae63e63",
+        "user": "10001",
+        "health": "200 {\"status\":\"ok\"}"
+      },
+      {
+        "case": "node-full-stack-addons",
+        "image": "sha256:8ff717ccf92d97cc00c7d6970fbdb807c3d4028b91b81c78fcb11ef809a2b5fb",
+        "user": "node",
+        "health": "200 {\"status\":\"ok\"}"
+      }
+    ],
+    "corpus": [
+      {
+        "repo": "fastapi/full-stack-fastapi-template",
+        "sha": "cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7",
+        "findings": 21,
+        "unchanged": true,
+        "components": 4,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "open-telemetry/opentelemetry-demo",
+        "sha": "9bfe486ff48ee8a6ea942be74171342cb71a9327",
+        "findings": 205,
+        "unchanged": true,
+        "components": 20,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "terraform-aws-modules/terraform-aws-vpc",
+        "sha": "cf0e3ca46fd51f47bf095957f2a6ac6127c89045",
+        "findings": 37,
+        "unchanged": true,
+        "components": 19,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "isovalent/terraform-aws-vpc",
+        "sha": "2bb6b130d0d884808fce9590a5a6c47dd931596d",
+        "findings": 11,
+        "unchanged": true,
+        "components": 1,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "astral-sh/ruff",
+        "sha": "4188373bdd5e3d0b05bbe254f98fd763b37519d6",
+        "findings": 108,
+        "unchanged": true,
+        "components": 105,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "pallets/flask",
+        "sha": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+        "findings": 19,
+        "unchanged": true,
+        "components": 4,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "open-webui/open-webui",
+        "sha": "0a7c15832fb30b1903753e83f81dc7d27e5b0944",
+        "findings": 2781,
+        "unchanged": true,
+        "components": 2,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "facebook/create-react-app",
+        "sha": "6254386531d263688ccfa542d0e628fbc0de0b28",
+        "findings": 308,
+        "unchanged": true,
+        "components": 26,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "sindresorhus/awesome",
+        "sha": "bc98e517ddca672f55f9857d714fc3ea3c3540b2",
+        "findings": 4,
+        "unchanged": true,
+        "components": 1,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      }
+    ],
+    "context_count": 54,
+    "contexts_with_source": 54,
+    "context_hashes_unchanged_after_fixes": true,
+    "shared_context_file_reads": 203,
+    "live_model_calls": 0,
+    "benchmarks": [
+      {
+        "schema_version": 1,
+        "repeats": 3,
+        "file_count": 101,
+        "discovery_ms_median": 128.737,
+        "context_ms_median": 64.891,
+        "peak_memory_bytes": 2162044,
+        "files_considered": 101,
+        "files_read": 24,
+        "bytes_read": 720,
+        "estimated_model_input_tokens": 1035,
+        "model_calls": 0,
+        "cache_hit_rate": null,
+        "findings_count": null
+      },
+      {
+        "schema_version": 1,
+        "repeats": 3,
+        "file_count": 1001,
+        "discovery_ms_median": 848.773,
+        "context_ms_median": 494.269,
+        "peak_memory_bytes": 3445263,
+        "files_considered": 1001,
+        "files_read": 24,
+        "bytes_read": 768,
+        "estimated_model_input_tokens": 1048,
+        "model_calls": 0,
+        "cache_hit_rate": null,
+        "findings_count": null
+      },
+      {
+        "schema_version": 1,
+        "repeats": 3,
+        "file_count": 5001,
+        "discovery_ms_median": 4363.521,
+        "context_ms_median": 2771.998,
+        "peak_memory_bytes": 9475271,
+        "files_considered": 5001,
+        "files_read": 24,
+        "bytes_read": 816,
+        "estimated_model_input_tokens": 1060,
+        "model_calls": 0,
+        "cache_hit_rate": null,
+        "findings_count": null
+      }
+    ],
+    "secret_scan_exception": {
+      "fingerprint": "fd30f8004678ad0e9b50b646bd50dcf1f4f49a09:benchmarks/corpus.py:generic-api-key:23",
+      "reason": "Verified public Git commit ID, not a credential; historical occurrence only."
+    },
+    "classification": "Ready for documented local review and genesis scope; no production or live-model certification.",
+    "self_review": {
+      "priorities": {
+        "P3": 9
+      },
+      "duration_ms": 118108,
+      "tools": {
+        "ruff": "passed",
+        "mypy": "passed",
+        "pytest": "passed",
+        "gitleaks": "passed",
+        "osv-scanner": "passed",
+        "trivy": "passed",
+        "actionlint": "passed",
+        "zizmor": "passed",
+        "markdownlint-cli2": "tool_missing",
+        "lychee": "passed"
+      },
+      "model_mode": "off"
+    },
+    "fresh_wheel": {
+      "version": "0.5.0",
+      "source_sha256": "a7623c451aa52f8f64974c69b03e21f596dd10773a73de5882b5acd9d46e0e84",
+      "isolated_install": "passed",
+      "cli_help_version_doctor_inspect_schemas": "passed",
+      "openapi_genesis": "verified",
+      "no_model_review": "passed"
+    }
+  }
+}

@@ -185,10 +185,10 @@ def test_tool_output_is_bounded_and_terminal_controls_are_removed(tmp_path: Path
     adapter.max_output_bytes = 16_384
     status, findings, error = adapter.run(tmp_path, timeout=2)
     assert status.output_truncated
-    assert status.outcome == "finding"
-    assert error is None
-    assert "\x1b" not in findings[0].message
-    assert len(findings[0].message) <= 1_000
+    assert status.outcome == "tool_error"
+    assert status.analysis_state == "truncated"
+    assert error is not None
+    assert not findings
 
 
 def test_crashing_parser_degrades_to_tool_error(tmp_path: Path) -> None:
@@ -261,12 +261,13 @@ def test_per_run_model_call_budget_is_enforced(tmp_path: Path) -> None:
     provider = CountingProvider()
     context, _ = make_context(
         tmp_path,
-        blueprints=["identity", "code-design", "documentation"],
+        blueprints=["architecture", "code-design", "documentation"],
         model_mode="on",
     )
     report = review(context, provider)
     assert provider.calls == 1
     assert sum("call budget" in note for result in report.results for note in result.notes) == 2
+    assert all(result.status == "partial" for result in report.results[1:])
 
 
 def test_corrupt_cache_is_invalidated_and_replaced(tmp_path: Path) -> None:

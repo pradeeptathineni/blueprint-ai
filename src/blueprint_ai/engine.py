@@ -3,6 +3,7 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -19,12 +20,22 @@ from blueprint_ai.core.priority import ORDER, deduplicate
 from blueprint_ai.discovery import discover_project
 from blueprint_ai.extensions import load_custom_blueprints
 from blueprint_ai.model import CachedModelReviewer, ModelProvider, provider_from_environment
+from blueprint_ai.model.context import ContextBuilder
 from blueprint_ai.model.reviewer import PROMPT_VERSION
-from blueprint_ai.safety import MAX_MANIFEST_BYTES, atomic_write_text, read_text_bounded
+from blueprint_ai.safety import (
+    MAX_MANIFEST_BYTES,
+    atomic_write_text,
+    read_text_bounded,
+    run_process,
+)
 
 
 def detect_profiles(project_types: list[str]) -> list[str]:
     preferred = (
+        "api-contract",
+        "documentation-project",
+        "template-generator",
+        "ai-context",
         "full-stack",
         "web-app",
         "frontend",
@@ -110,7 +121,9 @@ def make_context(
         changed_only=changed_only,
         base_ref=base_ref,
         config=settings.model_dump(mode="json"),
-        cache_dir=root / settings.output_path,
+        cache_dir=Path(tempfile.gettempdir())
+        / "blueprint-ai-cache"
+        / hashlib.sha256(str(root).encode()).hexdigest()[:20],
         trust_project_executables=trust_project_executables,
     )
     return context, settings
@@ -245,7 +258,38 @@ def _collect_tool_results(
 def _finalize_findings(
     findings: list[Finding], context: RunContext, facts, baseline: set[str], settings: Settings
 ) -> list[Finding]:
-    findings = deduplicate(findings, facts.project_types)
+    scoped = []
+    for item in findings:
+        if item.file:
+            item.scope = facts.graph.scope(item.file)
+            owner = facts.graph.owner(item.file)
+            item.component = owner.id if owner else None
+            item.locations = sorted(set(item.locations + [item.file]))
+            if item.scope in {"remote-module", "vendor"}:
+                # External dependency code is not a locally owned resource defect.
+                if item.category == "misconfiguration":
+                    continue
+            if item.blueprint in {"code-quality", "code-design"} and item.scope in {
+                "fixture",
+                "generated",
+                "migration",
+                "vendor",
+            }:
+                continue
+            if (
+                item.category == "misconfiguration"
+                and item.scope in {"build-image", "test-image", "development"}
+                and (item.rule_id or "").replace("-", "") in {"DS002", "DS026", "DS0002", "DS0026"}
+            ):
+                continue
+            if item.blueprint == "iac" and owner and "reusable-iac-module" in owner.roles:
+                item.tool_metadata["requires_caller_context"] = True
+                item.evidence.append(
+                    "Reusable module: assess caller inputs and resource conditions "
+                    "before treating this as a deployment defect."
+                )
+        scoped.append(item)
+    findings = deduplicate(scoped, facts.project_types)
     if context.changed_only and facts.changed_files:
         changed = set(facts.changed_files)
         findings = [item for item in findings if item.file is None or item.file in changed]
@@ -271,13 +315,14 @@ def _run_model_review(
     notes: list[str],
     default_budget: int,
     model_calls: int,
+    builder: ContextBuilder,
 ) -> tuple[dict[str, int | float | str | None], int, int, int]:
     if settings.offline:
         notes.append("model review disabled by offline mode")
-        return {}, 0, 0, model_calls
+        return {}, 1, 0, model_calls
     if model_calls >= settings.model_max_calls:
         notes.append("model review skipped because the per-run call budget was exhausted")
-        return {}, 0, 0, model_calls
+        return {}, 1, 0, model_calls
     if not provider:
         if context.model_mode == "on":
             notes.append("model requested but no configured provider is available")
@@ -286,9 +331,10 @@ def _run_model_review(
     reviewer = CachedModelReviewer(
         provider,
         context.cache_dir or context.root / ".blueprint-ai",
-        settings.blueprint_model_budgets.get(name, default_budget),
+        min(settings.blueprint_model_budgets.get(name, default_budget), default_budget),
         changed_files=facts.changed_files if context.changed_only else None,
         cache_mode=settings.model_cache,
+        builder=builder,
     )
     try:
         findings.extend(reviewer.review(context.root, name, facts, findings))
@@ -324,7 +370,9 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
         for name in context.selected_blueprints
         if catalog[name].model_review and catalog[name].applicability(facts)
     ]
-    default_budget = max(context.model_budget // max(len(model_names), 1), 256)
+    allocated_calls = max(1, min(len(model_names), settings.model_max_calls))
+    default_budget = max((context.model_budget * 4 // 5) // allocated_calls, 64)
+    builder = ContextBuilder(context.root, default_budget, settings.ignores, facts.changed_files)
     baseline = _load_baseline(context.root, settings)
     results = []
     model_calls = 0
@@ -358,6 +406,12 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
             )
             missing += 1
         model_metrics: dict[str, int | float | str | None] = {}
+        if definition.model_review and (context.model_mode == "off" or provider is None):
+            missing = max(missing, 1)
+            if not notes:
+                notes.append(
+                    "Deterministic checks completed; semantic concern review was not performed."
+                )
         if definition.model_review and context.model_mode != "off":
             model_metrics, model_missing, model_errors, model_calls = _run_model_review(
                 context,
@@ -369,9 +423,17 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
                 notes,
                 default_budget,
                 model_calls,
+                builder,
             )
             missing += model_missing
             errors += model_errors
+        if not tools and definition.check.__name__ == "no_builtin_checks" and not model_metrics:
+            missing = max(missing, 1)
+            if not notes:
+                notes.append("No applicable analyzer completed this concern.")
+        if facts.graph.diagnostics:
+            missing = max(missing, 1)
+            notes.append("Project inventory is partial; see graph diagnostics.")
         findings = _finalize_findings(findings, context, facts, baseline, settings)
         active = [item for item in findings if item.disposition == "new"]
         if errors or missing or assessment.state == "partial":
@@ -387,6 +449,8 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
                 notes=notes,
                 applicability=assessment,
                 model_metrics=model_metrics,
+                assessment="partial" if status_name == "partial" else "assessed",
+                checks_passed=[t.name for t in tools if t.outcome == "passed"],
             )
         )
     finished_at = datetime.now(UTC)
@@ -400,6 +464,7 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
         results=results,
         metadata=RunMetadata(
             blueprint_ai_version=__version__,
+            **analyzer_identity(),
             config_sha256=config_hash,
             started_at=started_at,
             finished_at=finished_at,
@@ -432,3 +497,17 @@ def write_baseline(report: RunReport, path: Path) -> None:
         json.dumps(payload, indent=2) + "\n",
         root=Path(report.facts.path),
     )
+
+
+def analyzer_identity() -> dict[str, Any]:
+    source = Path(__file__).parent
+    digest = hashlib.sha256()
+    for file in sorted(source.rglob("*.py")):
+        digest.update(file.relative_to(source).as_posix().encode())
+        digest.update(file.read_bytes())
+    commit = None
+    if (source.parent.parent / ".git").exists():
+        result = run_process(["git", "rev-parse", "HEAD"], source.parent.parent, 3)
+        if result.returncode == 0:
+            commit = result.stdout.strip()
+    return {"analyzer_commit": commit, "analyzer_source_sha256": digest.hexdigest()}
