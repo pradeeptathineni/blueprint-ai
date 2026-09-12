@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.1 — 2026-09-12
+
+- Honor canonical tool-registry container executables during managed evolution while preserving
+  explicit trusted-host resolution and fail-closed execution.
+- Compose Ruff pyupgrade with bounded safe import cleanup, complete staged previews, idempotency,
+  normal review-gate enforcement, and exact rollback for package initializers.
+- Canonicalize Next.js framework identity so Next projects receive the existing manual candidate
+  without promoting React-only, incidental-text, or fixture evidence.
+- Parse owned Cargo editions and SDK-style .NET target frameworks before offering version-specific
+  candidates, eliminating misleading Rust 2024 and net10.0 claims.
+- Distinguish an independently executable ready prefix from later manual work and report such applies
+  as partial without weakening dependency ordering.
+
 ## 0.7.0 — 2026-09-12
 
 - Add strict desired-state evolution catalog, plan, report, CLI, candidate inspection, provenance,

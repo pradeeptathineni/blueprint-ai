@@ -21,7 +21,7 @@ After PyPI publication, use `pipx install blueprint-ai-cli` or
 tool before registry publication:
 
 ```bash
-pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.7.0/blueprint_ai_cli-0.7.0-py3-none-any.whl
+pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.7.1/blueprint_ai_cli-0.7.1-py3-none-any.whl
 ```
 
 For development, run `uv sync --extra dev --locked`.
@@ -79,7 +79,7 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
 - [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
 - [Testing, threat model, and release gate](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/releasing.md): verification and release operations.
-- [0.7.0 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.7.0.md): transformation, corpus, dogfood, distribution, and release evidence.
+- [0.7.1 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.7.1.md): correctness-patch, corpus, distribution, and release evidence.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or

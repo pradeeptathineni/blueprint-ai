@@ -19,7 +19,7 @@ from blueprint_ai.core import Finding, ToolStatus
 from blueprint_ai.core.models import FileRange, Priority, Severity
 from blueprint_ai.safety import MAX_TOOL_OUTPUT_BYTES, controlled_env, run_process, sanitize_label
 from blueprint_ai.sandbox import SandboxPolicy, SandboxUnavailable, execute, resolve_backend
-from blueprint_ai.support import TOOLS
+from blueprint_ai.support import TOOLS, backend_executable
 from blueprint_ai.tooling import cached_image
 
 _TRIVY_LOCK = threading.Lock()
@@ -152,7 +152,6 @@ class ToolAdapter(ABC):
                     raise SandboxUnavailable(
                         f"{tool_id}: sandbox image unavailable; see tools plan {tool_id}"
                     )
-                spec = TOOLS.get(tool_id)
                 executable = getattr(self, "executable", self.name)
                 if Path(executable).is_absolute():
                     try:
@@ -161,8 +160,7 @@ class ToolAdapter(ABC):
                         )
                     except ValueError:
                         executable = Path(executable).name
-                if not policy.image and spec and spec.container_executable:
-                    executable = spec.container_executable
+                executable = backend_executable(tool_id, executable, backend)
                 sandbox_command = [executable, *getattr(self, "args", [])]
                 policy = SandboxPolicy.model_validate(
                     {**policy.model_dump(), "backend": backend, "image": image}
@@ -174,7 +172,7 @@ class ToolAdapter(ABC):
                     requires_project_trust=getattr(self, "executes_project_code", False),
                     recommended_version=getattr(self, "recommended_version", None),
                 )
-        except (SandboxUnavailable, OSError) as exc:
+        except (SandboxUnavailable, OSError, ValueError) as exc:
             status = ToolStatus(
                 name=self.name,
                 available=False,

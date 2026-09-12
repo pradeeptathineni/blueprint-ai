@@ -33,6 +33,7 @@ class InspectionCase:
     name: str
     files: dict[str, str]
     expected_candidates: set[str]
+    unexpected_candidates: set[str] | None = None
 
 
 CASES = (
@@ -42,10 +43,10 @@ CASES = (
             "pyproject.toml": (
                 '[project]\nname = "phase7-python"\nversion = "0.1.0"\nrequires-python = ">=3.12"\n'
             ),
-            "src/example.py": (
-                "from typing import List\n\n"
-                "def identity(values: List[int]) -> List[int]:\n"
-                "    return values\n"
+            "src/modernize_me/__init__.py": (
+                "from typing import List, Optional\n\n\n"
+                "def first(values: List[int]) -> Optional[int]:\n"
+                "    return values[0] if values else None\n"
             ),
         },
         "ruff",
@@ -149,6 +150,49 @@ INSPECTION_CASES = (
         {"dotnet/modernization-agent"},
     ),
     InspectionCase(
+        "next14-app",
+        {
+            "package.json": (
+                '{"name":"next14-app","dependencies":{"next":"14.2.0","react":"18.2.0"}}\n'
+            ),
+            "app/page.tsx": "export default function Page() { return <main />; }\n",
+        },
+        {"next/official-upgrade-codemod"},
+    ),
+    InspectionCase(
+        "react-only",
+        {
+            "package.json": '{"name":"react-only","dependencies":{"react":"18.2.0"}}\n',
+            "README.md": "This React project contains incidental Next.js prose.\n",
+        },
+        {"react/19-official-codemods"},
+        {"next/official-upgrade-codemod"},
+    ),
+    InspectionCase(
+        "rust-current",
+        {
+            "Cargo.toml": (
+                '[package]\nname = "current-rust"\nversion = "0.1.0"\nedition = "2024"\n'
+            ),
+            "src/lib.rs": "pub fn answer() -> u8 { 42 }\n",
+        },
+        set(),
+        {"rust/edition"},
+    ),
+    InspectionCase(
+        "dotnet-current",
+        {
+            "current.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                "<TargetFramework>net10.0</TargetFramework>"
+                "</PropertyGroup></Project>\n"
+            ),
+            "Program.cs": 'System.Console.WriteLine("current");\n',
+        },
+        set(),
+        {"dotnet/modernization-agent"},
+    ),
+    InspectionCase(
         "kubernetes-api",
         {
             "deploy.yaml": (
@@ -204,14 +248,20 @@ def _inspect_fixture(parent: Path, index: int, case: InspectionCase) -> dict:
     baseline = project_fingerprint(root)
     plan = plan_evolution(root)
     missing = case.expected_candidates - set(plan.candidates)
+    unexpected = set(case.unexpected_candidates or ()) & set(plan.candidates)
     if plan.status != "inspection" or plan.steps or project_fingerprint(root) != baseline:
         raise AssertionError(f"{case.name}: inspection planning mutated or selected work")
     if missing:
         raise AssertionError(f"{case.name}: missing candidate(s): {', '.join(sorted(missing))}")
+    if unexpected:
+        raise AssertionError(
+            f"{case.name}: unexpected candidate(s): {', '.join(sorted(unexpected))}"
+        )
     return {
         "name": case.name,
         "status": "passed",
         "expected_candidates": sorted(case.expected_candidates),
+        "unexpected_candidates": sorted(case.unexpected_candidates or ()),
         "detected_candidates": plan.candidates,
         "read_only": True,
     }

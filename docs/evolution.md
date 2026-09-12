@@ -1,6 +1,6 @@
 # Project evolution
 
-Blueprint AI 0.7.0 adds one evolution workflow: inspect current state, seal an explicit desired-state
+Blueprint AI 0.7.1 provides one evolution workflow: inspect current state, seal an explicit desired-state
 plan, preview or apply ordered transformations, verify the result, then accept it or restore exact
 pre-evolution bytes. Planning never chooses an upgrade merely because one is newer.
 
@@ -41,7 +41,9 @@ blueprint-ai evolve apply plan.json ./project \
 
 Use `--sandbox docker --sandbox-image IMAGE --trust-project-executables` for an already-acquired
 image containing the selected tool. Blueprint AI does not pull migration tools or enable network
-access during apply. A tool-driven write without explicit trust and a writable target is rejected.
+access during apply. Managed execution uses the selected tool's canonical container executable;
+trusted host execution resolves the host executable independently. A tool-driven write without
+explicit trust and a writable target is rejected.
 
 ## Transaction and verification boundary
 
@@ -53,8 +55,9 @@ expand file scope.
 
 Before mutation, Blueprint AI checkpoints the bounded Git inventory and creates a disposable staged
 copy outside the worktree. Every built-in and native command changes only that copy first. Native
-commands use isolated caches, no network, bounded output and time, compatible-version checks, their
-own dry-run mechanism, an idempotency rerun, and declared project verification. The staged inventory
+commands use isolated caches, no network, bounded output and time, compatible-version checks, a
+native preview or complete deterministic pipeline applied only to the disposable stage, an
+idempotency rerun, and declared project verification. The staged inventory
 includes normally ignored tool output, so an unexpected cache/build/source write aborts publication.
 Built-ins parse their target structure and produce unified diffs. Only verified graph-selected bytes
 are published atomically back to the worktree with their file modes preserved. The final gate rejects
@@ -77,9 +80,11 @@ verifier that requires them must use its isolated cache/vendor inputs or will fa
 
 ## Supported boundary
 
-The supported 0.7.0 set is deliberately small:
+The supported 0.7.1 set is deliberately small:
 
-- Ruff stable `UP` fixes, isolated and bound to `project.requires-python`, for owned Python source.
+- Ruff stable `UP` fixes plus narrowly selected safe F401/I001 cleanup, isolated and bound to
+  `project.requires-python`, for owned Python source. Package initializer typing names are retained
+  as explicit exports because Ruff correctly treats their removal as unsafe.
 - Go 1.26+ `go fix` for selected package directories, followed by `go test ./...` with network off.
 - Terraform 1.6+ native formatting for owned native-syntax HCL files; no provider, backend, or state
   migration is implied.
@@ -92,7 +97,13 @@ The generated [support registry](support.md#evolution-transformations) is author
 supported, partial, experimental, and deferred entry and its limitation. Python requirements to uv,
 Java/OpenRewrite, React/Next codemods, Rust edition changes, Kubernetes conversion, generic ast-grep,
 Spring recipes, .NET modernization, and Terraform-to-OpenTofu are inspectable candidates but are not
-executable Blueprint-managed migrations in 0.7.0.
+executable Blueprint-managed migrations in 0.7.1. Rust and .NET candidates require exact manifest
+version evidence; current or unresolved controls do not receive an old-version claim. Next.js uses
+the canonical `next` framework identity.
+
+A plan with an independent ready prefix followed by manual work is `ready`; applying it executes the
+ready prefix and reports `partial`. Manual-only plans remain blocked, and a ready step ordered after
+an unresolved manual predecessor remains blocked.
 
 No `AgentBackend` is implemented. All executable residual work in this release is deterministic, so
 silently introducing a coding agent would add authority and token cost without improving coverage.

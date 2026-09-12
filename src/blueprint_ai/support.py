@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -247,6 +248,20 @@ TOOLS: dict[str, ToolSpec] = {
         ),
     ),
 }
+
+
+def backend_executable(tool_id: str, requested: str, backend: str) -> str:
+    """Resolve a command executable from the canonical backend contract."""
+    executable = requested
+    if backend != "host":
+        spec = TOOLS.get(tool_id.split(":", 1)[0])
+        if spec and spec.container_executable:
+            executable = spec.container_executable
+    if not executable or "\0" in executable or any(character.isspace() for character in executable):
+        raise ValueError(f"{tool_id}: invalid {backend} executable")
+    if backend != "host" and ".." in Path(executable).parts:
+        raise ValueError(f"{tool_id}: invalid {backend} executable")
+    return executable
 
 
 class Family(BaseModel):

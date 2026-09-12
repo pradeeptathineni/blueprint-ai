@@ -57,6 +57,7 @@ FRAMEWORKS = {
     "vitest",
     "jest",
 }
+FRAMEWORK_ALIASES = {"next.js": "next", "nextjs": "next"}
 AI = {
     "openai",
     "anthropic",
@@ -70,6 +71,12 @@ AI = {
 }
 AGENTS = {"openai-agents", "autogen-agentchat", "pyautogen", "crewai", "langgraph"}
 DATA = {"apache-airflow", "dagster", "prefect", "pyspark"}
+
+
+def canonical_framework_id(value: str) -> str:
+    """Return the stable project-graph identity for a framework name."""
+    normalized = value.strip().lower()
+    return FRAMEWORK_ALIASES.get(normalized, normalized)
 
 
 def _read(root: Path, rel: str, limit: int = 200_000) -> str:
@@ -359,7 +366,13 @@ def _roles(c: Component) -> None:
     # Development-only framework dependencies are evidence for tooling, not a service.
     runtime = {d.name for d in c.dependencies if d.scope == "runtime"}
     all_deps = {d.name for d in c.dependencies}
-    c.frameworks = sorted(all_deps & FRAMEWORKS)
+    c.frameworks = sorted(
+        {
+            framework
+            for dependency in all_deps
+            if (framework := canonical_framework_id(dependency)) in FRAMEWORKS
+        }
+    )
     if runtime & {"react", "next", "vue", "svelte"} or (
         "svelte" in all_deps and "@sveltejs/kit" in all_deps
     ):

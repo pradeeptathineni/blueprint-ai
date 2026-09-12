@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import tomllib
+import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +24,10 @@ Detect = Callable[[Path, ProjectFacts], list[str]]
 Transform = Callable[[Path, list[str]], dict[str, str]]
 Command = Callable[[Path, list[str]], list[str]]
 
+RUST_EDITION_TARGET = "2024"
+DOTNET_TFM_TARGET = "net10.0"
+_NON_PROJECT_SCOPES = {"fixture", "vendor", "remote-module", "example", "test", "generated"}
+
 
 @dataclass(frozen=True)
 class RuntimeTransformation:
@@ -31,6 +37,9 @@ class RuntimeTransformation:
     preview_command: Command | None = None
     apply_command: Command | None = None
     verify_command: Command | None = None
+    preflight_command: Command | None = None
+    cleanup_command: Command | None = None
+    staged_preview: bool = False
 
 
 def _verification(
@@ -94,7 +103,7 @@ def _ruff_target(root: Path) -> str | None:
     return None
 
 
-def _ruff_command(root: Path, paths: list[str], *arguments: str) -> list[str]:
+def _ruff_command(root: Path, paths: list[str], rules: str, *arguments: str) -> list[str]:
     target = _ruff_target(root)
     if target is None:
         raise ValueError("project.requires-python has no supported Python 3.9-3.15 target")
@@ -105,12 +114,54 @@ def _ruff_command(root: Path, paths: list[str], *arguments: str) -> list[str]:
         "--target-version",
         target,
         "--select",
-        "UP",
+        rules,
         *arguments,
         "--no-cache",
         "--",
         *paths,
     ]
+
+
+def _preserve_init_typing_exports(root: Path, paths: list[str]) -> dict[str, str]:
+    """Mark typing names made unused by UP fixes as intentional package exports."""
+    rendered: dict[str, str] = {}
+    for relative in paths:
+        if Path(relative).name != "__init__.py":
+            continue
+        text = read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root)
+        tree = ast.parse(text)
+        used = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        }
+        line_offsets = [0]
+        for line in text.splitlines(keepends=True):
+            line_offsets.append(line_offsets[-1] + len(line))
+        inserts: list[tuple[int, str]] = []
+        for node in ast.walk(tree):
+            aliases: list[ast.alias]
+            if isinstance(node, ast.ImportFrom) and node.module in {"typing", "typing_extensions"}:
+                aliases = node.names
+            elif isinstance(node, ast.Import):
+                aliases = [
+                    alias for alias in node.names if alias.name in {"typing", "typing_extensions"}
+                ]
+            else:
+                continue
+            for alias in aliases:
+                if alias.asname is not None or alias.name == "*" or alias.name in used:
+                    continue
+                if alias.end_lineno is None or alias.end_col_offset is None:
+                    raise ValueError(f"{relative}: typing import position is unavailable")
+                offset = line_offsets[alias.end_lineno - 1] + alias.end_col_offset
+                inserts.append((offset, f" as {alias.name}"))
+        if inserts:
+            output = text
+            for offset, value in sorted(inserts, reverse=True):
+                output = output[:offset] + value + output[offset:]
+            rendered[relative] = output
+    return rendered
 
 
 def _terraform_paths(paths: list[str]) -> list[str]:
@@ -244,6 +295,97 @@ def _manual(predicate: Callable[[ProjectFacts], bool]) -> Detect:
     return detect
 
 
+def _owned_manifests(facts: ProjectFacts, predicate: Callable[[str], bool]) -> list[str]:
+    return sorted(
+        relative
+        for relative, scope in facts.graph.file_scopes.items()
+        if scope not in _NON_PROJECT_SCOPES and predicate(relative)
+    )
+
+
+def _rust_editions(root: Path, facts: ProjectFacts) -> list[str]:
+    editions: set[str] = set()
+    workspace_editions: set[str] = set()
+    documents: list[dict] = []
+    try:
+        for relative in _owned_manifests(facts, lambda path: Path(path).name == "Cargo.toml"):
+            document = tomllib.loads(
+                read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root)
+            )
+            if not isinstance(document, dict):
+                return []
+            documents.append(document)
+            workspace = document.get("workspace")
+            if isinstance(workspace, dict) and isinstance(workspace.get("package"), dict):
+                value = workspace["package"].get("edition")
+                if isinstance(value, str):
+                    workspace_editions.add(value)
+        for document in documents:
+            package = document.get("package")
+            if not isinstance(package, dict):
+                continue
+            value = package.get("edition", "2015")
+            if isinstance(value, dict) and value.get("workspace") is True:
+                value = next(iter(workspace_editions)) if len(workspace_editions) == 1 else None
+            if not isinstance(value, str) or value not in {"2015", "2018", "2021", "2024"}:
+                return []
+            editions.add(value)
+    except (OSError, ValueError):
+        return []
+    return sorted(editions)
+
+
+def _dotnet_target_frameworks(root: Path, facts: ProjectFacts) -> list[str]:
+    frameworks: set[str] = set()
+    try:
+        for relative in _owned_manifests(facts, lambda path: path.endswith(".csproj")):
+            document = ET.fromstring(
+                read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root)
+            )
+            for element in document.iter():
+                name = element.tag.rsplit("}", 1)[-1]
+                if name not in {"TargetFramework", "TargetFrameworks"}:
+                    continue
+                value = (element.text or "").strip()
+                values = [item.strip().lower() for item in value.split(";") if item.strip()]
+                if not values or any(
+                    not re.fullmatch(r"[a-z][a-z0-9.+-]*", item) for item in values
+                ):
+                    return []
+                frameworks.update(values)
+    except (ET.ParseError, OSError, ValueError):
+        return []
+
+    def sort_key(value: str) -> tuple[int, int, str]:
+        generation = _dotnet_tfm_generation(value)
+        if generation is None:
+            return (1, 0, value)
+        return (0, generation, value)
+
+    return sorted(frameworks, key=sort_key)
+
+
+def _rust_before_target(root: Path, facts: ProjectFacts) -> list[str]:
+    editions = _rust_editions(root, facts)
+    return ["."] if len(editions) == 1 and int(editions[0]) < int(RUST_EDITION_TARGET) else []
+
+
+def _dotnet_tfm_generation(value: str) -> int | None:
+    if match := re.fullmatch(r"net(\d+)\.\d+(?:-[a-z0-9.-]+)?", value):
+        return int(match.group(1))
+    if re.fullmatch(r"net\d{2,3}(?:-[a-z0-9.-]+)?", value):
+        return 4  # .NET Framework target monikers such as net48 and net472.
+    if match := re.fullmatch(r"netcoreapp(\d+)\.\d+(?:-[a-z0-9.-]+)?", value):
+        return int(match.group(1))
+    return None
+
+
+def _dotnet_before_target(root: Path, facts: ProjectFacts) -> list[str]:
+    frameworks = _dotnet_target_frameworks(root, facts)
+    generation = _dotnet_tfm_generation(frameworks[0]) if len(frameworks) == 1 else None
+    return ["."] if generation is not None and generation < 10 else []
+
+
 def _spec(**values) -> TransformationSpec:
     return TransformationSpec.model_validate(values)
 
@@ -260,10 +402,10 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 desired_state="Syntax modernized to the project's declared minimum Python version",
                 applicability=["Python source", "pyproject.toml with project.requires-python"],
                 lifecycle=["active-application", "library-framework", "unknown"],
-                provider="Ruff",
+                provider="Ruff with Blueprint AI bounded export preservation",
                 tool="ruff",
                 tool_version=">=0.13,<1",
-                recipe_version="1",
+                recipe_version="2",
                 authoritative_source="https://docs.astral.sh/ruff/rules/#pyupgrade-up",
                 license="MIT",
                 sandbox_requirements="explicit trusted writable sandbox or trusted host",
@@ -282,8 +424,8 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                     _verification(
                         "python/ruff-pyupgrade",
                         "native-idempotency",
-                        "Ruff UP dry-run produces no remaining automatic changes",
-                        command=["ruff", "check", "--select", "UP", "--diff"],
+                        "Ruff UP and bounded import cleanup produce no remaining safe changes",
+                        command=["ruff", "check", "--select", "UP,F401,I001", "--diff"],
                         trust=True,
                     ),
                     _verification(
@@ -291,12 +433,20 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                         "python-parse",
                         "Changed Python files parse successfully",
                     ),
+                    _verification(
+                        "python/ruff-pyupgrade",
+                        "package-exports",
+                        "Newly unused package initializer typing names remain explicit exports",
+                    ),
                 ],
                 maturity="supported",
                 mechanism="official-native",
                 implementation="command",
                 decision="wrap",
-                limitations=["Does not change declared Python or dependency versions"],
+                limitations=[
+                    "Does not change declared Python or dependency versions",
+                    "Package initializer typing imports are retained as explicit public exports",
+                ],
                 reviewed="2026-09-12",
             ),
             detect=lambda root, facts: (
@@ -305,9 +455,15 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 if _has_python_target(root)
                 else []
             ),
-            preview_command=lambda root, paths: _ruff_command(root, paths, "--diff"),
-            apply_command=lambda root, paths: _ruff_command(root, paths, "--fix-only"),
-            verify_command=lambda root, paths: _ruff_command(root, paths, "--diff"),
+            preview_command=lambda root, paths: _ruff_command(root, paths, "UP", "--diff"),
+            apply_command=lambda root, paths: _ruff_command(root, paths, "UP", "--fix-only"),
+            verify_command=lambda root, paths: _ruff_command(root, paths, "UP,F401,I001", "--diff"),
+            preflight_command=lambda root, paths: _ruff_command(root, paths, "F401,I001"),
+            cleanup_command=lambda root, paths: _ruff_command(
+                root, paths, "F401,I001", "--fix-only"
+            ),
+            transform=_preserve_init_typing_exports,
+            staged_preview=True,
         ),
         RuntimeTransformation(
             spec=_spec(
@@ -620,7 +776,7 @@ def _manual_catalog() -> list[RuntimeTransformation]:
             "MIT",
             "partial",
             "wrap",
-            lambda f: any(value.lower() == "next.js" for value in f.frameworks),
+            lambda f: "next" in f.frameworks,
             [
                 "Interactive dependency and semantic upgrade choices are not yet "
                 "transactionally adapted"
@@ -629,27 +785,27 @@ def _manual_catalog() -> list[RuntimeTransformation]:
         (
             "rust/edition",
             "language-modernization",
-            "older Rust edition",
+            f"Rust edition before {RUST_EDITION_TARGET}",
             "next explicitly requested Rust edition",
             "cargo fix --edition",
             "https://doc.rust-lang.org/cargo/commands/cargo-fix.html",
             "MIT OR Apache-2.0",
             "partial",
             "adapt",
-            lambda f: "Rust" in f.languages,
+            None,
             ["Cargo does not update Cargo.toml and inactive cfg/features can retain manual work"],
         ),
         (
             "dotnet/modernization-agent",
             "runtime-modernization",
-            "older .NET or .NET Framework",
+            f".NET target framework before {DOTNET_TFM_TARGET}",
             "supported .NET target",
             "GitHub Copilot modernization agent",
             "https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview",
             "service-specific",
             "deferred",
             "agent-assist",
-            lambda f: "C#" in f.languages,
+            None,
             [
                 "Upgrade Assistant is deprecated; the successor requires an authorized "
                 "external agent workflow"
@@ -733,6 +889,16 @@ def _manual_catalog() -> list[RuntimeTransformation]:
         "iac/terraform-to-opentofu",
     }
     transformations = []
+    versioned_detection: dict[str, Detect] = {
+        "rust/edition": _rust_before_target,
+        "dotnet/modernization-agent": _dotnet_before_target,
+    }
+    versioned_applicability = {
+        "rust/edition": [f"one exact owned Cargo edition before {RUST_EDITION_TARGET}"],
+        "dotnet/modernization-agent": [
+            f"one exact owned .NET target framework before {DOTNET_TFM_TARGET}"
+        ],
+    }
     for (
         recipe_id,
         category,
@@ -746,6 +912,10 @@ def _manual_catalog() -> list[RuntimeTransformation]:
         predicate,
         limitations,
     ) in rows:
+        detect = versioned_detection.get(recipe_id)
+        if detect is None:
+            assert predicate is not None
+            detect = _manual(predicate)
         transformations.append(
             RuntimeTransformation(
                 spec=_spec(
@@ -753,14 +923,18 @@ def _manual_catalog() -> list[RuntimeTransformation]:
                     category=category,
                     current_state=current,
                     desired_state=desired,
-                    applicability=["detected ecosystem; exact applicability remains unresolved"],
+                    applicability=versioned_applicability.get(
+                        recipe_id,
+                        ["detected ecosystem; exact applicability remains unresolved"],
+                    ),
                     provider=provider,
                     recipe_version="research-2026.09.12",
                     authoritative_source=source,
                     license=license_name,
                     network_required=recipe_id in networked,
                     sandbox_requirements=(
-                        "not executable in 0.7.0; explicit future trust/network policy required"
+                        "not executable in this release; explicit future trust/network policy "
+                        "required"
                     ),
                     preconditions=[
                         "Exact target, tool/recipe version, and verification contract selected"
@@ -769,7 +943,7 @@ def _manual_catalog() -> list[RuntimeTransformation]:
                     expected_paths=[],
                     dry_run=False,
                     reversible=False,
-                    irreversible_boundary="No mutation is implemented in 0.7.0",
+                    irreversible_boundary="No mutation is implemented in this release",
                     verification=[],
                     model_allowed=recipe_id in model_planning,
                     agent_allowed=decision == "agent-assist",
@@ -780,7 +954,7 @@ def _manual_catalog() -> list[RuntimeTransformation]:
                     limitations=limitations,
                     reviewed="2026-09-12",
                 ),
-                detect=_manual(predicate),
+                detect=detect,
             )
         )
     return transformations

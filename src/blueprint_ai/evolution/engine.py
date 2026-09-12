@@ -36,8 +36,16 @@ from blueprint_ai.safety import (
     safe_regular_file,
 )
 from blueprint_ai.sandbox import SandboxPolicy, SandboxUnavailable, execute
+from blueprint_ai.support import backend_executable
 
-from .catalog import _MAINTAINER, _USES, OFFICIAL_ACTION_SHAS, TRANSFORMATIONS
+from .catalog import (
+    _MAINTAINER,
+    _USES,
+    OFFICIAL_ACTION_SHAS,
+    TRANSFORMATIONS,
+    _dotnet_target_frameworks,
+    _rust_editions,
+)
 from .models import (
     EvolutionChange,
     EvolutionPlan,
@@ -239,18 +247,16 @@ def _detected_versions(root: Path, facts: ProjectFacts) -> dict[str, str]:
                 versions["go"] = match.group(1)
         except (OSError, ValueError):
             pass
-    cargo = root / "Cargo.toml"
-    if cargo.is_file():
-        try:
-            import tomllib
-
-            package = tomllib.loads(read_text_bounded(cargo, MAX_MANIFEST_BYTES, root=root)).get(
-                "package", {}
-            )
-            if package.get("edition"):
-                versions["rust-edition"] = str(package["edition"])
-        except (OSError, ValueError):
-            pass
+    rust_editions = _rust_editions(root, facts)
+    if len(rust_editions) == 1:
+        versions["rust-edition"] = rust_editions[0]
+    elif rust_editions:
+        versions["rust-editions"] = ";".join(rust_editions)
+    dotnet_frameworks = _dotnet_target_frameworks(root, facts)
+    if len(dotnet_frameworks) == 1:
+        versions["dotnet-target-framework"] = dotnet_frameworks[0]
+    elif dotnet_frameworks:
+        versions["dotnet-target-frameworks"] = ";".join(dotnet_frameworks)
     return dict(sorted(versions.items()))
 
 
@@ -357,6 +363,8 @@ def plan_evolution(root: Path, requested_targets: list[str] | None = None) -> Ev
             step_status = "noop"
         else:
             step_status = "ready"
+        if step_status == "ready" and steps and steps[-1].status in {"manual", "blocked"}:
+            step_status = "blocked"
         step_id = f"step-{len(steps) + 1:02d}"
         steps.append(
             EvolutionStep(
@@ -381,7 +389,7 @@ def plan_evolution(root: Path, requested_targets: list[str] | None = None) -> Ev
                     else "none"
                 ),
                 agent_responsibility=(
-                    "explicit residual implementation; unavailable in 0.7.0"
+                    "explicit residual implementation; unavailable in this release"
                     if spec.agent_allowed
                     else "none"
                 ),
@@ -393,10 +401,10 @@ def plan_evolution(root: Path, requested_targets: list[str] | None = None) -> Ev
         risks.extend(f"{recipe_id}: {item}" for item in spec.conflicts)
     if not targets:
         plan_status: Literal["inspection", "ready", "blocked", "noop"] = "inspection"
-    elif any(step.status == "manual" for step in steps):
-        plan_status = "blocked"
     elif any(step.status == "ready" for step in steps):
         plan_status = "ready"
+    elif any(step.status in {"manual", "blocked"} for step in steps):
+        plan_status = "blocked"
     else:
         plan_status = "noop"
     return EvolutionPlan(
@@ -552,7 +560,7 @@ def _tool_command(root: Path, tool: str, policy: SandboxPolicy) -> str:
     if policy.backend != "host" and not (
         policy.backend == "auto" and policy.trusted and not policy.image
     ):
-        return tool
+        return backend_executable(tool, tool, policy.backend)
     if executable := shutil.which(tool):
         return executable
     for directory in (".venv/bin", ".venv/Scripts"):
@@ -590,7 +598,6 @@ def _run(
     tool: str,
     tool_root: Path | None = None,
 ) -> tuple[EvolutionVerification, str]:
-    reported_command = list(command)
     execution_command = list(command)
     execution_command[0] = _tool_command(tool_root or root, execution_command[0], policy)
     started = time.monotonic()
@@ -601,7 +608,7 @@ def _run(
             EvolutionVerification(
                 id=f"{tool}/execution",
                 status="tool_error",
-                command=reported_command,
+                command=execution_command,
                 detail=str(exc)[:1000],
                 duration_ms=round((time.monotonic() - started) * 1000),
             ),
@@ -622,7 +629,7 @@ def _run(
         EvolutionVerification(
             id=f"{tool}/execution",
             status="passed" if okay else "failed",
-            command=reported_command,
+            command=execution_command,
             detail=(output[-1000:] or f"exit {result.returncode}"),
             duration_ms=round((time.monotonic() - started) * 1000),
             sandbox=execution.evidence.model_dump(mode="json"),
@@ -672,6 +679,17 @@ def _diff(relative: str, before: str, after: str) -> str:
     )
 
 
+def _staged_diff(checkpoint: Path, workspace: Path, paths: list[str]) -> str:
+    return "".join(
+        _diff(
+            relative,
+            read_text_bounded(checkpoint / relative, MAX_CHECKPOINT_FILE_BYTES, root=checkpoint),
+            read_text_bounded(workspace / relative, MAX_CHECKPOINT_FILE_BYTES, root=workspace),
+        )
+        for relative in paths
+    )
+
+
 def _builtin_preview(root: Path, step: EvolutionStep) -> tuple[dict[str, str], dict[str, str]]:
     runtime = TRANSFORMATIONS[step.recipe_id]
     if runtime.transform is None:
@@ -710,7 +728,35 @@ def _builtin_verify(root: Path, step: EvolutionStep) -> list[EvolutionVerificati
                     raise ValueError(f"{relative}: eligible mutable action reference remains")
         elif step.recipe_id == "python/ruff-pyupgrade":
             for relative in step.files:
-                ast.parse(read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root))
+                tree = ast.parse(read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root))
+                if Path(relative).name != "__init__.py":
+                    continue
+                used = {
+                    node.id
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                }
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom) and node.module in {
+                        "typing",
+                        "typing_extensions",
+                    }:
+                        aliases = node.names
+                    elif isinstance(node, ast.Import):
+                        aliases = [
+                            alias
+                            for alias in node.names
+                            if alias.name in {"typing", "typing_extensions"}
+                        ]
+                    else:
+                        continue
+                    if any(
+                        alias.name != "*" and alias.asname is None and alias.name not in used
+                        for alias in aliases
+                    ):
+                        raise ValueError(
+                            f"{relative}: typing name is neither used nor an explicit export"
+                        )
         elif step.recipe_id == "terraform/native-format":
             for relative in step.files:
                 hcl2.loads(read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root))
@@ -786,8 +832,9 @@ def apply_evolution(
     with _operation_lock(root):
         facts, before = _validate_fresh_plan(root, plan)
         ready = [step for step in plan.steps if step.status == "ready"]
+        unresolved = [step for step in plan.steps if step.status in {"manual", "blocked"}]
         limitations = sorted({item for step in plan.steps for item in step.limitations})
-        if any(step.status == "manual" for step in plan.steps):
+        if unresolved and not ready:
             raise ValueError("plan contains manual/deferred steps and cannot be applied")
         if not ready:
             return EvolutionReport(
@@ -856,7 +903,7 @@ def apply_evolution(
                                 os.chmod(workspace / relative, before[relative].mode)
                                 recipe_by_path[relative] = step.recipe_id
                     else:
-                        assert spec.tool and runtime.preview_command and runtime.apply_command
+                        assert spec.tool and runtime.apply_command
                         version_check = _verify_version(
                             workspace,
                             spec.tool,
@@ -868,46 +915,103 @@ def apply_evolution(
                         reports.append(version_check)
                         if version_check.status != "passed":
                             raise RuntimeError(version_check.detail)
-                        preview, output = _run(
-                            workspace,
-                            runtime.preview_command(workspace, step.files),
-                            execution_policy.model_copy(update={"writable": False}),
-                            environment,
-                            tool=spec.tool,
-                            tool_root=root,
-                        )
-                        preview.id = f"{step.recipe_id}/preview"
-                        has_diff = bool(re.search(r"(?m)^(?:--- |diff |@@ )", output))
-                        evidence = preview.sandbox or {}
-                        if (
-                            preview.status == "failed"
-                            and has_diff
-                            and evidence.get("exit_code")
-                            in {"ruff": {1}, "go": {1}, "terraform": {3}}.get(spec.tool, set())
-                            and not evidence.get("timed_out", False)
-                            and not evidence.get("output_truncated", False)
-                        ):
-                            preview.status = "passed"
-                        reports.append(preview)
-                        if preview.status != "passed":
-                            raise RuntimeError(preview.detail)
-                        if output:
-                            diffs[step.recipe_id] = output
-                        if not dry_run:
-                            applied, _output = _run(
+                        if runtime.staged_preview:
+                            assert (
+                                runtime.preflight_command
+                                and runtime.cleanup_command
+                                and runtime.transform
+                            )
+                            preflight, _output = _run(
                                 workspace,
-                                runtime.apply_command(workspace, step.files),
-                                execution_policy,
+                                runtime.preflight_command(workspace, step.files),
+                                execution_policy.model_copy(update={"writable": False}),
                                 environment,
                                 tool=spec.tool,
                                 tool_root=root,
                             )
-                            applied.id = f"{step.recipe_id}/apply"
+                            preflight.id = f"{step.recipe_id}/preflight"
+                            reports.append(preflight)
+                            if preflight.status != "passed":
+                                raise RuntimeError(
+                                    f"{step.recipe_id}: pre-existing import cleanup findings make "
+                                    "the composed change ambiguous"
+                                )
+                            applied, _output = _run(
+                                workspace,
+                                runtime.apply_command(workspace, step.files),
+                                execution_policy.model_copy(update={"writable": True}),
+                                environment,
+                                tool=spec.tool,
+                                tool_root=root,
+                            )
+                            applied.id = f"{step.recipe_id}/pyupgrade"
                             reports.append(applied)
                             if applied.status != "passed":
                                 raise RuntimeError(applied.detail)
+                            rendered = runtime.transform(workspace, step.files)
+                            for relative, content in rendered.items():
+                                atomic_write_text(
+                                    _safe_path(workspace, relative, missing=False),
+                                    content,
+                                    root=workspace,
+                                )
+                            cleanup, _output = _run(
+                                workspace,
+                                runtime.cleanup_command(workspace, step.files),
+                                execution_policy.model_copy(update={"writable": True}),
+                                environment,
+                                tool=spec.tool,
+                                tool_root=root,
+                            )
+                            cleanup.id = f"{step.recipe_id}/unused-import-cleanup"
+                            reports.append(cleanup)
+                            if cleanup.status != "passed":
+                                raise RuntimeError(cleanup.detail)
+                            diffs[step.recipe_id] = _staged_diff(checkpoint, workspace, step.files)
                             for relative in step.files:
                                 recipe_by_path[relative] = step.recipe_id
+                        else:
+                            assert runtime.preview_command
+                            preview, output = _run(
+                                workspace,
+                                runtime.preview_command(workspace, step.files),
+                                execution_policy.model_copy(update={"writable": False}),
+                                environment,
+                                tool=spec.tool,
+                                tool_root=root,
+                            )
+                            preview.id = f"{step.recipe_id}/preview"
+                            has_diff = bool(re.search(r"(?m)^(?:--- |diff |@@ )", output))
+                            evidence = preview.sandbox or {}
+                            if (
+                                preview.status == "failed"
+                                and has_diff
+                                and evidence.get("exit_code")
+                                in {"ruff": {1}, "go": {1}, "terraform": {3}}.get(spec.tool, set())
+                                and not evidence.get("timed_out", False)
+                                and not evidence.get("output_truncated", False)
+                            ):
+                                preview.status = "passed"
+                            reports.append(preview)
+                            if preview.status != "passed":
+                                raise RuntimeError(preview.detail)
+                            if output:
+                                diffs[step.recipe_id] = output
+                            if not dry_run:
+                                applied, _output = _run(
+                                    workspace,
+                                    runtime.apply_command(workspace, step.files),
+                                    execution_policy,
+                                    environment,
+                                    tool=spec.tool,
+                                    tool_root=root,
+                                )
+                                applied.id = f"{step.recipe_id}/apply"
+                                reports.append(applied)
+                                if applied.status != "passed":
+                                    raise RuntimeError(applied.detail)
+                                for relative in step.files:
+                                    recipe_by_path[relative] = step.recipe_id
                     current = _stage_inventory(workspace)
                     unexpected = set(_changed(before, current)) - allowed
                     if unexpected:
@@ -916,7 +1020,7 @@ def apply_evolution(
                             + ", ".join(sorted(unexpected)[:20])
                         )
                     if dry_run:
-                        if current != before:
+                        if _inventory(root) != before:
                             raise RuntimeError("dry-run mutated project files")
                         continue
                     if spec.implementation == "command":
@@ -985,7 +1089,7 @@ def apply_evolution(
                 if not actual:
                     return EvolutionReport(
                         plan_sha256=plan.plan_sha256,
-                        status="noop",
+                        status="partial" if unresolved else "noop",
                         before=plan.current_state,
                         plan=plan,
                         after=plan.current_state,
@@ -1106,7 +1210,7 @@ def apply_evolution(
                 )
                 return EvolutionReport(
                     plan_sha256=plan.plan_sha256,
-                    status="verified",
+                    status="partial" if unresolved else "verified",
                     before=plan.current_state,
                     plan=plan,
                     after=_project_state(

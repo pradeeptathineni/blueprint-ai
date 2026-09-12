@@ -10,7 +10,7 @@ from pathlib import Path
 from pathspec import GitIgnoreSpec
 
 from blueprint_ai.core import ProjectFacts
-from blueprint_ai.discovery.graph import build_graph, graph_project_types
+from blueprint_ai.discovery.graph import build_graph, canonical_framework_id, graph_project_types
 from blueprint_ai.safety import (
     MAX_CONFIG_BYTES,
     RawProcessResult,
@@ -597,7 +597,7 @@ def discover_project(
         git_branch=branch,
         git_dirty=dirty,
         languages=dict(languages.most_common()),
-        frameworks=sorted(set(frameworks)),
+        frameworks=sorted({canonical_framework_id(value) for value in frameworks}),
         package_managers=sorted(set(managers)),
         manifests=manifests,
         ci=ci,

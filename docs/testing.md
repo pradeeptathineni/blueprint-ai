@@ -45,6 +45,8 @@ repositories. Each supported case must create a real diff, pass migration-specif
 become idempotent, restore its complete fingerprint, and reproduce the same result. `--only` selects
 a portable CI subset; `--require` turns a missing selected tool into a failure. Planning-only fixtures
 exercise researched legacy states without claiming that partial/deferred recipes are executable.
+The inspection set includes Next/React separation plus Rust 2024 and net10.0 negative controls; the
+Ruff case mirrors the audited package-initializer fixture and verifies the complete composed diff.
 
 ## Independent release regression gate
 

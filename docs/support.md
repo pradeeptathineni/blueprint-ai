@@ -133,7 +133,7 @@ Recognition, initialization and verification are separate claims. External tools
 
 | Transformation | Mechanism / provider | Maturity | Dry run / rollback | Boundary |
 | --- | --- | --- | --- | --- |
-| python/ruff-pyupgrade | official-native; Ruff | supported | yes / yes | Does not change declared Python or dependency versions |
+| python/ruff-pyupgrade | official-native; Ruff with Blueprint AI bounded export preservation | supported | yes / yes | Does not change declared Python or dependency versions; Package initializer typing imports are retained as explicit public exports |
 | go/native-fix | official-native; Go toolchain | supported | yes / yes | Build-tagged configurations need separate runs; the isolated module cache starts empty |
 | terraform/native-format | official-native; Terraform CLI | supported | yes / yes | Formatting is not a provider, module, backend, or state migration |
 | container/maintainer-to-oci-label | builtin-structural; Blueprint AI structural transform | supported | yes / yes | Multiline instructions are rejected rather than guessed |

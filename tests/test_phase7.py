@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -215,6 +216,8 @@ def test_native_tool_failure_after_writing_rolls_back_without_path_leak(
         evidence = SandboxEvidence(backend="host", tool="ruff", policy=policy, teardown=True)
         if command[-1] == "--version":
             result = ProcessResult(0, "ruff 0.16.7\n", "", False, False)
+        elif "--select" in command and command[command.index("--select") + 1] == "F401,I001":
+            result = ProcessResult(0, "All checks passed!\n", "", False, False)
         elif "--diff" in command:
             result = ProcessResult(
                 1,
@@ -272,6 +275,8 @@ def test_native_tool_staging_contains_ignored_writes(tmp_path: Path, monkeypatch
         evidence = SandboxEvidence(backend="host", tool="ruff", policy=policy, teardown=True)
         if command[-1] == "--version":
             result = ProcessResult(0, "ruff 0.16.7\n", "", False, False)
+        elif "--select" in command and command[command.index("--select") + 1] == "F401,I001":
+            result = ProcessResult(0, "All checks passed!\n", "", False, False)
         elif "--diff" in command:
             result = ProcessResult(1, "--- src/demo.py\n+++ src/demo.py\n", "", False, False)
         else:
@@ -425,6 +430,105 @@ def test_python_upgrade_requires_an_explicit_supported_lower_bound(tmp_path: Pat
     assert plan.status == "noop" and plan.steps[0].status == "noop"
 
 
+def test_python_syntax_fixture_is_clean_idempotent_and_exactly_reversible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai.evolution import engine
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    ruff = Path(sys.executable).with_name("ruff")
+    if not ruff.is_file():
+        pytest.skip("Ruff development executable is unavailable")
+    which = engine.shutil.which
+    monkeypatch.setattr(
+        engine.shutil, "which", lambda name: str(ruff) if name == "ruff" else which(name)
+    )
+    source = (
+        "from typing import List, Optional\n\n\n"
+        "def first(values: List[int]) -> Optional[int]:\n"
+        "    return values[0] if values else None\n"
+    )
+    root = _repository(
+        tmp_path,
+        {
+            "pyproject.toml": (
+                '[project]\nname = "audit-python-syntax"\nversion = "0.1.0"\n'
+                'requires-python = ">=3.12"\n'
+            ),
+            "src/modernize_me/__init__.py": source,
+        },
+    )
+    before = project_fingerprint(root)
+    policy = SandboxPolicy(backend="host", trusted=True, writable=True)
+    plan = plan_evolution(root, ["python/ruff-pyupgrade"])
+
+    preview = apply_evolution(
+        root,
+        plan,
+        dry_run=True,
+        policy=policy.model_copy(update={"writable": False}),
+        run_blueprint_review=False,
+    )
+    assert preview.status == "dry_run" and project_fingerprint(root) == before
+    assert "List as List" in preview.diffs["python/ruff-pyupgrade"]
+    assert "list[int]" in preview.diffs["python/ruff-pyupgrade"]
+
+    result = apply_evolution(root, plan, policy=policy)
+    assert result.status == "verified"
+    assert result.review.introduced_fingerprints == []
+    assert len(result.review.resolved_fingerprints) == 2
+    transformed = (root / "src/modernize_me/__init__.py").read_text()
+    assert "from typing import List as List" in transformed
+    assert "from typing import Optional as Optional" in transformed
+    assert "def first(values: list[int]) -> int | None:" in transformed
+
+    second = apply_evolution(
+        root,
+        plan_evolution(root, ["python/ruff-pyupgrade"]),
+        allow_dirty=True,
+        policy=policy,
+    )
+    assert second.status == "noop" and not second.changes
+    rollback_evolution(root, result.operation_id or "")
+    assert (root / "src/modernize_me/__init__.py").read_text() == source
+    assert project_fingerprint(root) == before
+
+
+def test_ruff_composition_refuses_preexisting_import_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai.evolution import engine
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    ruff = Path(sys.executable).with_name("ruff")
+    if not ruff.is_file():
+        pytest.skip("Ruff development executable is unavailable")
+    which = engine.shutil.which
+    monkeypatch.setattr(
+        engine.shutil, "which", lambda name: str(ruff) if name == "ruff" else which(name)
+    )
+    source = "import os\nfrom typing import List\nvalue: List[int] = []\n"
+    root = _repository(
+        tmp_path,
+        {
+            "pyproject.toml": (
+                '[project]\nname = "demo"\nversion = "1"\nrequires-python = ">=3.12"\n'
+            ),
+            "demo.py": source,
+        },
+    )
+    before = project_fingerprint(root)
+    with pytest.raises(RuntimeError, match="pre-existing import cleanup"):
+        apply_evolution(
+            root,
+            plan_evolution(root, ["python/ruff-pyupgrade"]),
+            policy=SandboxPolicy(backend="host", trusted=True, writable=True),
+            run_blueprint_review=False,
+        )
+    assert project_fingerprint(root) == before
+    assert (root / "demo.py").read_text() == source
+
+
 def test_manual_recipe_is_inspectable_but_not_executable(tmp_path: Path) -> None:
     root = _repository(tmp_path, {"main.tf": 'resource "null_resource" "example" {}\n'})
     plan = plan_evolution(root, ["iac/terraform-to-opentofu"])
@@ -432,6 +536,167 @@ def test_manual_recipe_is_inspectable_but_not_executable(tmp_path: Path) -> None
     assert "state" in " ".join(plan.manual_boundaries).lower()
     with pytest.raises(ValueError, match="manual/deferred"):
         apply_evolution(root, plan, run_blueprint_review=False)
+
+
+def test_mixed_ready_and_manual_plan_applies_independent_ready_prefix(tmp_path: Path) -> None:
+    root = _repository(
+        tmp_path,
+        {
+            "Dockerfile": "FROM scratch\nMAINTAINER owner\n",
+            "main.tf": 'resource "null_resource" "example" {}\n',
+        },
+    )
+    plan = plan_evolution(
+        root,
+        ["container/maintainer-to-oci-label", "iac/terraform-to-opentofu"],
+    )
+    assert plan.status == "ready"
+    assert [step.status for step in plan.steps] == ["ready", "manual"]
+    result = apply_evolution(root, plan, run_blueprint_review=False)
+    assert result.status == "partial"
+    assert "MAINTAINER" not in (root / "Dockerfile").read_text()
+    rollback_evolution(root, result.operation_id or "")
+
+
+def test_next_framework_identity_drives_only_project_level_applicability(tmp_path: Path) -> None:
+    next_root = tmp_path / "next"
+    next_root.mkdir()
+    _repository(
+        next_root,
+        {
+            "package.json": json.dumps({"dependencies": {"next": "14.2.0", "react": "18.2.0"}}),
+            "app/page.tsx": "export default function Page() { return <main />; }\n",
+        },
+    )
+    next_plan = plan_evolution(next_root)
+    assert next_plan.current_state.frameworks == ["next", "react"]
+    assert "next/official-upgrade-codemod" in next_plan.candidates
+
+    react_root = tmp_path / "react"
+    react_root.mkdir()
+    _repository(
+        react_root,
+        {
+            "package.json": json.dumps({"dependencies": {"react": "18.2.0"}}),
+            "README.md": "A comparison mentions next and Next.js without using either.\n",
+            "fixtures/package.json": json.dumps({"dependencies": {"next": "14.2.0"}}),
+        },
+    )
+    react_plan = plan_evolution(react_root)
+    assert react_plan.current_state.frameworks == ["react"]
+    assert "next/official-upgrade-codemod" not in react_plan.candidates
+
+
+@pytest.mark.parametrize(
+    ("edition", "candidate"),
+    [("2018", True), ("2024", False)],
+)
+def test_rust_candidate_requires_an_exact_older_edition(
+    tmp_path: Path, edition: str, candidate: bool
+) -> None:
+    root = _repository(
+        tmp_path,
+        {
+            "Cargo.toml": (f'[package]\nname = "demo"\nversion = "0.1.0"\nedition = "{edition}"\n'),
+            "src/lib.rs": "pub fn answer() -> u8 { 42 }\n",
+        },
+    )
+    plan = plan_evolution(root)
+    assert plan.current_state.versions["rust-edition"] == edition
+    assert ("rust/edition" in plan.candidates) is candidate
+
+
+@pytest.mark.parametrize(
+    ("framework", "candidate"),
+    [("net6.0", True), ("net10.0", False), ("netstandard2.0", False)],
+)
+def test_dotnet_candidate_requires_an_exact_older_target_framework(
+    tmp_path: Path, framework: str, candidate: bool
+) -> None:
+    root = _repository(
+        tmp_path,
+        {
+            "Demo.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk">\n'
+                f"  <PropertyGroup><TargetFramework>{framework}</TargetFramework></PropertyGroup>\n"
+                "</Project>\n"
+            ),
+            "Program.cs": 'Console.WriteLine("hello");\n',
+        },
+    )
+    plan = plan_evolution(root)
+    assert plan.current_state.versions["dotnet-target-framework"] == framework
+    assert ("dotnet/modernization-agent" in plan.candidates) is candidate
+
+
+def test_ambiguous_or_missing_versions_do_not_claim_applicability(tmp_path: Path) -> None:
+    rust_root = tmp_path / "rust"
+    rust_root.mkdir()
+    _repository(
+        rust_root,
+        {
+            "Cargo.toml": '[workspace]\nmembers = ["old", "current"]\n',
+            "old/Cargo.toml": ('[package]\nname = "old"\nversion = "0.1.0"\nedition = "2018"\n'),
+            "current/Cargo.toml": (
+                '[package]\nname = "current"\nversion = "0.1.0"\nedition = "2024"\n'
+            ),
+            "old/src/lib.rs": "pub fn old() {}\n",
+            "current/src/lib.rs": "pub fn current() {}\n",
+        },
+    )
+    rust_plan = plan_evolution(rust_root)
+    assert rust_plan.current_state.versions["rust-editions"] == "2018;2024"
+    assert "rust/edition" not in rust_plan.candidates
+
+    unresolved_rust_root = tmp_path / "unresolved-rust"
+    unresolved_rust_root.mkdir()
+    _repository(
+        unresolved_rust_root,
+        {
+            "Cargo.toml": '[workspace]\nmembers = ["member"]\n',
+            "member/Cargo.toml": (
+                '[package]\nname = "member"\nversion = "0.1.0"\nedition.workspace = true\n'
+            ),
+            "member/src/lib.rs": "pub fn member() {}\n",
+        },
+    )
+    unresolved_rust_plan = plan_evolution(unresolved_rust_root)
+    assert "rust-edition" not in unresolved_rust_plan.current_state.versions
+    assert "rust/edition" not in unresolved_rust_plan.candidates
+
+    dotnet_root = tmp_path / "dotnet"
+    dotnet_root.mkdir()
+    _repository(
+        dotnet_root,
+        {
+            "Demo.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk">\n'
+                "  <PropertyGroup><TargetFrameworks>net6.0;net10.0</TargetFrameworks>"
+                "</PropertyGroup>\n</Project>\n"
+            ),
+            "Program.cs": 'Console.WriteLine("hello");\n',
+        },
+    )
+    dotnet_plan = plan_evolution(dotnet_root)
+    assert dotnet_plan.current_state.versions["dotnet-target-frameworks"] == "net6.0;net10.0"
+    assert "dotnet/modernization-agent" not in dotnet_plan.candidates
+
+    unresolved_dotnet_root = tmp_path / "unresolved-dotnet"
+    unresolved_dotnet_root.mkdir()
+    _repository(
+        unresolved_dotnet_root,
+        {
+            "Demo.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk">\n'
+                "  <PropertyGroup><TargetFramework>$(ConfiguredTfm)</TargetFramework>"
+                "</PropertyGroup>\n</Project>\n"
+            ),
+            "Program.cs": 'Console.WriteLine("hello");\n',
+        },
+    )
+    unresolved_dotnet_plan = plan_evolution(unresolved_dotnet_root)
+    assert "dotnet-target-framework" not in unresolved_dotnet_plan.current_state.versions
+    assert "dotnet/modernization-agent" not in unresolved_dotnet_plan.candidates
 
 
 def test_plan_and_models_reject_unknown_or_extra_authority(tmp_path: Path) -> None:
@@ -521,3 +786,68 @@ def test_native_commands_do_not_interpret_project_paths_as_options(tmp_path: Pat
     assert terraform.preview_command is not None
     terraform_command = terraform.preview_command(tmp_path, ["-state.tf"])
     assert terraform_command[-1] == "./-state.tf"
+
+
+def test_tool_contract_resolves_divergent_host_and_container_executables(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai.evolution import engine
+    from blueprint_ai.sandbox import SandboxPolicy
+    from blueprint_ai.support import TOOLS, backend_executable
+
+    monkeypatch.setattr(
+        engine.shutil, "which", lambda name: "/trusted/ruff" if name == "ruff" else None
+    )
+    assert (
+        engine._tool_command(tmp_path, "ruff", SandboxPolicy(backend="host", trusted=True))
+        == "/trusted/ruff"
+    )
+    assert (
+        engine._tool_command(
+            tmp_path,
+            "ruff",
+            SandboxPolicy(backend="docker", image="ghcr.io/astral-sh/ruff:0.16.7", trusted=True),
+        )
+        == "/ruff"
+    )
+    assert (
+        engine._tool_command(
+            tmp_path,
+            "ruff",
+            SandboxPolicy(backend="docker", image="example.invalid/custom-ruff", trusted=True),
+        )
+        == "/ruff"
+    )
+    assert backend_executable("go", "go", "docker") == "go"
+    assert backend_executable("terraform", "terraform", "docker") == "terraform"
+
+    monkeypatch.setattr(TOOLS["ruff"], "container_executable", "../ruff")
+    with pytest.raises(ValueError, match="invalid docker executable"):
+        backend_executable("ruff", "ruff", "docker")
+    with pytest.raises(ValueError, match="invalid docker executable"):
+        backend_executable("missing", "", "docker")
+
+
+def test_evolution_verification_reports_executable_actually_used(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai.evolution import engine
+    from blueprint_ai.safety import ProcessResult
+    from blueprint_ai.sandbox import Execution, SandboxEvidence, SandboxPolicy
+
+    policy = SandboxPolicy(backend="docker", image="ghcr.io/astral-sh/ruff:0.16.7", trusted=True)
+
+    def fake_execute(command, _root, actual_policy, **_kwargs):
+        evidence = SandboxEvidence(
+            backend="docker",
+            tool="ruff",
+            policy=actual_policy,
+            exit_code=0,
+            teardown=True,
+        )
+        return Execution(ProcessResult(0, "ruff 0.16.7\n", "", False, False), evidence)
+
+    monkeypatch.setattr(engine, "execute", fake_execute)
+    verification, _output = engine._run(tmp_path, ["ruff", "--version"], policy, {}, tool="ruff")
+    assert verification.command == ["/ruff", "--version"]
+    assert verification.sandbox and verification.sandbox["backend"] == "docker"
