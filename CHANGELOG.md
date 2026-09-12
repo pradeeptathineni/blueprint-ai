@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.1 — Unreleased
+## 0.4.1 — 2026-09-11
 
 - Preserve a bounded diagnostic excerpt when a trusted project tool fails instead of reporting only
   its exit code.
