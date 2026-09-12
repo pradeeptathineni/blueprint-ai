@@ -105,5 +105,8 @@ def test_schema_help_lists_every_supported_schema() -> None:
         "genesis-plan",
         "project-graph",
         "sandbox-policy",
+        "evolution-plan",
+        "evolution-report",
+        "transformation",
     ):
         assert name in result.stdout

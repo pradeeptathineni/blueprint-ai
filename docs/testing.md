@@ -14,6 +14,10 @@ PYTHONPATH=src uv run python benchmarks/phase6_matrix.py \
 PYTHONPATH=src uv run python benchmarks/corpus.py \
   --output /tmp/blueprint-corpus-check --review --offline
 PYTHONPATH=src uv run python benchmarks/run.py
+PYTHONPATH=src uv run python benchmarks/phase7_migrations.py \
+  --output /tmp/blueprint-phase7-migrations.json \
+  --require python/ruff-pyupgrade --require go/native-fix \
+  --require terraform/native-format
 ```
 
 Use fresh output paths and explicitly acquire registered images first; these test commands never
@@ -34,6 +38,13 @@ Target-controlled code may run only in an available OCI image, never implicitly 
 The harness checks source snapshots before and after review. Runtime, database availability, and
 scanner configuration can change findings, so compare deterministic discovery/context separately
 from total scanner findings. See [releasing](releasing.md) for the complete package gate.
+
+The Phase 7 migration corpus makes no network calls or installation attempts. It executes already
+available compatible native tools only with an explicit trusted writable host policy in disposable
+repositories. Each supported case must create a real diff, pass migration-specific verification,
+become idempotent, restore its complete fingerprint, and reproduce the same result. `--only` selects
+a portable CI subset; `--require` turns a missing selected tool into a failure. Planning-only fixtures
+exercise researched legacy states without claiming that partial/deferred recipes are executable.
 
 ## Independent release regression gate
 

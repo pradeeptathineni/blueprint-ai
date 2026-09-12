@@ -34,6 +34,7 @@ def test_ci_has_distinct_quality_compatibility_sandbox_and_windows_jobs() -> Non
     assert not any("pytest" in command for command in commands["quality"])
     assert sum("pip-audit" in command for rows in commands.values() for command in rows) == 1
     assert any("release_smoke.py" in command for command in commands["windows"])
+    assert any("phase7_migrations.py" in command for command in commands["quality"])
 
 
 def test_release_is_tag_only_build_once_and_least_privilege() -> None:
@@ -76,7 +77,7 @@ def test_release_actions_are_pinned_and_publishing_is_secretless_opt_in() -> Non
 def test_distribution_name_preserves_executable_and_import() -> None:
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert metadata["project"]["name"] == "blueprint-ai-cli"
-    assert metadata["project"]["version"] == "0.6.2"
+    assert metadata["project"]["version"] == "0.7.0"
     assert metadata["project"]["scripts"] == {"blueprint-ai": "blueprint_ai.cli:app"}
     assert metadata["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
         "src/blueprint_ai"

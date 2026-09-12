@@ -53,6 +53,17 @@ Cloud resources, remote state, account credentials, GitHub changes, signing, and
 are never implicit. Native Docker builds require the trusted host path; no daemon socket is exposed
 inside OCI generation.
 
+Evolution requires Git, a checksum-sealed plan, current Blueprint version, and canonical catalog
+re-resolution. It rejects stale bytes, main/dirty mutation without explicit acknowledgement, and
+native-tool execution without trust. The tracked/unignored inventory is copied to an external stage;
+formatters, fixers, project tests, and their normally ignored output cannot write the real worktree.
+Only verified planned text paths and modes are published. Pre-publication fingerprints detect
+concurrent edits, caught failures restore only Blueprint-published paths, and rollback preflights the
+entire post-apply and projected checkpoint fingerprints plus branch, HEAD, and index identity before
+changing any file. Operation state in Git-private storage rejects symlink redirection. Abrupt process
+or host loss at the narrow multi-file publication boundary still requires Git recovery; evolution
+state is not a remote backup.
+
 ## Residual boundaries
 
 Containers share a Linux kernel; rootless operation is preferred when available. gVisor must already
@@ -64,7 +75,8 @@ Git indexes and upstream dependency graphs can consume resources within the docu
 Concurrent hostile host administrators are outside the threat model. Keep the runtime patched and
 review explicit trust/network decisions for the task being performed.
 
-The [Phase 6 validation report](phase-6-validation.md) separates tested controls from these limits.
+The [Phase 6 validation report](phase-6-validation.md) and
+[Phase 7 validation report](phase-7-validation.md) separate tested controls from these limits.
 
 The [independent red team](phase-6-redteam.md) supersedes candidate self-review conclusions.
 POSIX bounded reads pin parent directory descriptors and reject leaf substitution by symlinks or

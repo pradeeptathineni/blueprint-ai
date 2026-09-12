@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0 — 2026-09-12
+
+- Add strict desired-state evolution catalog, plan, report, CLI, candidate inspection, provenance,
+  dry-run diffs, canonical re-resolution, staged verification, and exact transactional rollback.
+- Support isolated Ruff syntax modernization, Go 1.26+ native fixes, Terraform native formatting,
+  Dockerfile maintainer conversion, and reviewed official GitHub Actions full-SHA pinning.
+- Enforce Git/main/dirty/stale-plan guards, explicit native-tool trust, bounded checkpoints and
+  execution, isolated offline caches, planned write scope, automatic failure restoration, deterministic
+  review comparison, and conflict-safe rollback.
+- Record current authoritative Java/Spring, React/Next/CRA, Python/uv, Rust, .NET, Kubernetes,
+  OpenTofu, ast-grep, and Codex decisions without exposing unverified migrations or an unused agent
+  backend.
+- Add a real-tool migration corpus, planning-only legacy fixtures, Create React App 5.0.1 dogfood,
+  mutation/security regressions, generated support metadata, public schemas, and installed-package
+  evolution smoke coverage.
+
 ## 0.6.2 — 2026-09-12
 
 - Publish tag-built wheel and source archives with SHA-256 checksums, an SPDX SBOM, GitHub build/SBOM

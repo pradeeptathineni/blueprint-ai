@@ -1,0 +1,99 @@
+{
+  "schema_version": "1.0.0",
+  "date": "2026-09-12",
+  "baseline": {
+    "release": "0.6.2",
+    "release_commit": "9b65610d5e6ae2587b86626e4d8a583b83d0483e",
+    "starting_main": "fef585b0a28720242abba14e5ec8066b619320b2",
+    "tests": {
+      "passed": 384,
+      "skipped": 7,
+      "coverage_percent": 82
+    }
+  },
+  "supported_corpus": [
+    {
+      "recipe": "python/ruff-pyupgrade",
+      "tool": "Ruff 0.16.7",
+      "real_change": "typing.List annotations to built-in list annotations",
+      "verification": ["native preview", "apply", "native idempotency", "Python parse"],
+      "repeatable": true,
+      "rollback_exact": true
+    },
+    {
+      "recipe": "go/native-fix",
+      "tool": "Go 1.27.0",
+      "real_change": "interface{} to any through go fix",
+      "verification": ["native preview", "apply", "native idempotency", "go test ./..."],
+      "repeatable": true,
+      "rollback_exact": true
+    },
+    {
+      "recipe": "terraform/native-format",
+      "tool": "Terraform 1.16.0",
+      "real_change": "canonical native HCL formatting",
+      "verification": ["native preview", "apply", "native idempotency", "HCL parse"],
+      "repeatable": true,
+      "rollback_exact": true
+    },
+    {
+      "recipe": "container/maintainer-to-oci-label",
+      "tool": "Blueprint AI structural transform",
+      "real_change": "deprecated MAINTAINER to OCI authors label",
+      "verification": ["unified diff", "structural postcondition"],
+      "repeatable": true,
+      "rollback_exact": true
+    },
+    {
+      "recipe": "github-actions/pin-official-actions",
+      "tool": "Blueprint AI schema-aware YAML scalar transform",
+      "real_change": "reviewed official action major tags to immutable full SHAs",
+      "verification": ["strict YAML parse", "immutable-reference postcondition"],
+      "repeatable": true,
+      "rollback_exact": true
+    }
+  ],
+  "planning_only_corpus": [
+    "legacy Python requirements packaging",
+    "older Java and Spring project",
+    "Create React App and generic JS structural candidate",
+    "older Rust edition",
+    "older .NET target",
+    "deprecated Kubernetes API"
+  ],
+  "dogfood": {
+    "repository": "facebook/create-react-app",
+    "tag": "v5.0.1",
+    "commit": "19fa58d527ae74f2b6baa0867463eea1d290f9a5",
+    "transformation": "github-actions/pin-official-actions",
+    "files_changed": 3,
+    "references_changed": 6,
+    "before_findings": 53,
+    "after_findings": 47,
+    "introduced_findings": 0,
+    "review_status": "partial",
+    "incomplete_optional_review_routes": 9,
+    "model_calls": 0,
+    "agent_calls": 0,
+    "baseline_build_tests": "not run: the archived Node 14 dependency graph requires network access; the selected workflow-only transform changed no application source",
+    "rollback_exact": true,
+    "upstream_remote_modified": false
+  },
+  "live_model": {
+    "attempted": false,
+    "reason": "No model call was justified by any supported transformation"
+  },
+  "release_candidate": {
+    "tests": {
+      "passed": 407,
+      "skipped": 7,
+      "coverage_percent": 82
+    },
+    "supported_migrations_passed": 5,
+    "planning_only_fixtures_passed": 6,
+    "installed_smoke_checks_per_distribution": 30,
+    "dependency_vulnerabilities": 0,
+    "model_calls": 0,
+    "agent_calls": 0
+  }
+}

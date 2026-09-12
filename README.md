@@ -1,7 +1,8 @@
 # Blueprint AI
 
-Create, inspect, review, and strengthen software projects with native tools and deterministic
-checks. Optional model reasoning works from bounded evidence. Any folder works; Git is optional.
+Create, inspect, review, strengthen, and safely evolve software projects with native tools and
+deterministic checks. Optional model reasoning works from bounded evidence. Review works in any
+folder; transactional evolution requires Git.
 
 ## Install
 
@@ -20,7 +21,7 @@ After PyPI publication, use `pipx install blueprint-ai-cli` or
 tool before registry publication:
 
 ```bash
-pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.6.2/blueprint_ai_cli-0.6.2-py3-none-any.whl
+pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.7.0/blueprint_ai_cli-0.7.0-py3-none-any.whl
 ```
 
 For development, run `uv sync --extra dev --locked`.
@@ -39,6 +40,9 @@ blueprint-ai review ./project --no-model --format json
 blueprint-ai support
 blueprint-ai init ./new-service --kind python-api --dry-run --no-model
 blueprint-ai add security-policy ./project
+blueprint-ai evolve plan ./project --target python/ruff-pyupgrade > evolution-plan.json
+blueprint-ai evolve apply evolution-plan.json ./project --dry-run \
+  --sandbox host --trust-project-executables
 ```
 
 Inspection and planning do not execute project code. Review defaults to a read-only OCI sandbox
@@ -70,11 +74,12 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Generated support registry](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/support.md): families, tools, availability, and capabilities.
 - [Project genesis](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/genesis.md): naming, providers, cloud starters, and compositions.
 - [Existing-project capabilities](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/capabilities.md): plan, add, verify, and rollback.
+- [Project evolution](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/evolution.md): desired-state plans, supported transformations, safety, and exact rollback.
 - [Tools and sandbox policy](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/sandbox.md): acquisition and execution boundaries.
 - [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
 - [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
 - [Testing, threat model, and release gate](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/releasing.md): verification and release operations.
-- [0.6.2 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.6.2.md): distribution, publication, and model evidence.
+- [0.7.0 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.7.0.md): transformation, corpus, dogfood, distribution, and release evidence.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or
