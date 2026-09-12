@@ -54,7 +54,9 @@ def test_release_is_tag_only_build_once_and_least_privilege() -> None:
     commands = [step.get("run", "") for job in jobs.values() for step in job["steps"]]
     assert sum("uv build" in command for command in commands) == 1
     assert all("${{" not in command for command in commands)
-    assert "--verify-tag" in "\n".join(commands)
+    release_commands = "\n".join(commands)
+    assert "--verify-tag" in release_commands
+    assert "release-assets/dist/SHA256SUMS" in release_commands
 
 
 def test_release_actions_are_pinned_and_publishing_is_secretless_opt_in() -> None:

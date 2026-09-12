@@ -114,7 +114,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             release-assets/*.whl \
             release-assets/*.tar.gz \
-            release-assets/SHA256SUMS \
+            release-assets/dist/SHA256SUMS \
             release-assets/sbom.spdx.json \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
