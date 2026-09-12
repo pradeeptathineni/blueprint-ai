@@ -31,8 +31,9 @@ The remaining registry setup is exact and small because PyPI was not authenticat
 
 1. Create the `blueprint-ai-cli` pending publisher on PyPI for owner `pradeeptathineni`, repository
    `blueprint-ai`, workflow `release.yml`, environment `pypi`.
-2. Set repository variable `BLUEPRINT_PUBLISH_PYPI` to `true`, then rerun the skipped publish job or
-   issue the next authorized release tag. No PyPI token or repository secret is required.
+2. Set repository variable `BLUEPRINT_PUBLISH_PYPI` to `true` before the next authorized release tag.
+   No PyPI token or repository secret is required. Version 0.6.2 remains GitHub-only rather than
+   weakening authentication or replacing its immutable tag for retroactive publication.
 
 TestPyPI is not in the production tag workflow: it needs a separate trusted identity, does not reserve
 the production name, and would add a second public side effect without improving artifact validation.
@@ -65,9 +66,18 @@ checksums, and attestations. Exact final commit, hashes, and hosted URLs are rep
 recording them cannot alter the source being verified.
 
 Pre-release self-review in both untrusted and explicitly trusted project modes reported no P1 or P2
-findings. Its release-specific P3 link warning is expected until this new document reaches `main`;
-the other P3 findings are pre-existing function-size heuristics and a cache-detection heuristic, not
-distribution regressions.
+findings. Its initial release-specific P3 link warning was transient while this new document was not
+yet on `main`, and the final `main` self-review cleared it. The other P3 findings are pre-existing
+function-size heuristics and a cache-detection heuristic, not distribution regressions.
+
+During the hosted release, the build, fresh-install checks, workflow artifacts, provenance, and SBOM
+attestations succeeded. The first GitHub Release job then failed visibly because the metadata artifact
+preserved `dist/SHA256SUMS` while its command expected a root-level file; no release had been created.
+The exact tag-built artifacts were downloaded, checksum-verified, and published with the same
+`--verify-tag` release operation. GitHub's API confirms the resulting release is immutable. The path
+was corrected on `main`, regression-tested against the observed artifact layout, and passed the full
+six-job hosted CI gate. The original failed workflow run remains visible as audit evidence; PyPI was
+skipped as designed.
 
 Actual remaining limitations: live OpenAI provider quality is unmeasured without an API credential;
 PyPI publication remains pending until the trusted publisher identity is configured. Historical
