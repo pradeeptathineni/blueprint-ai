@@ -1129,5 +1129,292 @@
     "requests_to_temporary_loopback_listener": 0,
     "outcome": "passed",
     "metadata_address_live_test": "not_run; automatic approval review required a safer alternative"
+  },
+  "release_finalization": {
+    "date": "2026-09-12",
+    "tag": "0.5.0",
+    "implementation_commit": "fd30f8004678ad0e9b50b646bd50dcf1f4f49a09",
+    "release_fixes_commit": "0793e15b76b888f77616ec12768de6c22912c9d6",
+    "analyzer_source_sha256": "a7623c451aa52f8f64974c69b03e21f596dd10773a73de5882b5acd9d46e0e84",
+    "main_base": "b3c5fc673a0741bdeec29eedc13b3485c564ad02",
+    "tests": 160,
+    "coverage": {
+      "covered_lines": 3506,
+      "num_statements": 4394,
+      "percent_covered": 79.79062357760583,
+      "percent_covered_display": "80",
+      "missing_lines": 888,
+      "excluded_lines": 16,
+      "percent_statements_covered": 79.79062357760583,
+      "percent_statements_covered_display": "80"
+    },
+    "deprecations_as_errors": true,
+    "genesis_matrix": [
+      {
+        "kind": "repository",
+        "status": "verified",
+        "duration_ms": 611,
+        "operations": 1,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-library",
+        "status": "verified",
+        "duration_ms": 72668,
+        "operations": 10,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-cli",
+        "status": "verified",
+        "duration_ms": 72279,
+        "operations": 10,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-api",
+        "status": "verified",
+        "duration_ms": 37781,
+        "operations": 11,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "typescript-library",
+        "status": "verified",
+        "duration_ms": 23821,
+        "operations": 7,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "typescript-cli",
+        "status": "verified",
+        "duration_ms": 47618,
+        "operations": 7,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "node-api",
+        "status": "verified",
+        "duration_ms": 67942,
+        "operations": 8,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "react",
+        "status": "verified",
+        "duration_ms": 60605,
+        "operations": 7,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "full-stack",
+        "status": "verified",
+        "duration_ms": 107769,
+        "operations": 18,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "openapi",
+        "status": "verified",
+        "duration_ms": 532,
+        "operations": 2,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "python-api-addons",
+        "status": "verified",
+        "duration_ms": 45977,
+        "operations": 13,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      },
+      {
+        "kind": "node-full-stack-addons",
+        "status": "verified",
+        "duration_ms": 73461,
+        "operations": 17,
+        "detail": "generated-project verifiers completed; review assurance is reported separately"
+      }
+    ],
+    "service_runtime_checks": [
+      {
+        "case": "python-api-addons",
+        "image": "sha256:baa22dac4e2430bf046569120f62e50426e213e76fca1612255db2c21ae63e63",
+        "user": "10001",
+        "health": "200 {\"status\":\"ok\"}"
+      },
+      {
+        "case": "node-full-stack-addons",
+        "image": "sha256:8ff717ccf92d97cc00c7d6970fbdb807c3d4028b91b81c78fcb11ef809a2b5fb",
+        "user": "node",
+        "health": "200 {\"status\":\"ok\"}"
+      }
+    ],
+    "corpus": [
+      {
+        "repo": "fastapi/full-stack-fastapi-template",
+        "sha": "cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7",
+        "findings": 21,
+        "unchanged": true,
+        "components": 4,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "open-telemetry/opentelemetry-demo",
+        "sha": "9bfe486ff48ee8a6ea942be74171342cb71a9327",
+        "findings": 205,
+        "unchanged": true,
+        "components": 20,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "terraform-aws-modules/terraform-aws-vpc",
+        "sha": "cf0e3ca46fd51f47bf095957f2a6ac6127c89045",
+        "findings": 37,
+        "unchanged": true,
+        "components": 19,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "isovalent/terraform-aws-vpc",
+        "sha": "2bb6b130d0d884808fce9590a5a6c47dd931596d",
+        "findings": 11,
+        "unchanged": true,
+        "components": 1,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "astral-sh/ruff",
+        "sha": "4188373bdd5e3d0b05bbe254f98fd763b37519d6",
+        "findings": 108,
+        "unchanged": true,
+        "components": 105,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "pallets/flask",
+        "sha": "d73fa1cdcbd8b1465c151db8924ba58b1dd14e35",
+        "findings": 19,
+        "unchanged": true,
+        "components": 4,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "open-webui/open-webui",
+        "sha": "0a7c15832fb30b1903753e83f81dc7d27e5b0944",
+        "findings": 2781,
+        "unchanged": true,
+        "components": 2,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "facebook/create-react-app",
+        "sha": "6254386531d263688ccfa542d0e628fbc0de0b28",
+        "findings": 308,
+        "unchanged": true,
+        "components": 26,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      },
+      {
+        "repo": "sindresorhus/awesome",
+        "sha": "bc98e517ddca672f55f9857d714fc3ea3c3540b2",
+        "findings": 4,
+        "unchanged": true,
+        "components": 1,
+        "contexts_with_source": 6,
+        "distinct_contexts": 6
+      }
+    ],
+    "context_count": 54,
+    "contexts_with_source": 54,
+    "context_hashes_unchanged_after_fixes": true,
+    "shared_context_file_reads": 203,
+    "live_model_calls": 0,
+    "benchmarks": [
+      {
+        "schema_version": 1,
+        "repeats": 3,
+        "file_count": 101,
+        "discovery_ms_median": 128.737,
+        "context_ms_median": 64.891,
+        "peak_memory_bytes": 2162044,
+        "files_considered": 101,
+        "files_read": 24,
+        "bytes_read": 720,
+        "estimated_model_input_tokens": 1035,
+        "model_calls": 0,
+        "cache_hit_rate": null,
+        "findings_count": null
+      },
+      {
+        "schema_version": 1,
+        "repeats": 3,
+        "file_count": 1001,
+        "discovery_ms_median": 848.773,
+        "context_ms_median": 494.269,
+        "peak_memory_bytes": 3445263,
+        "files_considered": 1001,
+        "files_read": 24,
+        "bytes_read": 768,
+        "estimated_model_input_tokens": 1048,
+        "model_calls": 0,
+        "cache_hit_rate": null,
+        "findings_count": null
+      },
+      {
+        "schema_version": 1,
+        "repeats": 3,
+        "file_count": 5001,
+        "discovery_ms_median": 4363.521,
+        "context_ms_median": 2771.998,
+        "peak_memory_bytes": 9475271,
+        "files_considered": 5001,
+        "files_read": 24,
+        "bytes_read": 816,
+        "estimated_model_input_tokens": 1060,
+        "model_calls": 0,
+        "cache_hit_rate": null,
+        "findings_count": null
+      }
+    ],
+    "secret_scan_exception": {
+      "fingerprint": "fd30f8004678ad0e9b50b646bd50dcf1f4f49a09:benchmarks/corpus.py:generic-api-key:23",
+      "reason": "Verified public Git commit ID, not a credential; historical occurrence only."
+    },
+    "classification": "Ready for documented local review and genesis scope; no production or live-model certification.",
+    "self_review": {
+      "priorities": {
+        "P3": 9
+      },
+      "duration_ms": 118108,
+      "tools": {
+        "ruff": "passed",
+        "mypy": "passed",
+        "pytest": "passed",
+        "gitleaks": "passed",
+        "osv-scanner": "passed",
+        "trivy": "passed",
+        "actionlint": "passed",
+        "zizmor": "passed",
+        "markdownlint-cli2": "tool_missing",
+        "lychee": "passed"
+      },
+      "model_mode": "off"
+    },
+    "fresh_wheel": {
+      "version": "0.5.0",
+      "source_sha256": "a7623c451aa52f8f64974c69b03e21f596dd10773a73de5882b5acd9d46e0e84",
+      "isolated_install": "passed",
+      "cli_help_version_doctor_inspect_schemas": "passed",
+      "openapi_genesis": "verified",
+      "no_model_review": "passed"
+    }
   }
 }

@@ -10,10 +10,11 @@ Run from a clean checkout with Python 3.12+ and `uv`:
 uv sync --extra dev --locked
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy src
-uv run pytest --cov=blueprint_ai --cov-report=term-missing
+uv run mypy .
+uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
 uv run pip-audit
 uv build
+uv run blueprint-ai --version
 uv run blueprint-ai doctor --json
 uv run blueprint-ai schema report
 uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format sarif

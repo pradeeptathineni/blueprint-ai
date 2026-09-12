@@ -1,7 +1,8 @@
 # Phase 5 validation and release decision
 
-Prepared 2026-09-12. Recommended release: **0.5.0, ready for the documented local genesis/review
-scope**. No release tag or remote publication was created. Production readiness of generated
+Prepared 2026-09-12; release finalization is recorded below. Recommended release: **0.5.0, ready
+for the documented local genesis/review scope**. The initial implementation validation did not
+create a release tag or remote publication. Production readiness of generated
 applications, live model judgment, remote templates, and cloud deployment are not certified.
 The compact [machine-readable evidence](phase-5-evidence.json) records exact corpus SHAs, contexts,
 provider results, image subjects, tool versions, and measurement identities. It contains derived
@@ -194,7 +195,7 @@ uv sync --extra dev --extra model --locked
 uv run ruff check src tests benchmarks
 uv run ruff format --check src tests benchmarks
 uv run mypy .
-uv run pytest --cov=blueprint_ai --cov-report=term-missing
+uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
 uv run pip-audit --progress-spinner off
 uv build
 uv run blueprint-ai schema intent
@@ -214,3 +215,73 @@ execute native publishers and generated projects and requires network. Availabil
 results may differ and must remain explicit. OS/tool/registry versions, source hashes, exact SHAs, and
 lockfiles are the reproduction evidence; neither mutable dependency ranges nor container tags imply
 bit-for-bit reproducibility. Tagging and publishing remain separate release actions.
+
+## 0.5.0 release finalization
+
+The release pass fetched `origin` and reconfirmed clean `codex/phase-5-project-genesis` at
+`fd30f8004678ad0e9b50b646bd50dcf1f4f49a09`. Local and remote `main` still pointed to the original
+`b3c5fc673a0741bdeec29eedc13b3485c564ad02` base, so no reconciliation was necessary. All six historical
+annotated tag objects and commit targets were retained unchanged. The release tag is **`0.5.0`**.
+
+The final engineering review found and fixed three concrete release issues in `0793e15`:
+
+- Malformed script/workspace declarations and Compose services now retain explicit incomplete
+  inventory diagnostics instead of crashing discovery. Regression cases also verify unaffected
+  components and read-only behavior.
+- The genesis-plan schema now describes the complete dry-run output, including its checksum.
+  The CLI preview is checked against that schema, including rejection of invalid checksums.
+- The optional MIT template leaves year and copyright holder for the project owner to complete.
+  It no longer assigns the tool author's identity to generated projects.
+
+Fresh validation passes **160 tests with deprecations treated as errors**, with **79.8% statement
+coverage (3,506/4,394 statements)**. Ruff format/lint, mypy over source/tests/benchmarks, dependency
+audit, wheel/sdist builds, CLI version/help/doctor/inspect, all six schemas, and dry-run schema
+validation pass. Version metadata and the CLI consistently report `0.5.0`. Package archives contain
+no corpus clones, environments, bytecode, or unintended build artifacts. The local package remains
+excluded from the PyPI vulnerability lookup; all audited resolved dependencies pass.
+
+The trusted no-model candidate self-review passes with zero P0/P1/P2 findings and nine P3
+large-function observations. Ruff, mypy, pytest, Gitleaks, OSV-Scanner, Trivy, actionlint, zizmor, and
+Lychee pass; markdownlint-cli2 remains unavailable and semantic coverage remains partial. A fresh
+isolated wheel install passes version/help/doctor/inspect/schema, OpenAPI genesis, and no-model
+review checks. Its analyzer source hash matches the candidate:
+`a7623c451aa52f8f64974c69b03e21f596dd10773a73de5882b5acd9d46e0e84`.
+
+Gitleaks initially mistook the
+pinned public FastAPI commit ID in `benchmarks/corpus.py` for an API key after that file entered Git
+history. The ID was checked against the retained source clone. `.gitleaksignore` excludes only the
+exact commit/file/rule/line fingerprint of that historical occurrence; no rule or whole file is
+disabled, and future revisions remain scanned. The history scan passes with this documented
+false-positive exception.
+
+All twelve native-provider matrix cases were freshly regenerated and verified. Both service images
+again returned HTTP 200 with the expected health body as non-root users, with network disabled,
+read-only filesystems, dropped capabilities, and no-new-privileges. The two image identities match
+the implementation evidence above. The release corrections do not change those default generated
+assets or provider commands; the separate MIT path and preview contract have regression coverage.
+
+The full pinned corpus rerun retains **3,494 findings** and **9/9 unchanged target snapshots**.
+Discovery and context selection were rerun after the release fixes: all component/type inventories
+and all **54 context hashes** are unchanged. Every context still contains 4–8 source snippets,
+with 203 shared file reads across the corpus. OpenTelemetry's previously silent unsupported Compose
+inventory now has a diagnostic; its affected full review was rerun and retains 205 findings with
+explicitly partial concern results. Other corpus graphs are unchanged. This is a regression result,
+not a claim that every finding is correct or every concern is fully assessed.
+
+Fresh final-source benchmark medians (three repeats; memory traced separately):
+
+| Synthetic Python files | Discovery ms | Context ms | Peak MiB | Files read |
+| --- | ---: | ---: | ---: | ---: |
+| 100 | 128.7 | 64.9 | 2.1 | 24 |
+| 1,000 | 848.8 | 494.3 | 3.3 | 24 |
+| 5,000 | 4,363.5 | 2,772.0 | 9.0 | 24 |
+
+These runs overlapped other validation work and are not controlled performance comparisons. No live
+model calls were made. Previously documented optional-tool, semantic, cloud, template/publication,
+migration, and OS-isolation limitations remain in force.
+
+The release process merges the verified branch with the repository's existing merge-commit
+convention, reruns the smoke gate from the exact resulting `main` commit, and only then creates the
+annotated `0.5.0` tag. The tag's peeled commit identifies the release; historical tags are immutable.
+No package-registry publication is part of this release. See the concise
+[0.5.0 release notes](release-notes-0.5.0.md).
