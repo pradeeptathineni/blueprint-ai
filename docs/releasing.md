@@ -1,114 +1,127 @@
 # Release verification
 
-Release from a clean branch after the code, native execution, hostile input, documentation, and
-package gates pass. A zero-finding review is only one input. Existing release tags are immutable;
-use the repository's no-`v` convention. The [independent Phase 6 audit](phase-6-redteam.md) records the observed
-0.6.0 gate and its limits; the [0.6.1 validation](release-validation-0.6.1.md) records the maintenance
-release delta and [release notes](release-notes-0.6.1.md).
+Release from a clean branch after source, package, security, and documentation gates pass. Existing
+release tags are immutable and use the no-`v` convention. The tag-driven `release.yml` workflow
+builds the public artifacts from the exact tag; do not build or upload a second copy manually.
 
-## Source and boundary gate
+## Local gate
 
-Use Python 3.12–3.14 and `uv`. Core discovery and built-in generation also work without Git installed;
-Git-specific inventory and revision operations require the Git client.
+Use Python 3.12–3.14 and `uv`. The complete source gate is:
 
 ```bash
 uv sync --extra dev --extra model --locked
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy .
+uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
 uv run pip-audit
 uv run blueprint-ai support --markdown > /tmp/blueprint-support.md
 cmp docs/support.md /tmp/blueprint-support.md
 uv run blueprint-ai doctor --json
 uv run blueprint-ai schema sandbox-policy
-uv run blueprint-ai review . --profile production --no-model --sandbox docker --fail-on P1 --format json
-uv run blueprint-ai review . --profile production --no-model --trust-project-executables --fail-on P1 --format json
+uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format json
 ```
 
-The second review deliberately executes this trusted source checkout. Never copy that trust flag to
-an untrusted public corpus. Strict review needs explicitly acquired tool images; unavailable tools
-remain partial. Review's priority exit policy does not certify complete tool coverage. Use a disposable
-source checkout in a Docker-shared path if Docker Desktop cannot mount the development directory.
-
-After explicitly acquiring the Python and Node test images:
+Run Actionlint and Zizmor against every workflow. For the live OCI boundary, explicitly acquire the
+Python and Node images and run the sandbox suites; a skipped boundary is not a passing live test:
 
 ```bash
 docker pull python:3.12-slim-bookworm
 docker pull node:24-bookworm-slim
 BLUEPRINT_SANDBOX_TEST_IMAGE=python:3.12-slim-bookworm \
 BLUEPRINT_SANDBOX_NODE_IMAGE=node:24-bookworm-slim \
-  uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
-PYTHONPATH=src uv run python benchmarks/sandbox_overhead.py \
-  --output /tmp/blueprint-startup.json
-PYTHONPATH=src uv run python benchmarks/run.py
+  uv run pytest tests/test_phase6.py tests/test_redteam_sandbox.py -W error::DeprecationWarning
 ```
 
-Without those environment variables the ordinary suite skips live OCI boundary tests. Set both in
-release verification; a missing runtime/image is not a successful isolation test. CI has a dedicated
-Linux Docker job, a Python 3.12/3.13/3.14 compatibility matrix, one Linux quality/build/audit job,
-and a native Windows smoke job. A configured job is not a completed remote run.
+Target repositories and their executable configuration remain untrusted. Only the dedicated trusted
+self-review may use `--trust-project-executables`; never copy that flag to a public corpus.
 
-## Native projects and scanners
+## Distribution gate
 
-Inspect `tools plan` before explicitly acquiring the selected tool/provider images. For the complete
-matrix, provider names are `uv`, `npm`, `vite`, `next`, `go`, `cargo`, `dotnet`, `maven`, `spring`,
-`terraform`, `tofu`, `pulumi`, `helm`, and `kustomize`. Shared images need not be downloaded twice.
-Native mutation fixtures need `ruff`, `gitleaks`, `semgrep`, `hadolint`, `markdownlint-cli2`,
-`conftest`, `ast-grep`, and `buf`; Syft has its own SBOM evidence contract.
-
-Use unused output paths:
+The Python distribution is `blueprint-ai-cli`; it installs the `blueprint-ai` executable and
+`blueprint_ai` import. Build in an unused directory so stale files cannot enter verification:
 
 ```bash
-PYTHONPATH=src uv run python benchmarks/tool_matrix.py --output /tmp/blueprint-native-tools.json
-PYTHONPATH=src uv run python benchmarks/phase6_matrix.py \
-  --output /tmp/blueprint-generated --backend docker --network --compositions
-PYTHONPATH=src uv run python benchmarks/corpus.py --output /tmp/blueprint-corpus --review
-PYTHONPATH=src uv run python benchmarks/genesis_matrix.py \
-  --output /tmp/blueprint-trusted-images --network --kinds repository --add-ons
+uv build --out-dir /tmp/blueprint-0.6.2-dist
+uv run python benchmarks/verify_distribution.py \
+  --dist /tmp/blueprint-0.6.2-dist --tag 0.6.2
+uv venv /tmp/blueprint-wheel
+uv pip install --python /tmp/blueprint-wheel/bin/python \
+  /tmp/blueprint-0.6.2-dist/blueprint_ai_cli-0.6.2-py3-none-any.whl
+env -u PYTHONPATH /tmp/blueprint-wheel/bin/python benchmarks/release_smoke.py \
+  --output /tmp/blueprint-wheel.json
+uv venv /tmp/blueprint-sdist
+uv pip install --python /tmp/blueprint-sdist/bin/python \
+  /tmp/blueprint-0.6.2-dist/blueprint_ai_cli-0.6.2.tar.gz
+env -u PYTHONPATH /tmp/blueprint-sdist/bin/python benchmarks/release_smoke.py \
+  --output /tmp/blueprint-sdist.json
 ```
 
-The final command intentionally uses trusted host providers and local Docker to build generated
-service and development images. It requires native uv/Node/npm. Strict OCI generation never receives
-the Docker socket and reports nested image builds as unavailable. Cloud generation performs local
-validation only, with no provisioning, state backend, or deployment. Compare pinned corpus source
-snapshots and component/context evidence; total findings depend on optional tool and database availability.
+The verifier rejects package/tag/import version drift, a missing console entry point, unsafe archive
+paths, development cache files, non-portable members, and unnecessary sdist roots. Inspect the final
+file lists and scan archives for credentials and machine-specific paths. Record SHA-256 hashes from
+the hosted assets, not a second local build.
 
-## Wheel and source distribution
+## Tag, GitHub Release, and provenance
+
+Commit and reconcile the verified branch with `origin/main`, rerun the full gate, and fast-forward or
+merge it to `main`. Push `main` and wait for every hosted CI job on the exact commit to pass before
+creating and pushing an annotated tag on that commit:
 
 ```bash
-uv build --out-dir /tmp/blueprint-0.6.1-dist
-uv venv /tmp/blueprint-fresh
-uv pip install --python /tmp/blueprint-fresh/bin/python \
-  /tmp/blueprint-0.6.1-dist/blueprint_ai-0.6.1-py3-none-any.whl
-env -u PYTHONPATH /tmp/blueprint-fresh/bin/python benchmarks/release_smoke.py \
-  --output /tmp/blueprint-wheel-smoke.json --image python:3.12-slim-bookworm
-uv pip install --python /tmp/blueprint-fresh/bin/python --reinstall-package blueprint-ai \
-  /tmp/blueprint-0.6.1-dist/blueprint_ai-0.6.1.tar.gz
-env -u PYTHONPATH /tmp/blueprint-fresh/bin/python benchmarks/release_smoke.py \
-  --output /tmp/blueprint-sdist-smoke.json
+git status --porcelain
+git push origin main
+git tag -a 0.6.2 -m 'Blueprint AI 0.6.2'
+git cat-file -t 0.6.2
+git rev-parse '0.6.2^{commit}'
+git push origin 0.6.2
 ```
 
-The smoke harness checks the installed distribution through its CLI: version/help, doctor, seven
-schemas, support/acquisition planning, repository/OpenAPI generation, read-only offline/no-model
-review, capability planning/apply/exact rollback, and either real OCI execution or explicit unavailable
-execution. Repeat in isolated supported Python/platform environments. Inspect wheel/sdist contents,
-record SHA-256 sums alongside the artifacts, and rerun smoke checks on the final build.
+CI and Release both run on the tag. Release builds the wheel and source archive once, verifies fresh
+installs, emits `SHA256SUMS` and `sbom.spdx.json`, records GitHub build-provenance and SBOM
+attestations, and creates the GitHub Release only from the pre-existing remote tag. The GitHub Release
+job alone receives `contents: write`; the build alone receives `attestations: write` and OIDC.
+Repository release immutability must be enabled before publishing so assets and the associated tag
+cannot be replaced after publication.
 
-## Tag and publication
+Verify each hosted artifact after downloading it:
 
-After release authorization, commit the verified tree and create an annotated `0.6.1` tag on that
-exact commit. Check `git status --porcelain`, `git cat-file -t 0.6.1`, and
-`git rev-parse '0.6.1^{commit}'`. Preparing an artifact or tag does not itself authorize pushing it,
-creating a public GitHub Release, or uploading a package.
+```bash
+sha256sum -c SHA256SUMS
+gh attestation verify blueprint_ai_cli-0.6.2-py3-none-any.whl \
+  -R pradeeptathineni/blueprint-ai
+gh attestation verify blueprint_ai_cli-0.6.2.tar.gz \
+  -R pradeeptathineni/blueprint-ai
+gh attestation verify blueprint_ai_cli-0.6.2-py3-none-any.whl \
+  -R pradeeptathineni/blueprint-ai --predicate-type https://spdx.dev/Document/v2.3
+```
 
-For a later authorized PyPI release, prefer [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
-with a protected GitHub environment, an exact repository/workflow identity, short-lived OIDC, and
-publication of the already-verified artifacts. Follow the
-[PyPA GitHub Actions publishing guide](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/).
-Configure publisher identity at the registry before enabling a release job, pin actions to reviewed
-commits, and scope `id-token: write` to that job. No publisher credentials or automatic upload workflow
-are introduced by this release.
+An attestation binds artifacts to source and workflow identity; it is not a security certification.
 
-The published `0.6.0` tag is immutable and resolves to `5e19dac`. The [independent release
-audit](phase-6-redteam.md) remains the historical source gate for that release; never reuse or move
-the tag. Maintenance releases receive a new tag after final CI succeeds on the exact merged commit.
+## PyPI Trusted Publishing
+
+The `publish-pypi` job is skipped unless repository variable `BLUEPRINT_PUBLISH_PYPI` equals `true`.
+Before opting in, configure the pending PyPI publisher exactly as:
+
+- owner: `pradeeptathineni`
+- repository: `blueprint-ai`
+- workflow: `release.yml`
+- environment: `pypi`
+- project: `blueprint-ai-cli`
+
+Create the matching protected GitHub environment with an approval rule and tag-only deployment policy,
+then set the repository variable. The publisher job receives only `id-token: write`, downloads the
+already-verified workflow artifact, and uses the commit-pinned PyPA action. Do not add an API token. A
+missing or mismatched publisher fails the job visibly. TestPyPI is optional and deliberately outside
+the production tag path.
+
+After publication, verify registry metadata and install from the registry in a fresh environment:
+
+```bash
+python -m pip index versions blueprint-ai-cli
+pipx run --spec blueprint-ai-cli blueprint-ai --version
+uvx --from blueprint-ai-cli blueprint-ai doctor
+```
+
+Record exact commit/tag identities, CI and Release run URLs, hosted asset hashes, attestation results,
+PyPI state, and only actual remaining limitations in the final release report.

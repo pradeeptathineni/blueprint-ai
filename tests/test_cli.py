@@ -92,3 +92,18 @@ def test_cli_baseline_separates_existing_findings(python_project: Path) -> None:
         finding["disposition"] for result in payload["results"] for finding in result["findings"]
     }
     assert dispositions == {"baseline"}
+
+
+def test_schema_help_lists_every_supported_schema() -> None:
+    result = run_cli("schema", "--help")
+    assert result.returncode == 0, result.stderr
+    for name in (
+        "settings",
+        "report",
+        "custom-blueprint",
+        "intent",
+        "genesis-plan",
+        "project-graph",
+        "sandbox-policy",
+    ):
+        assert name in result.stdout

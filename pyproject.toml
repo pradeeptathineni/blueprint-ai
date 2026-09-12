@@ -3,12 +3,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "blueprint-ai"
-version = "0.6.1"
+name = "blueprint-ai-cli"
+version = "0.6.2"
 description = "Deterministic-first software project genesis, analysis, and remediation"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "openapi-spec-validator>=0.7,<1",
   "packaging>=25,<27",
@@ -32,8 +33,17 @@ model = ["openai>=3.9.0,<4"]
 [project.scripts]
 blueprint-ai = "blueprint_ai.cli:app"
 
+[project.urls]
+Changelog = "https://github.com/pradeeptathineni/blueprint-ai/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/pradeeptathineni/blueprint-ai#readme"
+Issues = "https://github.com/pradeeptathineni/blueprint-ai/issues"
+Repository = "https://github.com/pradeeptathineni/blueprint-ai"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/blueprint_ai"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/LICENSE", "/README.md", "/pyproject.toml", "/src"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

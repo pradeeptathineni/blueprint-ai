@@ -111,8 +111,8 @@ wheels = [
 ]
 
 [[package]]
-name = "blueprint-ai"
-version = "0.6.1"
+name = "blueprint-ai-cli"
+version = "0.6.2"
 source = { editable = "." }
 dependencies = [
     { name = "openapi-spec-validator" },

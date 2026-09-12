@@ -549,7 +549,10 @@ def schema_command(
     name: Annotated[
         str,
         typer.Argument(
-            help="settings, report, custom-blueprint, intent, genesis-plan, project-graph"
+            help=(
+                "settings, report, custom-blueprint, intent, genesis-plan, project-graph, "
+                "sandbox-policy"
+            )
         ),
     ] = "report",
 ) -> None:

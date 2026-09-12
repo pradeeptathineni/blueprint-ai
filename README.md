@@ -5,17 +5,31 @@ checks. Optional model reasoning works from bounded evidence. Any folder works; 
 
 ## Install
 
-Python 3.12 or newer is required. From a checkout:
+Python 3.12 or newer is required. The Python distribution is `blueprint-ai-cli`; it installs the
+`blueprint-ai` command and the `blueprint_ai` import. From a checkout:
 
 ```bash
 uv tool install .
-blueprint-ai --help
+blueprint-ai --version
+blueprint-ai doctor
+blueprint-ai review . --no-model
 ```
 
-For development, run `uv sync --extra dev --locked`. Optional model support is installed with
-`uv tool install '.[model]'` and reads `OPENAI_API_KEY` from the operator's environment. Provider,
-model, reasoning effort, and timeout are operator-owned environment settings; repository content
-cannot select them. See [the AI context contract](docs/ai-context.md).
+After PyPI publication, use `pipx install blueprint-ai-cli` or
+`uv tool install blueprint-ai-cli`. A GitHub Release wheel can be installed directly with either
+tool before registry publication:
+
+```bash
+pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.6.2/blueprint_ai_cli-0.6.2-py3-none-any.whl
+```
+
+For development, run `uv sync --extra dev --locked`.
+
+Optional model support is installed with `uv tool install 'blueprint-ai-cli[model]'` (or `'.[model]'`
+from a checkout) and reads `OPENAI_API_KEY` from the operator's environment. Provider, model,
+reasoning effort, timeout, call count, and context-token budgets remain operator controlled. Model
+access is optional; `--no-model` makes no remote calls. See
+[the AI context contract](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/ai-context.md).
 
 ## Usage
 
@@ -53,17 +67,14 @@ starters validate locally without provisioning resources or choosing remote stat
 
 ## Choose a workflow
 
-- [Generated support registry](docs/support.md): families, tools, availability, and capabilities.
-- [Project genesis](docs/genesis.md): naming, providers, cloud starters, and compositions.
-- [Existing-project capabilities](docs/capabilities.md): plan, add, verify, and rollback.
-- [Tools](docs/tools.md) and [sandbox policy](docs/sandbox.md): acquisition and execution boundaries.
-- [Profiles](docs/profiles.md): review selection, CI output, baselines, and suppressions.
-- [Provider contracts](docs/providers.md) and [extensions](docs/extending.md): architecture.
-- [Testing](docs/testing.md), [threat model](docs/threat-model.md), and [release gate](docs/releasing.md).
-- [Phase 6 evidence](docs/phase-6-validation.md): measured results and explicit remaining limits.
-- [Independent release audit](docs/phase-6-redteam.md): candidate defects, corrections, and final gate.
-- [0.6.1 maintenance validation](docs/release-validation-0.6.1.md): CI, Windows, provider, and
-  sandbox follow-up evidence.
+- [Generated support registry](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/support.md): families, tools, availability, and capabilities.
+- [Project genesis](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/genesis.md): naming, providers, cloud starters, and compositions.
+- [Existing-project capabilities](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/capabilities.md): plan, add, verify, and rollback.
+- [Tools and sandbox policy](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/sandbox.md): acquisition and execution boundaries.
+- [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
+- [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
+- [Testing, threat model, and release gate](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/releasing.md): verification and release operations.
+- [0.6.2 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.6.2.md): distribution, publication, and model evidence.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or

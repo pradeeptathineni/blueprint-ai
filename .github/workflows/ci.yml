@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   quality:
+    name: Quality and package checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -45,6 +46,7 @@ jobs:
           output-file: sbom.spdx.json
 
   compatibility:
+    name: Python ${{ matrix.python }} compatibility
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +63,7 @@ jobs:
       - run: uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
 
   sandbox:
+    name: Live OCI sandbox boundary
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -78,6 +81,7 @@ jobs:
           BLUEPRINT_SANDBOX_NODE_IMAGE: node:24-bookworm-slim
 
   windows:
+    name: Windows CLI and wheel smoke
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -80,7 +80,8 @@ a minimum allocation beyond the configured budget. No live API credential was pr
 
 ## Coding-agent boundary
 
-Coding agents are not model providers. Blueprint AI sends bounded review context only through the
-provider protocol and does not invoke Codex CLI, App Server, an SDK agent, or an autonomous patch loop.
-The retained interoperability boundary is: Blueprint AI decides or validates, an explicitly chosen
-agent may implement, and Blueprint AI verifies. Agent orchestration remains outside this release.
+`ModelProvider` is the bounded semantic path: Blueprint AI sends redacted evidence to a model API and
+accepts schema-validated judgment. A future `AgentBackend` would be an implementation path: Blueprint
+AI supplies a plan to an explicitly selected coding-agent harness, then verifies returned repository
+changes. Coding-agent CLIs, App Server, SDK agents, and autonomous patch loops are therefore not
+registered as model providers and are not implemented in 0.6.2.
