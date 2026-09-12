@@ -75,6 +75,20 @@ def _read(root: Path, rel: str, limit: int = 200_000) -> str:
     return read_text_bounded(root / rel, limit, root=root, errors="replace")
 
 
+def _scripts(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) or not isinstance(command, str) for key, command in value.items()
+    ):
+        raise ValueError("scripts must map names to command strings")
+    return value
+
+
+def _members(value: Any) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(member, str) for member in value):
+        raise ValueError("workspace members must be a list of strings")
+    return value
+
+
 def _requirements(component: Component, values: Any, rel: str, scope: str) -> None:
     if not isinstance(values, list):
         return
@@ -103,7 +117,7 @@ def _manifest(root: Path, rel: str, c: Component) -> None:
         data = tomllib.loads(text)
         project = data.get("project", {})
         c.name = project.get("name") or c.name
-        c.scripts.update(project.get("scripts", {}))
+        c.scripts.update(_scripts(project.get("scripts", {})))
         if project.get("scripts"):
             c.roles.append("cli")
         _requirements(c, project.get("dependencies", []), rel, "runtime")
@@ -124,7 +138,9 @@ def _manifest(root: Path, rel: str, c: Component) -> None:
                         requirement=str(requirement),
                     )
                 )
-        c.workspace_patterns.extend(tool.get("uv", {}).get("workspace", {}).get("members", []))
+        c.workspace_patterns.extend(
+            _members(tool.get("uv", {}).get("workspace", {}).get("members", []))
+        )
         if "build-system" in data:
             c.lifecycle = "library-framework"
             c.roles.append("library")
@@ -136,7 +152,7 @@ def _manifest(root: Path, rel: str, c: Component) -> None:
         if not isinstance(data, dict):
             raise ValueError("package manifest must be an object")
         c.name = data.get("name") or c.name
-        c.scripts.update(data.get("scripts", {}))
+        c.scripts.update(_scripts(data.get("scripts", {})))
         for field, scope in (
             ("dependencies", "runtime"),
             ("devDependencies", "development"),
@@ -159,7 +175,7 @@ def _manifest(root: Path, rel: str, c: Component) -> None:
             c.roles.append("library")
         workspaces = data.get("workspaces", [])
         c.workspace_patterns.extend(
-            workspaces.get("packages", []) if isinstance(workspaces, dict) else workspaces
+            _members(workspaces.get("packages", []) if isinstance(workspaces, dict) else workspaces)
         )
         if manager := data.get("packageManager"):
             c.package_manager = str(manager).split("@", 1)[0]
@@ -167,7 +183,7 @@ def _manifest(root: Path, rel: str, c: Component) -> None:
     elif name == "Cargo.toml":
         data = tomllib.loads(text)
         c.name = data.get("package", {}).get("name") or c.name
-        c.workspace_patterns.extend(data.get("workspace", {}).get("members", []))
+        c.workspace_patterns.extend(_members(data.get("workspace", {}).get("members", [])))
         for field, scope in (
             ("dependencies", "runtime"),
             ("dev-dependencies", "development"),
@@ -449,7 +465,7 @@ def build_graph(root: Path, files: list[Path], languages: dict[str, str]) -> Pro
         if name in {"pnpm-workspace.yaml", "pnpm-workspace.yml"}:
             try:
                 c.workspace_patterns.extend(
-                    load_yaml_mapping(root / rel, root, label=rel).get("packages", [])
+                    _members(load_yaml_mapping(root / rel, root, label=rel).get("packages", []))
                 )
                 c.package_manager = "pnpm"
             except ValueError:
@@ -711,10 +727,15 @@ def _generation_evidence(root: Path, rels: list[str], graph: ProjectGraph) -> No
         ):
             try:
                 compose = load_yaml_mapping(root / rel, root, label=rel)
+                services = compose.get("services", {})
+                if not isinstance(services, dict):
+                    raise ValueError("Compose services must be a mapping")
             except ValueError:
+                graph.diagnostics.append(f"{rel}: invalid Compose inventory")
                 continue
-            for service, spec in compose.get("services", {}).items():
+            for service, spec in services.items():
                 if not isinstance(spec, dict):
+                    graph.diagnostics.append(f"{rel}: invalid Compose service inventory")
                     continue
                 build = spec.get("build")
                 context = build.get("context") if isinstance(build, dict) else build

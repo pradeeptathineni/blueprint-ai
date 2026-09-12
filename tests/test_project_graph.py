@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from blueprint_ai.adapters import applicable_adapters
 from blueprint_ai.blueprints import BLUEPRINTS
 from blueprint_ai.core import Finding
@@ -13,6 +15,39 @@ def write(root: Path, path: str, text: str) -> None:
     file = root / path
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(text)
+
+
+@pytest.mark.parametrize(
+    "filename,content",
+    [
+        ("compose.yaml", "services: []\n"),
+        ("compose.yaml", "services: null\n"),
+        ("compose.yaml", "services:\n  app: null\n"),
+        ("package.json", '{"name":"broken","scripts":{"test":null}}'),
+        ("package.json", '{"name":"broken","workspaces":[null]}'),
+        ("pyproject.toml", "[project.scripts]\ntest=123\n"),
+        ("pyproject.toml", "[tool.uv.workspace]\nmembers=[123]\n"),
+        ("Cargo.toml", "[workspace]\nmembers=[123]\n"),
+        ("pnpm-workspace.yaml", "packages: [null]\n"),
+    ],
+)
+def test_malformed_metadata_remains_partial_and_read_only(
+    tmp_path: Path, filename: str, content: str
+) -> None:
+    write(tmp_path, filename, content)
+    write(tmp_path, "good/package.json", '{"name":"good","scripts":{"test":"node --test"}}')
+    before = {p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    context, _ = make_context(tmp_path, blueprints=["repository"], model_mode="off")
+    report = review(context)
+    assert any(filename in message for message in report.facts.graph.diagnostics)
+    assert any(
+        node.component == "good" and node.kind == "unit" for node in report.facts.graph.verification
+    )
+    assert report.results[0].status == "partial"
+    assert "Project inventory is partial" in " ".join(report.results[0].notes)
+    assert before == {
+        p.relative_to(tmp_path): p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()
+    }
 
 
 def test_nested_components_do_not_learn_roles_from_fixtures(tmp_path: Path) -> None:

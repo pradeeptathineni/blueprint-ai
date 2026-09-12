@@ -596,7 +596,7 @@ def strengthen(root: Path, plan: GenesisPlan) -> None:
             (
                 "MIT License\n"
                 "\n"
-                "Copyright (c) 2026 Pradeep Tathineni\n"
+                "Copyright (c) [year] [copyright holder]\n"
                 "\n"
                 "Permission is hereby granted, free of charge, to any person obtaining a "
                 "copy\n"

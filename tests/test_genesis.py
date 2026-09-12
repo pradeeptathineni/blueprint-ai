@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 from typer.testing import CliRunner
 
 from blueprint_ai.cli import app
@@ -83,6 +84,12 @@ def test_dry_run_is_pure_and_no_model_is_supported(tmp_path: Path) -> None:
     assert {"python", "react", "api", "api-client"} <= set(plan["capabilities"])
     assert not list(tmp_path.iterdir())
     assert plan["plan_sha256"]
+    schema_result = CliRunner().invoke(app, ["schema", "genesis-plan"])
+    assert schema_result.exit_code == 0, schema_result.output
+    schema = json.loads(schema_result.output)["schema"]
+    Draft202012Validator.check_schema(schema)
+    Draft202012Validator(schema).validate(plan)
+    assert not Draft202012Validator(schema).is_valid({**plan, "plan_sha256": "invalid"})
 
 
 def test_plan_tampering_cannot_supply_commands(tmp_path: Path) -> None:
@@ -117,6 +124,17 @@ def test_nonempty_and_symlink_destinations_are_preserved(tmp_path: Path) -> None
     with pytest.raises(ValueError, match="symbolic"):
         create_project(link / "child", plan)
     assert (destination / "user.txt").read_text() == "keep"
+
+
+def test_mit_generation_does_not_assign_the_tool_authors_copyright(tmp_path: Path) -> None:
+    destination = tmp_path / "independent-project"
+    result = create_project(
+        destination, plan_project(IntentSpec(name="Independent Project", license="MIT"))
+    )
+    assert result.status == "verified", result.detail
+    license_text = (destination / "LICENSE").read_text()
+    assert "Copyright (c) [year] [copyright holder]" in license_text
+    assert "Pradeep Tathineni" not in license_text
 
 
 def test_provider_trust_preflight_has_no_side_effects(tmp_path: Path) -> None:

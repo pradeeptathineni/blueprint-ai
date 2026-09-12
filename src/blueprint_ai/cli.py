@@ -525,14 +525,14 @@ def schema_command(
 ) -> None:
     """Print stable machine-readable JSON schemas for integrations and extensions."""
     from blueprint_ai.core.project import ProjectGraph
-    from blueprint_ai.genesis.models import GenesisPlan, IntentSpec
+    from blueprint_ai.genesis.models import GenesisPlanPreview, IntentSpec
 
     schemas = {
         "settings": Settings.model_json_schema(),
         "report": RunReport.model_json_schema(mode="serialization"),
         "custom-blueprint": custom_blueprint_schema(),
         "intent": IntentSpec.model_json_schema(),
-        "genesis-plan": GenesisPlan.model_json_schema(),
+        "genesis-plan": GenesisPlanPreview.model_json_schema(),
         "project-graph": ProjectGraph.model_json_schema(),
     }
     if name not in schemas:
@@ -618,6 +618,7 @@ def init_command(
     from blueprint_ai.config import load_yaml_mapping
     from blueprint_ai.genesis import IntentSpec, plan_project
     from blueprint_ai.genesis.executor import create_project
+    from blueprint_ai.genesis.models import GenesisPlanPreview
 
     try:
         if spec:
@@ -636,7 +637,7 @@ def init_command(
         intent = IntentSpec.model_validate(data)
         resolved = plan_project(intent)
         if dry_run:
-            _dump({"plan_sha256": resolved.digest(), **resolved.model_dump(mode="json")})
+            _dump(GenesisPlanPreview(**resolved.model_dump(), plan_sha256=resolved.digest()))
             return
         result = create_project(
             path, resolved, allow_network=allow_network, trust_providers=trust_providers

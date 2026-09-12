@@ -106,6 +106,12 @@ class GenesisPlan(BaseModel):
         ).hexdigest()
 
 
+class GenesisPlanPreview(GenesisPlan):
+    """CLI dry-run interchange, including its computed integrity checksum."""
+
+    plan_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class OperationResult(BaseModel):
     id: str
     status: Literal["passed", "failed", "unavailable", "unauthorized", "partial"]

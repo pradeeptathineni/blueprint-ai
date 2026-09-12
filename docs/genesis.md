@@ -4,6 +4,7 @@
 It creates fresh projects only. Existing-project `plan`, `apply`, kits, and rollback keep their original
 meaning. Common generation never calls a model. `catalog` exposes providers and capabilities;
 `schema intent`, `schema genesis-plan`, and `schema project-graph` expose the strict interchange data.
+The genesis-plan schema describes `init --dry-run` output, including its `plan_sha256` checksum.
 
 ## Delivered kinds
 
@@ -51,6 +52,7 @@ then rerun with `--trust-providers --allow-network`. When `--spec` is supplied, 
 kind/name/capability flags do not override it. Unknown keys, duplicate YAML keys, aliases, unsupported
 kinds, and incompatible options fail validation. `maturity` and `license` are spec fields. The default
 license is `UNLICENSED`; the tool does not grant rights on the user's behalf.
+Choosing `MIT` creates a license template; fill in its year and copyright holder before publication.
 
 Naming keeps display, repository, package, and Python import-module identities distinct. PyPA rules
 permit normalized case/dot/underscore/hyphen equivalents; npm rules require legal lowercase package
