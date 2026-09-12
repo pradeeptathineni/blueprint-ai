@@ -70,6 +70,8 @@ def deduplicate(findings: list[Finding], project_types: list[str]) -> list[Findi
         return alias
 
     for item in findings:
+        if item.provenance == "model":
+            continue
         ids = set(item.advisory_aliases)
         if item.category == "dependency-vulnerability" and item.rule_id:
             ids.add(item.rule_id)
@@ -94,7 +96,11 @@ def deduplicate(findings: list[Finding], project_types: list[str]) -> list[Findi
             else item.fingerprint
         )
         if item.category == "dependency-vulnerability" and item.tool_metadata.get("package"):
-            advisory = representative(item.rule_id or item.message)
+            advisory = (
+                item.rule_id or item.message
+                if item.provenance == "model"
+                else representative(item.rule_id or item.message)
+            )
             package = str(item.tool_metadata["package"])
             ecosystem = str(item.tool_metadata.get("ecosystem") or "").lower()
             ecosystem = {"pip": "pypi", "python": "pypi", "node-pkg": "npm"}.get(
@@ -112,6 +118,8 @@ def deduplicate(findings: list[Finding], project_types: list[str]) -> list[Findi
             )
             key = "dependency:" + repr(identity)
             item.rule_id = advisory
+        if item.provenance == "model":
+            key = "model:" + key
         previous = grouped.get(key)
         if not previous:
             grouped[key] = item

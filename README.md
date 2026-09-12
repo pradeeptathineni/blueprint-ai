@@ -59,6 +59,7 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Provider contracts](docs/providers.md) and [extensions](docs/extending.md): architecture.
 - [Testing](docs/testing.md), [threat model](docs/threat-model.md), and [release gate](docs/releasing.md).
 - [Phase 6 evidence](docs/phase-6-validation.md): measured results and explicit remaining limits.
+- [Independent release audit](docs/phase-6-redteam.md): candidate defects, corrections, and final gate.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or

@@ -22,3 +22,8 @@ results, graph facts, and tool diagnostics remain deterministic. Model calls req
 provider dependency and credentials; `--no-model` makes zero model calls. Context metrics record
 bytes/files read, unique snippets, token budgets, calls, cache behavior, and latency. The current
 validation report states whether live credentials were available.
+
+Changed-file review requires usable Git comparison evidence and includes individual files in new
+untracked directories. Invalid refs fail explicitly; a clean tree does not reintroduce file-scoped
+findings. JUnit represents incomplete concerns without active findings as skipped, and counts only
+active failures. SARIF includes execution completeness and per-concern tool/sandbox evidence.

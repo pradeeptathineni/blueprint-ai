@@ -51,10 +51,40 @@ def safe_regular_file(
 def read_bytes_bounded(path: Path, limit: int, *, root: Path | None = None) -> bytes:
     if not safe_regular_file(path, root):
         raise OSError(f"not a safe regular file: {path}")
-    size = path.lstat().st_size
-    if size > limit:
-        raise ValueError(f"{path.name} exceeds the {limit}-byte safety limit")
-    with path.open("rb") as handle:
+    # Recheck the opened descriptor: an untrusted path can change after preflight.
+    # NONBLOCK prevents a replacement FIFO from hanging before fstat can reject it.
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    if (
+        root is not None
+        and os.open in os.supports_dir_fd
+        and hasattr(os, "O_NOFOLLOW")
+        and hasattr(os, "O_DIRECTORY")
+    ):
+        try:
+            relative = path.absolute().relative_to(root.absolute())
+        except ValueError as exc:
+            raise OSError(f"read target escapes safety root: {path}") from exc
+        if ".." in relative.parts or not relative.parts:
+            raise OSError(f"read target escapes safety root: {path}")
+        # Pin every directory inside the authorized root; replacing a parent with
+        # an outside symlink must not redirect the final open.
+        directory = os.open(root.resolve(), flags | os.O_DIRECTORY)
+        try:
+            for part in relative.parts[:-1]:
+                child = os.open(part, flags | os.O_DIRECTORY, dir_fd=directory)
+                os.close(directory)
+                directory = child
+            descriptor = os.open(relative.name, flags, dir_fd=directory)
+        finally:
+            os.close(directory)
+    else:
+        descriptor = os.open(path, flags)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise OSError(f"not a safe regular file: {path}")
+        if info.st_size > limit:
+            raise ValueError(f"{path.name} exceeds the {limit}-byte safety limit")
         data = handle.read(limit + 1)
     if len(data) > limit:
         raise ValueError(f"{path.name} exceeds the {limit}-byte safety limit")

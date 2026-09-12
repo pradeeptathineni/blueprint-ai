@@ -53,3 +53,19 @@ Actual provider usage is reported when supplied. No silent malformed-response re
 default SDK retries are zero. Exhausted call budgets, missing models, and malformed results produce
 partial concern analysis while retaining deterministic findings. Cache hits do not consume uncached
 call capacity; cached input/output usage describes the original response, not a new billable call.
+
+## Independent boundary corrections
+
+The provider wire schema contains only semantic finding fields and closed objects, with root-level
+references. It excludes mutation, suppression, and tool-authority fields. This follows the
+[Structured Outputs contract](https://developers.openai.com/api/docs/guides/structured-outputs).
+Incomplete responses fail explicitly. Cache envelopes and metric values are validated; cache hits
+are normalized as model evidence again. Model and deterministic findings cannot share an aggregation
+or baseline identity, so model severity cannot promote deterministic evidence.
+
+Redaction recognizes quoted configuration keys, quoted/truncated values, private-key blocks, and
+credential-bearing non-HTTP URLs. Key tokenization avoids quadratic regex behavior on hostile long
+identifiers. It remains a likely-secret filter, not a complete data-loss-prevention guarantee.
+Reports expose current `calls` and latency; cached token/cost fields describe the original response.
+An allocation below 64 estimated context tokens is skipped with partial status instead of multiplying
+a minimum allocation beyond the configured budget. No live API credential was present in the audit.

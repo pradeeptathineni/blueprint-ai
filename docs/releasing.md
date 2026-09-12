@@ -2,7 +2,7 @@
 
 Release from a clean branch after the code, native execution, hostile input, documentation, and
 package gates pass. A zero-finding review is only one input. Existing release tags are immutable;
-use the repository's no-`v` convention. The [Phase 6 report](phase-6-validation.md) records the observed
+use the repository's no-`v` convention. The [independent Phase 6 audit](phase-6-redteam.md) records the observed
 0.6.0 gate and its limits; [release notes](release-notes-0.6.0.md) are ready for a later authorized release.
 
 ## Source and boundary gate
@@ -29,18 +29,20 @@ an untrusted public corpus. Strict review needs explicitly acquired tool images;
 remain partial. Review's priority exit policy does not certify complete tool coverage. Use a disposable
 source checkout in a Docker-shared path if Docker Desktop cannot mount the development directory.
 
-After explicitly acquiring the Python test image:
+After explicitly acquiring the Python and Node test images:
 
 ```bash
 docker pull python:3.12-slim-bookworm
+docker pull node:24-bookworm-slim
 BLUEPRINT_SANDBOX_TEST_IMAGE=python:3.12-slim-bookworm \
+BLUEPRINT_SANDBOX_NODE_IMAGE=node:24-bookworm-slim \
   uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
 PYTHONPATH=src uv run python benchmarks/sandbox_overhead.py \
   --output /tmp/blueprint-startup.json
 PYTHONPATH=src uv run python benchmarks/run.py
 ```
 
-Without that environment variable the ordinary suite skips the live OCI boundary test. Set it in
+Without those environment variables the ordinary suite skips live OCI boundary tests. Set both in
 release verification; a missing runtime/image is not a successful isolation test. CI has a dedicated
 Linux Docker job and a Python 3.12/3.13/3.14 quality matrix. A configured job is not a completed remote run.
 
@@ -103,3 +105,11 @@ publication of the already-verified artifacts. Follow the
 Configure publisher identity at the registry before enabling a release job, pin actions to reviewed
 commits, and scope `id-token: write` to that job. No publisher credentials or automatic upload workflow
 are introduced by this release.
+
+## Independent 0.6.0 correction gate
+
+The [independent release audit](phase-6-redteam.md) supersedes the original candidate self-review.
+Its source gate, native matrix, browser checks, hostile cases, and final installed-artifact commands
+are retained there. The existing never-published `0.6.0` tag remains on `6c376b9` and is stale after
+these corrections. Release finalization must recreate it on the independently verified audit commit,
+under separate authorization. Do not move historical published tags.

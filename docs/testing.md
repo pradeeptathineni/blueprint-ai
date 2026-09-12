@@ -2,7 +2,7 @@
 
 Use deterministic unit and property checks, native scanner mutation fixtures, fresh generated
 projects, compositions, public repositories, hostile inputs, and isolated package installs together.
-The [Phase 6 report](phase-6-validation.md) records actual results and environment limits.
+The [independent Phase 6 audit](phase-6-redteam.md) records corrected results and environment limits.
 
 ```bash
 uv sync --extra dev --locked
@@ -34,3 +34,17 @@ Target-controlled code may run only in an available OCI image, never implicitly 
 The harness checks source snapshots before and after review. Runtime, database availability, and
 scanner configuration can change findings, so compare deterministic discovery/context separately
 from total scanner findings. See [releasing](releasing.md) for the complete package gate.
+
+## Independent release regression gate
+
+The [red-team report](phase-6-redteam.md) records the corrected source gate. Enable both
+`BLUEPRINT_SANDBOX_TEST_IMAGE=python:3.12-slim-bookworm` and
+`BLUEPRINT_SANDBOX_NODE_IMAGE=node:24-bookworm-slim` to execute all optional live boundary tests.
+`benchmarks/redteam_kits.py` checks all sixteen live kit transactions;
+`benchmarks/redteam_tools.py` adds the native formatter/parser mutation fixtures.
+`benchmarks/redteam_browser.cjs` drives installed Playwright/Chrome against explicitly supplied
+loopback applications. See the linked audit documents for prerequisites, exact commands and evidence.
+`benchmarks/redteam_platforms.py --linux-tests --output PATH` creates temporary Git-enabled Linux
+images and runs the full suite on Python 3.12–3.14. After building both distributions, its `--installs`
+mode checks each artifact in separate fresh Linux and native environments. Output paths must be fresh
+and outside the checkout; images and native Python interpreters must already be available.

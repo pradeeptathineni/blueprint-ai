@@ -19,7 +19,8 @@ IaC CI combinations are currently rejected explicitly pending their own pinned w
 Docker build verifier. `--devcontainer` adds a separate non-root development image containing the
 selected Python/uv and/or Node toolchain, with its own Docker build. The Docker verifier uses a local
 Unix socket; a missing daemon is partial. No host credentials or Docker socket are mounted into images.
-Windows can run core generation, but this release's Docker verifier requires a local Unix socket.
+Core generation targets Windows, but native Windows execution remains unverified. This release's
+Docker verifier requires a local Unix socket and does not support Windows named pipes.
 Dev Container editor attachment and cross-platform image execution are not claimed as validated.
 
 Full stack uses independent component manifests and lockfiles under `backend` and `frontend`.
@@ -81,6 +82,10 @@ An existing destination, symlink ancestor, or modified serialized plan is reject
 execution always recomputes commands from validated intent. No remote template hooks, repository
 creation, publishing, cloud provisioning, or package release occurs.
 
+Eligible generated source files are limited to 2,000,000 bytes each. Oversized source fails
+generation before publication, rather than being silently omitted. Inventory hashing and native
+JSON/YAML validation use bounded, no-follow reads; transient dependencies/build output remain excluded.
+
 Exit codes: `0` verified, `3` partial, `2` failed or invalid input. Inspect the JSON result even when the
 command exits successfully: review assurance and improvement findings are separate from verifier status.
 `.blueprint-ai/genesis.json` owns the receipt; `.blueprint-ai/review.json` records the final review.
@@ -92,7 +97,8 @@ contract relationships; a receipt never grants execution trust or overrides dete
 
 `--kind terraform`, `opentofu`, or `pulumi` accepts `--cloud aws|azure|gcp`. Terraform/OpenTofu declare
 provider requirements and run format, init with `-backend=false`, and validate. Pulumi uses native
-`new --generate-only` and TypeScript checking. No starter declares billable resources, configures a
+`new --generate-only` and TypeScript checking; its empty program does not exercise cloud SDK resource
+APIs and is classified partial. No starter declares billable resources, configures a
 remote backend, previews, plans, applies, or deploys infrastructure. Supply account/state decisions
 explicitly in your own later workflow. Kubernetes starts with a Namespace and bounded structural
 checks; Helm uses its native chart generator/linter/renderer; Kustomize uses its native local build.

@@ -26,6 +26,10 @@ _TRIVY_LOCK = threading.Lock()
 _TRIVY_CACHE: tempfile.TemporaryDirectory[str] | None = None
 
 
+class IncompleteToolOutput(ValueError):
+    """A native report explicitly says some requested analysis did not run."""
+
+
 class CommandResult:
     def __init__(
         self,
@@ -167,6 +171,8 @@ class ToolAdapter(ABC):
                     name=self.name,
                     available=True,
                     network_required=getattr(self, "network_required", False),
+                    requires_project_trust=getattr(self, "executes_project_code", False),
+                    recommended_version=getattr(self, "recommended_version", None),
                 )
         except (SandboxUnavailable, OSError) as exc:
             status = ToolStatus(
@@ -238,6 +244,7 @@ class ToolAdapter(ABC):
                 status.detail = "tool output exceeded capture limit; analysis is incomplete"
                 status.duration_ms = round((time.monotonic() - started) * 1000)
                 return status, [], status.detail
+            self.output_evidence: dict[str, Any] = {}
             findings = [] if result.timed_out else self.parse(result, root)
             status.output_evidence = getattr(self, "output_evidence", {})
             if root != repository_root:
@@ -257,6 +264,8 @@ class ToolAdapter(ABC):
                 if result.timed_out
                 else f"analysis prerequisite missing: {incomplete.message}"
                 if incomplete
+                else "nonzero exit without structured diagnostics"
+                if result.returncode != 0 and not findings
                 else None
                 if result.returncode in self.expected_codes
                 else _failure_detail(result)
@@ -282,6 +291,12 @@ class ToolAdapter(ABC):
         except (OSError, SandboxUnavailable) as exc:
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
+            status.detail = sanitize_label(str(exc), 500)
+            return status, [], status.detail
+        except IncompleteToolOutput as exc:
+            status.duration_ms = round((time.monotonic() - started) * 1000)
+            status.outcome = "tool_error"
+            status.analysis_state = "incomplete"
             status.detail = sanitize_label(str(exc), 500)
             return status, [], status.detail
         except Exception as exc:
@@ -322,9 +337,17 @@ class ExternalToolAdapter(ToolAdapter):
         self.parser = parser
         self.expected_codes = expected_codes or {0, 1}
         self.executable = executable or name
-        self.install = install or f"install {name} with its official package or release"
+        spec = TOOLS.get(name.split(":", 1)[0])
+        self.install = install or (
+            (f"blueprint-ai tools plan {spec.id}; " if spec.image else "")
+            + spec.acquisition
+            + "; "
+            + spec.source
+            if spec
+            else f"install {name} with its official package or release"
+        )
         self.network_required = network_required
-        self.recommended_version = recommended_version
+        self.recommended_version = recommended_version or (spec.versions if spec else None)
         self.disabled_reason: str | None = None
         self.executes_project_code = executes_project_code
         self.default_timeout = default_timeout
@@ -358,7 +381,10 @@ class ExternalToolAdapter(ToolAdapter):
             try:
                 output = run_bounded_command([path, *flag], Path(tempfile.gettempdir()), 3, 16_384)
                 if output.returncode == 0:
-                    version = (output.stdout or output.stderr).strip().splitlines()[0][:160]
+                    lines = (output.stdout or output.stderr).strip().splitlines()
+                    version = next(
+                        (line for line in lines if re.search(r"\d+\.\d+", line)), lines[0]
+                    )[:160]
                     break
             except (OSError, subprocess.TimeoutExpired, IndexError):
                 pass
@@ -400,7 +426,9 @@ def finding(
     category: str = "tool-finding",
     rule_id: str | None = None,
 ) -> Finding:
-    normalized = severity.lower()
+    normalized = {"error": "high", "warning": "medium", "note": "low", "style": "low"}.get(
+        severity.lower(), severity.lower()
+    )
     if normalized not in {"critical", "high", "medium", "low", "info"}:
         normalized = "medium"
     normalized_file = None
@@ -432,11 +460,29 @@ def finding(
     )
 
 
+def _object_report(result: CommandResult, key: str, *, nullable: bool = False) -> dict:
+    data = json.loads(result.stdout)
+    if not isinstance(data, dict) or key not in data:
+        raise ValueError(f"missing {key} in structured tool output")
+    value = data[key]
+    if not isinstance(value, list) and not (nullable and value is None):
+        raise ValueError(f"expected {key} diagnostic array")
+    if value is not None and any(not isinstance(row, dict) for row in value):
+        raise ValueError(f"invalid {key} diagnostic")
+    return data
+
+
+def _report_errors(data: dict, key: str, tool: str) -> None:
+    errors = data.get(key)
+    if errors:
+        raise IncompleteToolOutput(f"{tool} reported incomplete analysis ({key}): {errors!s}")
+
+
 def parse_json_list(
     result: CommandResult, root: Path, adapter: ExternalToolAdapter
 ) -> list[Finding]:
     try:
-        rows = json.loads(result.stdout or "[]")
+        rows = json.loads(result.stdout)
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     if isinstance(rows, dict):
@@ -495,8 +541,6 @@ def parse_json_list(
                 line=_int(line),
             )
         )
-    if not findings and result.returncode != 0 and result.stdout.strip():
-        return parse_lines(result, root, adapter)
     if adapter.name == "gitleaks":
         specific_locations = {
             (item.file, item.range.start_line if item.range else None)
@@ -512,12 +556,71 @@ def parse_json_list(
     return findings
 
 
+def parse_cfn_lint(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    rows = json.loads(result.stdout)
+    if not isinstance(rows, list):
+        raise ValueError("CloudFormation lint must emit a diagnostic array")
+    findings = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("Message"), str):
+            raise ValueError("invalid CloudFormation lint diagnostic")
+        rule = row.get("Rule") or {}
+        start = (row.get("Location") or {}).get("Start") or {}
+        findings.append(
+            finding(
+                adapter,
+                root=root,
+                category="schema-validation",
+                rule_id=str(rule.get("Id") or "cfn-lint"),
+                message=row["Message"],
+                severity=str(row.get("Level") or "warning"),
+                file=row.get("Filename"),
+                line=_int(start.get("LineNumber")),
+                recommendation=rule.get("Source") or "Correct the CloudFormation template.",
+            )
+        )
+    return findings
+
+
+def parse_spectral(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    rows = json.loads(result.stdout)
+    if not isinstance(rows, list):
+        raise ValueError("Spectral must emit a diagnostic array")
+    findings = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("message"), str):
+            raise ValueError("invalid Spectral diagnostic")
+        start = (row.get("range") or {}).get("start") or {}
+        line = _int(start.get("line"))
+        item = finding(
+            adapter,
+            root=root,
+            category="contract-lint",
+            rule_id=str(row.get("code") or "spectral"),
+            message=row["message"],
+            file=row.get("source"),
+            severity={"0": "high", "1": "medium", "2": "low", "3": "info"}.get(
+                str(row.get("severity")), "medium"
+            ),
+            line=line + 1 if line is not None else None,
+            recommendation=row.get("documentationUrl") or "Correct the API contract violation.",
+        )
+        item.tool_metadata["document_path"] = json.dumps(row.get("path") or [])
+        findings.append(item)
+    return findings
+
+
 def parse_tflint(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = _object_report(result, "issues")
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     severity_map = {"error": "high", "warning": "medium", "notice": "low"}
+    _report_errors(data, "errors", "tflint")
     findings = []
     for row in data.get("issues", []) if isinstance(data, dict) else []:
         rule = row.get("rule", {}) or {}
@@ -621,6 +724,39 @@ def parse_lines(result: CommandResult, root: Path, adapter: ExternalToolAdapter)
     output = (result.stdout + "\n" + result.stderr).strip()
     if not output or (result.returncode == 0 and not result.timed_out):
         return []
+    tool_id = adapter.name.split(":", 1)[0]
+    lowered = output.lower()
+    if tool_id in {"cargo-fmt", "cargo-clippy", "cargo-test"} and (
+        (
+            ("rustup" in lowered or "syncing channel updates" in lowered)
+            and any(
+                marker in lowered
+                for marker in (
+                    "read-only file system",
+                    "could not download",
+                    "failed to download",
+                    "not installed",
+                    "no release found",
+                    "no default toolchain",
+                )
+            )
+        )
+        or re.search(r"(?:toolchain|component) .+ is not installed", lowered)
+        or "no such command: `clippy`" in lowered
+        or "no such command: `fmt`" in lowered
+    ):
+        raise IncompleteToolOutput("Rust toolchain prerequisite unavailable: " + output)
+    if (
+        tool_id in {"cargo-clippy", "cargo-test"}
+        and "offline mode" in lowered
+        and "--offline" in lowered
+        and re.search(r"^error: no matching package named .+ found$", lowered, re.MULTILINE)
+    ):
+        raise IncompleteToolOutput("Rust dependency prerequisite unavailable offline: " + output)
+    if tool_id in {"go-vet", "go-test"} and re.search(
+        r"requires go >= .+running go.+gotoolchain=local", lowered
+    ):
+        raise IncompleteToolOutput("Go toolchain prerequisite unavailable: " + output)
     findings = []
     pattern = re.compile(r"^(.*?):(\d+)(?::\d+)?:\s*(.*)$")
     for line in output.splitlines()[:200]:
@@ -668,12 +804,16 @@ def parse_output_paths(
 
 def parse_ruff(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        rows = json.loads(result.stdout or "[]")
+        rows = json.loads(result.stdout)
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError("Ruff must emit a JSON diagnostic array")
     findings = []
     for row in rows:
-        location = row.get("location", {})
+        if not isinstance(row.get("message"), str) or not isinstance(row.get("location"), dict):
+            raise ValueError("invalid Ruff diagnostic")
+        location = row["location"]
         findings.append(
             finding(
                 adapter,
@@ -691,7 +831,7 @@ def parse_ruff(result: CommandResult, root: Path, adapter: ExternalToolAdapter) 
 
 def parse_osv(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = _object_report(result, "results")
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     findings = []
@@ -759,10 +899,11 @@ def parse_osv(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -
 
 def parse_semgrep(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = _object_report(result, "results")
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     levels = {"ERROR": "high", "WARNING": "medium", "INFO": "low", "INVENTORY": "info"}
+    _report_errors(data, "errors", "semgrep")
     findings = []
     for row in data.get("results", []):
         extra = row.get("extra", {})
@@ -785,7 +926,7 @@ def parse_semgrep(result: CommandResult, root: Path, adapter: ExternalToolAdapte
 
 def parse_grype(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = _object_report(result, "matches")
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     findings = []
@@ -817,12 +958,24 @@ def parse_kubeconform(
     result: CommandResult, root: Path, adapter: ExternalToolAdapter
 ) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = json.loads(result.stdout)
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
-    rows = data.get("resources", []) if isinstance(data, dict) else data
+    if isinstance(data, dict):
+        data = _object_report(result, "resources", nullable=True)
+        if (data.get("summary") or {}).get("skipped", 0):
+            raise IncompleteToolOutput(
+                "kubeconform skipped resources; schema coverage is incomplete"
+            )
+        rows = data["resources"] or []
+    else:
+        rows = data
+    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+        raise ValueError("invalid kubeconform resource report")
     findings = []
     for row in rows if isinstance(rows, list) else []:
+        if row.get("status") in {"statusError", "error", "statusSkipped", "skipped"}:
+            raise IncompleteToolOutput("kubeconform could not validate a resource")
         if row.get("status") in {"statusValid", "valid"}:
             continue
         findings.append(
@@ -840,13 +993,46 @@ def parse_kubeconform(
     return findings
 
 
+def parse_kube_linter(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    data = _object_report(result, "Reports", nullable=True)
+    summary = data.get("Summary") or {}
+    if summary.get("ChecksStatus") not in {"Passed", "Failed"}:
+        raise ValueError("invalid KubeLinter summary")
+    if summary["ChecksStatus"] == "Failed" and not data["Reports"]:
+        raise IncompleteToolOutput("KubeLinter failed without diagnostics")
+    findings = []
+    for row in data["Reports"] or []:
+        diagnostic = row.get("Diagnostic") or {}
+        if not isinstance(row.get("Check"), str) or not isinstance(diagnostic.get("Message"), str):
+            raise ValueError("invalid KubeLinter diagnostic")
+        metadata = (row.get("Object") or {}).get("Metadata") or {}
+        findings.append(
+            finding(
+                adapter,
+                root=root,
+                category="workload-policy",
+                rule_id="kube-linter/" + row["Check"],
+                message=diagnostic["Message"],
+                file=metadata.get("FilePath"),
+                recommendation=row.get("Remediation") or "Correct the Kubernetes workload policy.",
+            )
+        )
+    return findings
+
+
 def parse_terraform(
     result: CommandResult, root: Path, adapter: ExternalToolAdapter
 ) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = _object_report(result, "diagnostics")
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
+    if not isinstance(data.get("valid"), bool):
+        raise ValueError("Terraform validation report must declare validity")
+    if data["valid"] is False and not data["diagnostics"]:
+        raise IncompleteToolOutput("Terraform validation failed without diagnostics")
     findings = []
     for diagnostic in data.get("diagnostics", []):
         source = diagnostic.get("range", {})
@@ -877,9 +1063,17 @@ def parse_terraform(
 
 def parse_trivy(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = json.loads(result.stdout)
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
+    if not isinstance(data, dict):
+        raise ValueError("invalid Trivy report")
+    if "Results" not in data:
+        if not isinstance(data.get("SchemaVersion"), int) or "ArtifactName" not in data:
+            raise ValueError("unrecognized Trivy report envelope")
+        data["Results"] = []
+    if not isinstance(data["Results"], list):
+        raise ValueError("invalid Trivy result array")
     findings = []
     severity_map = {
         "UNKNOWN": "medium",
@@ -948,17 +1142,9 @@ def parse_actionlint(
     rows = [item for batch in decoded for item in (batch if isinstance(batch, list) else [batch])]
     findings = []
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-        message = str(row.get("message") or "GitHub Actions workflow error")
-        # actionlint versions predating GitHub's same-repository $/ syntax reject it.
-        # Discard only this exact unsupported syntax diagnostic, retaining every other rule.
-        if (
-            str(row.get("kind")) == "workflow-call"
-            and re.search(r"\$/\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml", message)
-            and ("invalid" in message.lower() or "format" in message.lower())
-        ):
-            continue
+        if not isinstance(row, dict) or not isinstance(row.get("message"), str):
+            raise ValueError("invalid actionlint diagnostic")
+        message = row["message"]
         injection = "potentially untrusted" in message.lower()
         item = finding(
             adapter,
@@ -988,9 +1174,11 @@ def parse_actionlint(
 
 def parse_lychee(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = json.loads(result.stdout)
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("error_map"), dict):
+        raise ValueError("invalid lychee report envelope")
     findings: dict[tuple[str, str, str], Finding] = {}
     for filename, rows in (data.get("error_map", {}) or {}).items():
         for row in rows if isinstance(rows, list) else []:
@@ -1039,19 +1227,62 @@ def parse_lychee(result: CommandResult, root: Path, adapter: ExternalToolAdapter
     return list(findings.values())
 
 
+def _checkov_security_group_reference(code_block: list) -> bool:
+    """Confirm the known upstream false positive from HCL syntax, never raw comments."""
+    import hcl2
+
+    try:
+        source = "\n".join(row[1] for row in code_block if isinstance(row, list) and len(row) == 2)
+        resources = hcl2.loads(source).get("resource", [])
+        if len(resources) != 1:
+            return False
+        resource = {key.strip('"'): value for key, value in resources[0].items()}
+        if set(resource) != {"aws_vpc_security_group_ingress_rule"}:
+            return False
+        instances = resource["aws_vpc_security_group_ingress_rule"]
+        if len(instances) != 1:
+            return False
+        attributes = next(iter(instances.values()))
+        return bool(attributes.get("referenced_security_group_id")) and not any(
+            key in attributes
+            for key in ("cidr_ipv4", "cidr_ipv6", "cidr_blocks", "ipv6_cidr_blocks")
+        )
+    except Exception:
+        # Incomplete/unknown evidence cannot justify discarding a native finding.
+        return False
+
+
 def parse_checkov(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        documents = json.loads(result.stdout or "{}")
+        documents = json.loads(result.stdout)
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     if not isinstance(documents, list):
         documents = [documents]
     findings = []
     for document in documents:
-        for row in document.get("results", {}).get("failed_checks", []):
+        if not isinstance(document, dict):
+            raise ValueError("invalid Checkov report")
+        summary = document.get("summary") or {}
+        if "results" not in document:
+            if not isinstance(summary.get("passed"), int) or not isinstance(
+                summary.get("failed"), int
+            ):
+                raise ValueError("unrecognized Checkov report envelope")
+            if summary["failed"]:
+                raise IncompleteToolOutput("Checkov reported failures without diagnostics")
+        results = document.get("results", {})
+        if not isinstance(results, dict):
+            raise ValueError("invalid Checkov results")
+        _report_errors(results, "parsing_errors", "Checkov")
+        if summary.get("parsing_errors"):
+            raise IncompleteToolOutput("Checkov reported configuration parsing errors")
+        if "results" in document and not isinstance(results.get("failed_checks"), list):
+            raise ValueError("Checkov report lacks failed_checks array")
+        for row in results.get("failed_checks", []):
             code_block = row.get("code_block") or []
-            if row.get("check_id") == "CKV_AWS_260" and any(
-                "referenced_security_group_id" in str(source_line) for source_line in code_block
+            if row.get("check_id") == "CKV_AWS_260" and _checkov_security_group_reference(
+                code_block
             ):
                 continue
             location = row.get("file_line_range") or [None]
@@ -1080,12 +1311,15 @@ def _int(value: Any) -> int | None:
 
 def parse_sarif(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
     try:
-        data = json.loads(result.stdout or "{}")
+        data = _object_report(result, "runs")
     except ValueError as exc:
         raise ValueError("expected structured tool output") from exc
     findings = []
     levels = {"error": "high", "warning": "medium", "note": "low", "none": "info"}
-    for run in data.get("runs", []):
+    for run in data["runs"]:
+        for invocation in run.get("invocations", []):
+            if invocation.get("executionSuccessful") is False:
+                raise IncompleteToolOutput("SARIF invocation did not complete successfully")
         for row in run.get("results", []):
             location = (row.get("locations") or [{}])[0].get("physicalLocation", {})
             artifact = location.get("artifactLocation", {}).get("uri")
@@ -1215,7 +1449,9 @@ def parse_ast_grep(
                 file=row.get("file"),
                 line=int(row["range"]["start"]["line"]) + 1,
                 rule_id=row["ruleId"],
-                severity="medium",
+                severity={"error": "high", "warning": "medium", "info": "low", "hint": "info"}.get(
+                    str(row.get("severity", "warning")).lower(), "medium"
+                ),
             )
         )
     return findings

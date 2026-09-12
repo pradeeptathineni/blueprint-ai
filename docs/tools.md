@@ -39,3 +39,12 @@ Missing images/backends are `sandbox_unavailable`; disabled/offline tools are in
 output, unexpected exits, timeouts, and truncation cannot become a pass. Successful SBOM generation
 records artifact count/schema/output hash; it does not fabricate a vulnerability finding. A scanner's
 findings remain separate from execution coverage.
+
+## Integration roles
+
+The canonical registry distinguishes review, genesis, toolchain acquisition, capability-kit
+verification, and deferred entries. The 52 IDs comprise 47 review integrations, OpenTofu genesis,
+Cargo toolchain acquisition, pre-commit kit verification, and deferred PHP lint/Kubescape entries.
+Registration alone does not claim an executable review integration. The generated support table
+shows both role and maturity; the [independent tool inventory](redteam-tool-inventory.json) records
+all 52 lifecycles. The [native audit](redteam-tools.md) records parser corrections and actual runs.

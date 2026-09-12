@@ -77,9 +77,19 @@ def install_tool(name: str, backend: str = "docker", *, cache: Path | None = Non
             env=env,
             output_limit=16_384,
         )
-        digests = json.loads(reference.stdout)
-        if reference.returncode or not digests:
+        if reference.returncode or reference.timed_out or reference.output_truncated:
             raise SandboxUnavailable("cannot pin the base image registry digest")
+        try:
+            digests = json.loads(reference.stdout)
+            if (
+                not isinstance(digests, list)
+                or not digests
+                or not isinstance(digests[0], str)
+                or not re.fullmatch(r"[^\s@]+@sha256:[a-f0-9]{64}", digests[0])
+            ):
+                raise ValueError("invalid registry digest")
+        except (ValueError, TypeError) as exc:
+            raise SandboxUnavailable("cannot pin the base image registry digest") from exc
         base = digests[0]
         with tempfile.TemporaryDirectory(prefix="blueprint-tool-image-") as temporary:
             context = Path(temporary)
@@ -120,6 +130,8 @@ def cached_image(name: str, backend: str, *, cache: Path | None = None) -> str |
         if any(p.is_symlink() for p in (path, *root.parents, root)):
             return None
         receipt = json.loads(read_text_bounded(path, 16_384, root=root))
+        if not isinstance(receipt, dict):
+            return None
         digest = receipt.get("image_id", "")
         if (
             receipt.get("image") != spec.image

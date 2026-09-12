@@ -21,7 +21,7 @@ from blueprint_ai.core.models import FileRange, Priority, Remediation, Severity
 from blueprint_ai.core.project import NON_RUNTIME
 from blueprint_ai.discovery import iter_project_files
 from blueprint_ai.naming import validate_name
-from blueprint_ai.safety import read_text_bounded
+from blueprint_ai.safety import read_bytes_bounded, read_text_bounded, safe_regular_file
 
 Check = Callable[[Path, ProjectFacts], list[Finding]]
 Predicate = Callable[[ProjectFacts], bool]
@@ -87,31 +87,32 @@ def _finding(
 
 
 def _manifest_identity(root: Path) -> tuple[str | None, list[str]]:
-    pyproject = root / "pyproject.toml"
-    if pyproject.is_file():
-        try:
-            project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
-            return project.get("name"), list(project.get("scripts", {}))
-        except (OSError, tomllib.TOMLDecodeError):
-            pass
-    package = root / "package.json"
-    if package.is_file():
-        try:
-            data = json.loads(package.read_text(encoding="utf-8"))
-            bins = data.get("bin", {})
-            return data.get("name"), [bins] if isinstance(bins, str) else list(bins)
-        except (OSError, ValueError):
-            pass
-    cargo = root / "Cargo.toml"
-    if cargo.is_file():
-        try:
-            package_data = tomllib.loads(cargo.read_text(encoding="utf-8")).get("package", {})
-            return package_data.get("name"), []
-        except (OSError, tomllib.TOMLDecodeError):
-            pass
+    for filename, section in (
+        ("pyproject.toml", "project"),
+        ("package.json", None),
+        ("Cargo.toml", "package"),
+    ):
+        path = root / filename
+        if not safe_regular_file(path, root):
+            continue
+        raw = read_text_bounded(path, 2_000_000, root=root)
+        data = json.loads(raw) if section is None else tomllib.loads(raw).get(section, {})
+        if not isinstance(data, dict):
+            raise ValueError(f"{filename} identity must be a mapping")
+        name = data.get("name")
+        if name is not None and not isinstance(name, str):
+            raise ValueError(f"{filename} name must be a string")
+        commands = data.get("bin", {}) if section is None else data.get("scripts", {})
+        if isinstance(commands, str) and section is None:
+            commands = [commands]
+        elif isinstance(commands, dict):
+            commands = list(commands)
+        else:
+            raise ValueError(f"{filename} commands must be a mapping or package bin string")
+        return name, commands
     go_mod = root / "go.mod"
-    if go_mod.is_file():
-        match = re.search(r"(?m)^module\s+(\S+)", go_mod.read_text(errors="ignore"))
+    if safe_regular_file(go_mod, root):
+        match = re.search(r"(?m)^module\s+(\S+)", read_text_bounded(go_mod, 2_000_000, root=root))
         return (match.group(1).rsplit("/", 1)[-1], []) if match else (None, [])
     return None, []
 
@@ -263,7 +264,7 @@ def code_design_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
             continue
         rel = path.relative_to(root).as_posix()
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")
+            text = read_text_bounded(path, 2_000_000, root=root, errors="ignore")
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", SyntaxWarning)
                 tree = ast.parse(text)
@@ -366,7 +367,7 @@ def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         if path.suffix.lower() not in code_suffixes:
             continue
         try:
-            text = path.read_text(encoding="utf-8", errors="ignore")[:300_000]
+            text = read_text_bounded(path, 2_000_000, root=root, errors="ignore")[:300_000]
         except OSError:
             continue
         for match in secret_pattern.finditer(text):
@@ -552,12 +553,17 @@ def supply_chain_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         "uv.lock",
         "poetry.lock",
         "package-lock.json",
+        "packages.lock.json",
         "pnpm-lock.yaml",
         "yarn.lock",
         "go.sum",
         "Cargo.lock",
     }
-    if facts.manifests and not any(Path(rel).name in lock_markers for rel in facts.manifests):
+    go_dependencies = any(
+        d.ecosystem == "Go" for c in facts.graph.components for d in c.dependencies
+    )
+    needs_lock = any(Path(rel).name != "go.mod" or go_dependencies for rel in facts.manifests)
+    if needs_lock and not any(Path(rel).name in lock_markers for rel in facts.manifests):
         findings.append(
             _finding(
                 "supply-chain",
@@ -573,8 +579,8 @@ def supply_chain_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         workflow_dir = root / ".github" / "workflows"
         if workflow_dir.is_dir():
             known_sbom = known_sbom or any(
-                "sbom-action" in path.read_text(encoding="utf-8", errors="ignore")
-                or "syft" in path.read_text(encoding="utf-8", errors="ignore")
+                "sbom-action" in read_text_bounded(path, 2_000_000, root=root, errors="ignore")
+                or "syft" in read_text_bounded(path, 2_000_000, root=root, errors="ignore")
                 for path in workflow_dir.glob("*.y*ml")
             )
         known_sbom = known_sbom or any(
@@ -597,7 +603,10 @@ def iac_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     findings = []
     if "terraform" in facts.iac:
         tf_files = [path for path in iter_project_files(root)[0] if path.suffix == ".tf"]
-        combined = "\n".join(path.read_text(errors="ignore")[:100_000] for path in tf_files)
+        combined = "\n".join(
+            read_text_bounded(path, 2_000_000, root=root, errors="ignore")[:100_000]
+            for path in tf_files
+        )
         if "required_version" not in combined:
             findings.append(
                 _finding(
@@ -629,7 +638,7 @@ def container_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         path = root / rel
         if path.name.lower() != "dockerfile":
             continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = read_text_bounded(path, 2_000_000, root=root, errors="ignore")
         if re.search(r"(?mi)^FROM\s+\S+:latest(?:\s|$)", text):
             findings.append(
                 _finding(
@@ -694,7 +703,7 @@ def kubernetes_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         path = root / rel
         if path.name.lower() in {"chart.yaml", "kustomization.yaml", "kustomization.yml"}:
             continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = read_text_bounded(path, 2_000_000, root=root, errors="ignore")
         for category, pattern, message, recommendation, severity in rules:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
@@ -896,7 +905,7 @@ def _dotted_name(node: ast.expr) -> str:
 
 def operations_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     operational_text = "\n".join(
-        (root / rel).read_text(encoding="utf-8", errors="ignore")[:100_000].lower()
+        read_text_bounded(root / rel, 2_000_000, root=root, errors="ignore")[:100_000].lower()
         for rel in facts.docs
         if rel.lower().endswith(".md") and (root / rel).is_file()
     )
@@ -926,7 +935,11 @@ def operations_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 
 def documentation_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     readme = next(
-        (root / name for name in ("README.md", "README.rst", "README") if (root / name).is_file()),
+        (
+            root / name
+            for name in ("README.md", "README.rst", "README")
+            if safe_regular_file(root / name, root)
+        ),
         None,
     )
     if not readme:
@@ -945,7 +958,7 @@ def documentation_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 ),
             )
         ]
-    text = readme.read_text(encoding="utf-8", errors="ignore")[:100_000].lower()
+    text = read_text_bounded(readme, 2_000_000, root=root, errors="ignore")[:100_000].lower()
     if facts.graph.lifecycle == "documentation-project":
         return []
     concepts = {
@@ -982,7 +995,7 @@ def ai_context_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     for rel in facts.ai_context_files:
         path = root / rel
         try:
-            content = path.read_bytes()
+            content = read_bytes_bounded(path, 2_000_000, root=root)
         except OSError:
             continue
         if len(content) > 32_000:
@@ -1036,7 +1049,11 @@ def ai_context_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 def completeness_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     security_workflow = bool(list(root.glob(".github/workflows/*security*")))
     families = {
-        "testing": bool(facts.tests),
+        "testing": bool(facts.tests)
+        or bool(
+            set(facts.test_capabilities)
+            & {"unit", "integration", "smoke", "end-to-end", "contract"}
+        ),
         "security": _conventional_file(root, "SECURITY.md") or security_workflow,
         "ci-cd": bool(facts.ci),
         "documentation": bool(facts.docs),

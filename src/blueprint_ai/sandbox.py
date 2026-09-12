@@ -24,15 +24,31 @@ _CONFIG_LOCK = threading.Lock()
 _CLIENT_CONFIG: tempfile.TemporaryDirectory[str] | None = None
 
 
-def _runtime_environment() -> dict[str, str]:
+def _runtime_environment(backend: str = "docker") -> dict[str, str]:
     # Docker otherwise discovers ~/.docker/config.json even when HOME is absent, and can
     # inject its configured proxies into a container. Public tool acquisition needs no credentials.
     global _CLIENT_CONFIG
     with _CONFIG_LOCK:
         if _CLIENT_CONFIG is None:
             _CLIENT_CONFIG = tempfile.TemporaryDirectory(prefix="blueprint-runtime-config-")
-            (Path(_CLIENT_CONFIG.name) / "config.json").write_text('{"auths":{},"proxies":{}}')
-        return controlled_env({"DOCKER_CONFIG": _CLIENT_CONFIG.name})
+            directory = Path(_CLIENT_CONFIG.name)
+            (directory / "config.json").write_text('{"auths":{},"proxies":{}}')
+            (directory / "containers.conf").write_text(
+                "[containers]\nenv_host=false\nhttp_proxy=false\n[engine]\nhooks_dir=[]\n"
+            )
+            (directory / "mounts.conf").write_text("")
+            (directory / "hooks").mkdir()
+        env = {"DOCKER_CONFIG": _CLIENT_CONFIG.name}
+        if backend == "podman":
+            # Podman reads host config even without HOME. It can inject mounts, devices,
+            # privileges and environment; registry auth also has independent defaults.
+            env.update(
+                {
+                    "CONTAINERS_CONF": str(Path(_CLIENT_CONFIG.name) / "containers.conf"),
+                    "REGISTRY_AUTH_FILE": str(Path(_CLIENT_CONFIG.name) / "config.json"),
+                }
+            )
+        return controlled_env(env)
 
 
 class SandboxPolicy(BaseModel):
@@ -107,7 +123,16 @@ def _local_runtime(name: str) -> tuple[list[str], dict[str, str]]:
         )
         # Native Linux Podman does not need a daemon/socket.
         if os.name == "posix" and os.uname().sysname == "Linux":
-            return [executable, "--remote=false"], _runtime_environment()
+            env = _runtime_environment("podman")
+            directory = Path(env["CONTAINERS_CONF"]).parent
+            return [
+                executable,
+                "--remote=false",
+                "--default-mounts-file",
+                str(directory / "mounts.conf"),
+                "--hooks-dir",
+                str(directory / "hooks"),
+            ], env
     for socket in sockets:
         if socket.exists() and socket.is_socket():
             flag = "--host" if name == "docker" else "--url"
@@ -134,8 +159,11 @@ def runtime_info(backend: str) -> dict:
         raise SandboxUnavailable(f"{backend} returned malformed engine metadata") from exc
     if backend == "podman":
         host = info.get("host", {})
-        if host.get("cgroupVersion") != "v2" or not {"cpu", "memory", "pids"}.issubset(
-            host.get("cgroupControllers", [])
+        if (
+            not isinstance(host, dict)
+            or host.get("cgroupVersion") != "v2"
+            or not isinstance(host.get("cgroupControllers"), list)
+            or not {"cpu", "memory", "pids"}.issubset(host["cgroupControllers"])
         ):
             raise SandboxUnavailable("Podman needs delegated cgroup v2 CPU, memory and PID limits")
     elif not all(
@@ -143,8 +171,10 @@ def runtime_info(backend: str) -> dict:
         for capability in ("MemoryLimit", "SwapLimit", "CpuCfsQuota", "PidsLimit")
     ):
         raise SandboxUnavailable("Docker engine cannot confirm required resource-limit support")
-    if backend == "gvisor" and "runsc" not in info.get("Runtimes", {}):
-        raise SandboxUnavailable("gVisor/runsc is not configured in the local Docker engine")
+    if backend == "gvisor":
+        runtimes = info.get("Runtimes")
+        if not isinstance(runtimes, dict) or "runsc" not in runtimes:
+            raise SandboxUnavailable("gVisor/runsc is not configured in the local Docker engine")
     return info
 
 
@@ -229,6 +259,8 @@ def container_command(
     mount = f"type=bind,src={root},dst=/workspace"
     if backend in {"docker", "gvisor"}:
         mount += ",bind-recursive=disabled"
+    elif backend == "podman":
+        mount += ",bind-nonrecursive"
     mount += "" if policy.writable else ",readonly"
     args = [
         *prefix,
@@ -266,7 +298,16 @@ def container_command(
         "/workspace" + ("/" + cwd if cwd != "." else ""),
     ]
     if backend == "podman":
-        args.extend(["--userns=keep-id", "--image-volume=ignore"])
+        args.extend(
+            [
+                "--userns=keep-id",
+                "--image-volume=ignore",
+                "--read-only-tmpfs=false",
+                "--http-proxy=false",
+                "--env-host=false",
+                "--hosts-file=none",
+            ]
+        )
     if backend == "gvisor":
         args.extend(["--runtime=runsc"])
     if identity_directory is not None:
@@ -312,6 +353,7 @@ def container_command(
         "GOTOOLCHAIN": "local",
         "CARGO_HOME": "/tmp/cargo-home",
         "CARGO_TARGET_DIR": "/tmp/cargo-target",
+        "CARGO_NET_OFFLINE": "false" if policy.network == "normal" else "true",
         "TRIVY_CACHE_DIR": "/tmp/trivy",
         "DOTNET_CLI_HOME": "/tmp/dotnet",
         "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
@@ -404,8 +446,14 @@ def execute(
                 env=env,
                 output_limit=16_384,
             )
+            if state.returncode or state.timed_out or state.output_truncated:
+                raise SandboxUnavailable(
+                    "sandbox lifecycle inspection failed; execution incomplete"
+                )
             try:
                 lifecycle = json.loads(state.stdout)
+                if not isinstance(lifecycle, dict):
+                    raise ValueError("invalid lifecycle metadata")
                 started_at = lifecycle.get("StartedAt", "")
                 # A rejected container creation is not evidence that a policy ran.
                 evidence.isolated = bool(
@@ -415,30 +463,40 @@ def execute(
                     and not started_at.startswith("0001-")
                 )
                 evidence.oom_killed = bool(lifecycle.get("OOMKilled", False))
-            except (ValueError, AttributeError):
-                pass
+            except (ValueError, AttributeError) as exc:
+                raise SandboxUnavailable("sandbox returned malformed lifecycle metadata") from exc
+            if result.returncode == 0 and not evidence.isolated:
+                raise SandboxUnavailable(
+                    "sandbox startup could not be confirmed; execution incomplete"
+                )
             evidence.target_read_only = evidence.isolated and not policy.writable
             evidence.network_enforced = evidence.isolated and policy.network in {"none", "loopback"}
             evidence.limits_enforced = evidence.isolated
         finally:
-            cleanup = run_process(
-                [*prefix, "rm", "--force", "--volumes", name],
-                Path(tempfile.gettempdir()),
-                10,
-                env=env,
-                output_limit=16_384,
-            )
-            evidence.teardown = cleanup.returncode == 0
-            identity_files.cleanup()
+            try:
+                cleanup = run_process(
+                    [*prefix, "rm", "--force", "--volumes", name],
+                    Path(tempfile.gettempdir()),
+                    10,
+                    env=env,
+                    output_limit=16_384,
+                )
+                evidence.teardown = cleanup.returncode == 0 and not cleanup.timed_out
+            except OSError as exc:
+                raise SandboxUnavailable(
+                    f"sandbox teardown failed for {name}; inspect the local engine"
+                ) from exc
+            finally:
+                identity_files.cleanup()
+            if not evidence.teardown:
+                raise SandboxUnavailable(
+                    f"sandbox teardown failed for {name}; inspect the local engine"
+                )
         evidence.detail = (
             "OCI isolation; shared Linux kernel"
             if backend != "gvisor"
             else "OCI isolation with configured runsc runtime"
         )
-        if not evidence.teardown:
-            raise SandboxUnavailable(
-                f"sandbox teardown failed for {name}; inspect the local engine"
-            )
     evidence.exit_code = result.returncode
     evidence.timed_out = result.timed_out
     evidence.output_truncated = result.output_truncated

@@ -1,7 +1,7 @@
 {
   "reviewed": "2026-09-12",
   "baseline": "0.5.0 @ 60e0c41732e513d54353933c3e2882b54161e340",
-  "interpretation": "Inherited gaps and final outcomes; platform availability is an observed environment snapshot, not certification.",
+  "interpretation": "Inherited gaps and corrected audit outcomes; availability is a local snapshot, not certification. Current evidence: phase-6-redteam.md and redteam-tool-inventory.json.",
   "gaps": [
     {
       "area": "shared support registry",
@@ -79,7 +79,7 @@
       "area": "browser / mutation / load / resilience / project-specific fuzz suites",
       "classification": "intentionally deferred",
       "outcome": "native project ownership",
-      "reason": "Inventory and native script delegation are retained; generated smoke/contract tests do not claim business-journey coverage."
+      "reason": "Native project ownership remains. Independent React/full-stack browser journeys and 14scanner mutation cycles were executed; generated smoke/contract tests do not imply business-journey coverage."
     },
     {
       "area": "rootless / Podman / runsc / Windows / file sharing",
@@ -115,7 +115,7 @@
       "area": "overlapping AST/SAST and vulnerability/Kubernetes scanner bundles",
       "classification": "duplicate capability already covered better elsewhere",
       "outcome": "configured alternatives",
-      "reason": "Native AST/compiler facts remain authoritative; ast-grep/Semgrep run when configured. Grype/Kubescape are explicit alternatives to established routes."
+      "reason": "Native AST/compiler facts remain authoritative; ast-grep/Semgrep run when configured. Grype is an explicit alternative; Kubescape has no public review route and is deferred."
     },
     {
       "area": "general manifest merges / codemods / migrations / remote template engines",
@@ -214,6 +214,18 @@
       "recognize": true,
       "initialize": false,
       "boundary": "recognition and local security inventory; GitLab API lint and template generation deferred"
+    },
+    "kubernetes": {
+      "maturity": "partial",
+      "recognize": true,
+      "initialize": true,
+      "boundary": "Namespace-only generation and built-in structural validation; no workload, live API-server, cluster or deployment verification"
+    },
+    "pulumi": {
+      "maturity": "partial",
+      "recognize": true,
+      "initialize": true,
+      "boundary": "generate-only empty program and selected cloud SDK installation; no SDK resource API, preview, state or deployment verification"
     }
   },
   "optional_tools": {
@@ -223,7 +235,8 @@
       "image": "ghcr.io/astral-sh/ruff:0.16.7",
       "source": "https://docs.astral.sh/ruff/",
       "cached_docker_image": "sha256:76a64feaa6a00514883835ed9d4df2a46ce228c8f7690b84710a49fc6f76e129",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "mypy": {
       "classification": "optional external tool unavailable",
@@ -231,7 +244,8 @@
       "image": null,
       "source": "https://mypy.readthedocs.io/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "pytest": {
       "classification": "optional external tool unavailable",
@@ -239,7 +253,8 @@
       "image": null,
       "source": "https://docs.pytest.org/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "biome": {
       "classification": "optional external tool unavailable",
@@ -247,7 +262,8 @@
       "image": null,
       "source": "https://biomejs.dev/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "eslint": {
       "classification": "optional external tool unavailable",
@@ -255,7 +271,8 @@
       "image": null,
       "source": "https://eslint.org/docs/latest/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "tsc": {
       "classification": "optional external tool unavailable",
@@ -263,7 +280,8 @@
       "image": null,
       "source": "https://www.typescriptlang.org/docs/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "go-vet": {
       "classification": "optional external tool unavailable",
@@ -271,7 +289,8 @@
       "image": "golang:1.26-bookworm",
       "source": "https://go.dev/doc/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "go-test": {
       "classification": "optional external tool unavailable",
@@ -279,7 +298,8 @@
       "image": "golang:1.26-bookworm",
       "source": "https://go.dev/doc/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "gofmt": {
       "classification": "optional external tool unavailable",
@@ -287,7 +307,8 @@
       "image": "golang:1.26-bookworm",
       "source": "https://go.dev/doc/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "cargo-fmt": {
       "classification": "optional external tool unavailable",
@@ -295,7 +316,8 @@
       "image": "blueprint-tools/rust:1.98.1",
       "source": "https://doc.rust-lang.org/cargo/",
       "cached_docker_image": "sha256:180af6c640009e371a18a6a5e7ba5aef4b85a2f4663df146fe7b0e6b921145d7",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "cargo-clippy": {
       "classification": "optional external tool unavailable",
@@ -303,7 +325,8 @@
       "image": "blueprint-tools/rust:1.98.1",
       "source": "https://doc.rust-lang.org/cargo/",
       "cached_docker_image": "sha256:180af6c640009e371a18a6a5e7ba5aef4b85a2f4663df146fe7b0e6b921145d7",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "cargo-test": {
       "classification": "optional external tool unavailable",
@@ -311,7 +334,8 @@
       "image": "blueprint-tools/rust:1.98.1",
       "source": "https://doc.rust-lang.org/cargo/",
       "cached_docker_image": "sha256:180af6c640009e371a18a6a5e7ba5aef4b85a2f4663df146fe7b0e6b921145d7",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "maven-check": {
       "classification": "optional external tool unavailable",
@@ -319,7 +343,8 @@
       "image": "maven:3.9-eclipse-temurin-21",
       "source": "https://maven.apache.org/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "maven-test": {
       "classification": "optional external tool unavailable",
@@ -327,7 +352,8 @@
       "image": "maven:3.9-eclipse-temurin-21",
       "source": "https://maven.apache.org/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "gradle-check": {
       "classification": "optional external tool unavailable",
@@ -335,7 +361,8 @@
       "image": null,
       "source": "https://docs.gradle.org/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "gradle-test": {
       "classification": "optional external tool unavailable",
@@ -343,7 +370,8 @@
       "image": null,
       "source": "https://docs.gradle.org/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "dotnet-build": {
       "classification": "optional external tool unavailable",
@@ -351,7 +379,8 @@
       "image": "mcr.microsoft.com/dotnet/sdk:10.0",
       "source": "https://learn.microsoft.com/en-us/dotnet/core/tools/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "dotnet-test": {
       "classification": "optional external tool unavailable",
@@ -359,15 +388,17 @@
       "image": "mcr.microsoft.com/dotnet/sdk:10.0",
       "source": "https://learn.microsoft.com/en-us/dotnet/core/tools/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "php-lint": {
-      "classification": "optional external tool unavailable",
-      "resolution": "official/project-native acquisition guidance",
+      "classification": "intentionally deferred",
+      "resolution": "PHP CLI recognition only; dedicated review invocation deferred; use project-native PHP checks with explicit trust",
       "image": null,
       "source": "https://www.php.net/manual/en/features.commandline.options.php",
       "cached_docker_image": null,
-      "maturity": "partial"
+      "maturity": "deferred",
+      "integration": "deferred"
     },
     "composer-validate": {
       "classification": "optional external tool unavailable",
@@ -375,7 +406,8 @@
       "image": null,
       "source": "https://getcomposer.org/doc/",
       "cached_docker_image": null,
-      "maturity": "partial"
+      "maturity": "partial",
+      "integration": "review"
     },
     "npm-test": {
       "classification": "optional external tool unavailable",
@@ -383,7 +415,8 @@
       "image": null,
       "source": "https://docs.npmjs.com/cli/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "shellcheck": {
       "classification": "optional external tool unavailable",
@@ -391,7 +424,8 @@
       "image": null,
       "source": "https://github.com/koalaman/shellcheck",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "semgrep": {
       "classification": "optional external tool unavailable",
@@ -399,7 +433,8 @@
       "image": "semgrep/semgrep:1.177.0",
       "source": "https://semgrep.dev/docs/",
       "cached_docker_image": "sha256:e7c3f38687e4c4f6ef917af51cf292d9d4ce54bd586c0e98e8a604c3e7d34f3f",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "gitleaks": {
       "classification": "optional external tool unavailable",
@@ -407,7 +442,8 @@
       "image": "ghcr.io/gitleaks/gitleaks:v8.30.1",
       "source": "https://github.com/gitleaks/gitleaks",
       "cached_docker_image": "sha256:4b81af4c7b4159acfdbbbfede6647bf49b4c9f24dc2a2bbd4581f39d5223fcfa",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "osv-scanner": {
       "classification": "optional external tool unavailable",
@@ -415,7 +451,8 @@
       "image": null,
       "source": "https://google.github.io/osv-scanner/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "trivy": {
       "classification": "optional external tool unavailable",
@@ -423,7 +460,8 @@
       "image": null,
       "source": "https://trivy.dev/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "syft": {
       "classification": "optional external tool unavailable",
@@ -431,7 +469,8 @@
       "image": "anchore/syft:v1.51.1",
       "source": "https://github.com/anchore/syft",
       "cached_docker_image": "sha256:b5394712466ead1ebabdf0e1cfad4880f321f0bc7aa99be42bb59dae249ad3a0",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "grype": {
       "classification": "optional external tool unavailable",
@@ -439,7 +478,8 @@
       "image": null,
       "source": "https://github.com/anchore/grype",
       "cached_docker_image": null,
-      "maturity": "partial"
+      "maturity": "partial",
+      "integration": "review"
     },
     "terraform": {
       "classification": "optional external tool unavailable",
@@ -447,7 +487,8 @@
       "image": "hashicorp/terraform:1.16.2",
       "source": "https://developer.hashicorp.com/terraform/cli",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "terraform-fmt": {
       "classification": "optional external tool unavailable",
@@ -455,7 +496,8 @@
       "image": "hashicorp/terraform:1.16.2",
       "source": "https://developer.hashicorp.com/terraform/cli",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "terraform-test": {
       "classification": "optional external tool unavailable",
@@ -463,7 +505,8 @@
       "image": "hashicorp/terraform:1.16.2",
       "source": "https://developer.hashicorp.com/terraform/cli",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "tofu": {
       "classification": "optional external tool unavailable",
@@ -471,7 +514,8 @@
       "image": "ghcr.io/opentofu/opentofu:1.12.6",
       "source": "https://opentofu.org/docs/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "genesis"
     },
     "tflint": {
       "classification": "optional external tool unavailable",
@@ -479,7 +523,8 @@
       "image": null,
       "source": "https://github.com/terraform-linters/tflint",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "checkov": {
       "classification": "optional external tool unavailable",
@@ -487,7 +532,8 @@
       "image": null,
       "source": "https://www.checkov.io/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "cfn-lint": {
       "classification": "optional external tool unavailable",
@@ -495,7 +541,8 @@
       "image": null,
       "source": "https://github.com/aws-cloudformation/cfn-lint",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "hadolint": {
       "classification": "optional external tool unavailable",
@@ -503,7 +550,8 @@
       "image": "hadolint/hadolint:v2.15.1",
       "source": "https://github.com/hadolint/hadolint",
       "cached_docker_image": "sha256:4b8fee39a7af1f036e4321dd767db6b5d0fb0a3de7637f842dfd0196f291362d",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "kubeconform": {
       "classification": "optional external tool unavailable",
@@ -511,7 +559,8 @@
       "image": null,
       "source": "https://github.com/yannh/kubeconform",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "kube-linter": {
       "classification": "optional external tool unavailable",
@@ -519,15 +568,17 @@
       "image": null,
       "source": "https://github.com/stackrox/kube-linter",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "kubescape": {
-      "classification": "optional external tool unavailable",
-      "resolution": "official/project-native acquisition guidance",
+      "classification": "intentionally deferred",
+      "resolution": "alternate compliance scanner; no review selection/parser contract; use the official CLI separately with explicit scope/network authorization",
       "image": null,
       "source": "https://github.com/kubescape/kubescape",
       "cached_docker_image": null,
-      "maturity": "partial"
+      "maturity": "deferred",
+      "integration": "deferred"
     },
     "helm": {
       "classification": "optional external tool unavailable",
@@ -535,7 +586,8 @@
       "image": "alpine/helm:3.19.0",
       "source": "https://helm.sh/docs/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "kustomize": {
       "classification": "optional external tool unavailable",
@@ -543,7 +595,8 @@
       "image": "registry.k8s.io/kustomize/kustomize:v5.7.1",
       "source": "https://kubectl.docs.kubernetes.io/references/kustomize/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "actionlint": {
       "classification": "optional external tool unavailable",
@@ -551,7 +604,8 @@
       "image": null,
       "source": "https://github.com/rhysd/actionlint",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "zizmor": {
       "classification": "optional external tool unavailable",
@@ -559,7 +613,8 @@
       "image": null,
       "source": "https://docs.zizmor.sh/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "spectral": {
       "classification": "optional external tool unavailable",
@@ -567,7 +622,8 @@
       "image": null,
       "source": "https://github.com/stoplightio/spectral",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "markdownlint-cli2": {
       "classification": "optional external tool unavailable",
@@ -575,7 +631,8 @@
       "image": "blueprint-tools/markdownlint-cli2:0.23.2",
       "source": "https://github.com/DavidAnson/markdownlint-cli2",
       "cached_docker_image": "sha256:c46a47b65b8e3835ba2744affc1d7135b3456e3b94f86a760ef35f9f0141b124",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "lychee": {
       "classification": "optional external tool unavailable",
@@ -583,7 +640,8 @@
       "image": null,
       "source": "https://lychee.cli.rs/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "conftest": {
       "classification": "optional external tool unavailable",
@@ -591,7 +649,8 @@
       "image": "openpolicyagent/conftest:v0.69.0",
       "source": "https://www.conftest.dev/",
       "cached_docker_image": "sha256:9131e34b9fdd675d00f6a45ed35548ab06266e20ff652fbf596e507cf86858a1",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "ast-grep": {
       "classification": "optional external tool unavailable",
@@ -599,7 +658,8 @@
       "image": "blueprint-tools/ast-grep:0.45.3",
       "source": "https://ast-grep.github.io/",
       "cached_docker_image": "sha256:6ae8fb17165d5c19be1ba96b8f8570d456e251b911955381f490be10ded99f0c",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "buf": {
       "classification": "optional external tool unavailable",
@@ -607,7 +667,8 @@
       "image": "bufbuild/buf:1.73.0",
       "source": "https://buf.build/docs/",
       "cached_docker_image": "sha256:63cb67f088869af8cbb729c9e3da40b532dea5ff58649a9871f8732416a47196",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "review"
     },
     "zap-baseline": {
       "classification": "optional external tool unavailable",
@@ -615,7 +676,8 @@
       "image": null,
       "source": "https://www.zaproxy.org/docs/docker/baseline-scan/",
       "cached_docker_image": null,
-      "maturity": "partial"
+      "maturity": "partial",
+      "integration": "review"
     },
     "cargo": {
       "classification": "optional external tool unavailable",
@@ -623,7 +685,8 @@
       "image": "blueprint-tools/rust:1.98.1",
       "source": "https://doc.rust-lang.org/cargo/",
       "cached_docker_image": "sha256:180af6c640009e371a18a6a5e7ba5aef4b85a2f4663df146fe7b0e6b921145d7",
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "toolchain"
     },
     "pre-commit": {
       "classification": "optional external tool unavailable",
@@ -631,7 +694,8 @@
       "image": null,
       "source": "https://pre-commit.com/",
       "cached_docker_image": null,
-      "maturity": "supported"
+      "maturity": "supported",
+      "integration": "capability-kit"
     }
   }
 }

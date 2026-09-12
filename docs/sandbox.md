@@ -26,10 +26,10 @@ process output and timeouts, but no filesystem, network, memory, or PID isolatio
 The default is a non-root user, read-only container root and repository, executable disposable
 scratch, dropped capabilities, no-new-privileges, private IPC, no inherited credentials, and no
 Docker socket or SSH agent. The only additional mounts are synthetic read-only account records
-for the container UID; host account databases are never mounted. Docker bind submounts are excluded.
+for the container UID; host account databases are never mounted. Docker and Podman target bind submounts are excluded.
 
 Defaults: 120 seconds, 2 CPU quota, 1 GiB memory with no additional swap, 128 processes, 256 MiB
-scratch, 128 MiB maximum individual file, and 4 MB captured output. These are policy limits,
+scratch, 128 MiB maximum individual file, and 4 MB captured output per stdout/stderr stream. These are policy limits,
 not a total writable-stage quota. Compilers use scratch caches. Tools that insist on writing source
 or require absent dependencies can fail under read-only review; that failure is incomplete evidence.
 
@@ -66,3 +66,11 @@ this release does not install or configure runsc. Bubblewrap/nsjail require depl
 seccomp, namespaces, and cgroup work and remain deferred. Runtime/host compromise and concurrent
 malicious host administrators are outside this boundary. The tests are empirical checks, not a formal
 isolation proof. [Threat model](threat-model.md) covers files, parsers, tools, and model inputs.
+
+## Independent audit
+
+The [independent sandbox audit](redteam-sandbox.md) records live Docker boundary checks and
+corrections to lifecycle evidence, Podman configuration isolation, and filesystem read races.
+Podman receives neutral configuration, authentication, mounts, and hooks files; these controls
+remain source/contract tested until a compatible live engine is available. Native Windows and
+live Podman/runsc remain unverified. macOS Docker results execute Linux containers across a VM.

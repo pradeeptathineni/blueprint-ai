@@ -14,6 +14,11 @@ The default command prints full proposed content, hashes, conflicts, and verific
 absent files. Existing identical assets are idempotent. Generated JSON/YAML/TOML/Python assets are
 parsed, and declared native verifiers run under the common sandbox policy.
 
+Known equivalent configuration locations also conflict: a root `.devcontainer.json`, an existing
+Renovate file or `package.json` Renovate section, or `.semgrep.yaml` will prevent a second default
+configuration from being created. These alternatives are declared by the kit metadata and checked
+by planning, direct kit application, and remediation. Existing configuration is never merged.
+
 Use `--sandbox docker --sandbox-image IMAGE` for a suitable acquired tool image, or explicitly trust
 host execution with `--sandbox host --trust-project-executables`. Unavailable verifiers leave an
 explicit incomplete result. A failed verifier rolls back unchanged files created by the operation.

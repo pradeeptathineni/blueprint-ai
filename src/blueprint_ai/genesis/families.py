@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 from blueprint_ai.core.project import Component
@@ -268,8 +269,34 @@ def _operations(
                     else ["uv", "run", "--no-sync", "pytest", "-q"],
                     False,
                 ),
+            ]
+            + ([(["uv", "run", "--no-sync", "pytest", "-q"], False)] if kind == "django" else [])
+            + [
                 (["uv", "build", "--no-sources"], True),
-            ],
+            ]
+            + (
+                [
+                    (
+                        [
+                            "uv",
+                            "run",
+                            "--no-project",
+                            "--isolated",
+                            "--with",
+                            f"./dist/{module}-0.1.0-py3-none-any.whl",
+                            "python",
+                            "-I",
+                            "-c",
+                            "import project_config.wsgi; from django.test import Client; "
+                            "r = Client(HTTP_HOST='localhost').get('/health'); "
+                            "assert r.status_code == 200; assert r.json() == {'status': 'ok'}",
+                        ],
+                        True,
+                    )
+                ]
+                if kind == "django"
+                else []
+            ),
             ["pyproject.toml"],
         )
     if kind in {"terraform", "opentofu"}:
@@ -302,6 +329,8 @@ def native_plan(intent: IntentSpec) -> GenesisPlan:
     identity = resolve_identity(
         intent.name, "python" if family.language == "Python" else "repository"
     )
+    if intent.kind in {"kubernetes", "kustomize"} and len(identity.repository) > 63:
+        raise ValueError("Kubernetes Namespace names must contain at most 63 characters")
     if not identity.module.isidentifier():
         raise ValueError("native package/module names must start with a letter")
     initializers, checks, expected = _operations(intent.kind, identity.package, identity.module)
@@ -577,6 +606,7 @@ public class HealthIntegrationTests {
 def _python_web(root: Path, plan: GenesisPlan) -> None:
     module = plan.identity.module
     framework = "django>=5.2,<5.3" if plan.intent.kind == "django" else "flask>=3.1,<4"
+    pytest_plugins = ', "pytest-django>=4.11,<5"' if plan.intent.kind == "django" else ""
     write(
         root,
         "pyproject.toml",
@@ -589,12 +619,23 @@ dependencies = ["{framework}"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 [dependency-groups]
-dev = ["pytest>=9.1.1,<10", "ruff>=0.16.6,<1"]
+dev = ["pytest>=9.1.1,<10", "ruff>=0.16.6,<1"{pytest_plugins}]
 [tool.ruff]
 line-length = 100
 ''',
     )
     if plan.intent.kind == "django":
+        project = root / "pyproject.toml"
+        write(
+            root,
+            "pyproject.toml",
+            project.read_text()
+            + (
+                "\n[tool.hatch.build.targets.wheel]\n"
+                f'packages = ["src/{module}", "project_config"]\n'
+                '\n[tool.pytest.ini_options]\nDJANGO_SETTINGS_MODULE = "project_config.settings"\n'
+            ),
+        )
         path = root / "project_config/settings.py"
         settings = path.read_text()
         settings = (
@@ -853,7 +894,7 @@ class HealthIntegrationTest {{
     else:
         _infrastructure(root, plan)
     commands = [
-        " ".join(op.command) for op in plan.operations if op.command and op.action != "initialize"
+        shlex.join(op.command) for op in plan.operations if op.command and op.action != "initialize"
     ]
     write(
         root,
@@ -898,5 +939,5 @@ class HealthIntegrationTest {{
                     "\n"
                 )
                 + setup
-                + "".join("      - run: " + command + "\n" for command in commands),
+                + "".join("      - run: |\n          " + command + "\n" for command in commands),
             )

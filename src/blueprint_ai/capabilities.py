@@ -6,7 +6,13 @@ import hashlib
 from pathlib import Path
 
 from blueprint_ai.core import ProjectFacts
-from blueprint_ai.remediation import KITS, ApplyResult, _safe_target, apply_kit
+from blueprint_ai.remediation import (
+    KITS,
+    ApplyResult,
+    _kit_configuration_conflicts,
+    _safe_target,
+    apply_kit,
+)
 from blueprint_ai.safety import read_text_bounded
 from blueprint_ai.sandbox import SandboxPolicy
 
@@ -37,7 +43,8 @@ def plan_add(root: Path, name: str) -> dict:
         "version": kit.version,
         "mode": "create-only",
         "files": files,
-        "conflicts": [row["path"] for row in files if row["status"] == "conflict"],
+        "conflicts": [row["path"] for row in files if row["status"] == "conflict"]
+        + _kit_configuration_conflicts(root, kit),
         "verification": kit.verification,
         "execution": "sandbox by default; host requires explicit trust",
     }

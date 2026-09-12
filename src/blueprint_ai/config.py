@@ -149,7 +149,7 @@ def load_settings(
 ) -> Settings:
     path = root / ".blueprint-ai.yml"
     if not path.is_file():
-        return Settings()
+        return Settings(authorized_target=authorized_network_target)
     raw = load_yaml_mapping(path, root, label=".blueprint-ai.yml")
     if raw.get("tool_overrides") and not trust_project_executables:
         raise ValueError(

@@ -30,7 +30,7 @@ Recognition, initialization and verification are separate claims. External tools
 | flask | Python | yes | yes | ruff, pytest | supported | uv; native checks; optional scanner availability reported independently |
 | terraform | HCL | yes | yes | terraform, terraform-fmt | supported | terraform; native checks; optional scanner availability reported independently |
 | opentofu | HCL | yes | yes | tofu | supported | tofu; native checks; optional scanner availability reported independently |
-| kubernetes | YAML | yes | yes | kubeconform, kube-linter | supported | builtin; native checks; optional scanner availability reported independently |
+| kubernetes | YAML | yes | yes | kubeconform, kube-linter | partial | builtin; Namespace-only generation and built-in structural validation; no workload, live API-server, cluster or deployment verification |
 | helm | YAML | yes | yes | helm | supported | helm; native checks; optional scanner availability reported independently |
 | kustomize | YAML | yes | yes | kustomize | supported | kustomize; native checks; optional scanner availability reported independently |
 | angular | TypeScript | yes | no | none declared | deferred | [upstream](https://angular.dev/tools/cli/new); CLI and Angular builder matrix deferred; existing project-native scripts remain authoritative |
@@ -49,82 +49,82 @@ Recognition, initialization and verification are separate claims. External tools
 | java-library | Java | yes | yes | maven-check, maven-test | supported | maven; native checks; optional scanner availability reported independently |
 | spring-boot | Java | yes | yes | maven-check, maven-test | supported | spring; native checks; optional scanner availability reported independently |
 | nextjs | TypeScript | yes | yes | tsc, npm-test, eslint | supported | next; native checks; optional scanner availability reported independently |
-| pulumi | TypeScript | yes | yes | tsc | supported | pulumi; generate-only native project, cloud dependency and type validation; no preview/state/deployment |
+| pulumi | TypeScript | yes | yes | tsc | partial | pulumi; generate-only empty program and selected cloud SDK installation; no SDK resource API, preview, state or deployment verification |
 
 ## External tools
 
-| Tool | Source / license | Version policy | Acquisition |
-| --- | --- | --- | --- |
-| ruff | [upstream](https://docs.astral.sh/ruff/); MIT | >=0.13,<1 | `tools install ruff`: `ghcr.io/astral-sh/ruff:0.16.7`; resolved image ID retained |
-| mypy | [upstream](https://mypy.readthedocs.io/); MIT | >=1,<3 | official release/package; pin and verify upstream checksums; explicit install only |
-| pytest | [upstream](https://docs.pytest.org/); MIT | >=9.0.3,<10 | official release/package; pin and verify upstream checksums; explicit install only |
-| biome | [upstream](https://biomejs.dev/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| eslint | [upstream](https://eslint.org/docs/latest/); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| tsc | [upstream](https://www.typescriptlang.org/docs/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | use the project's locked TypeScript dependency |
-| go-vet | [upstream](https://go.dev/doc/); BSD-3-Clause | >=1.24,<2 | `tools install go-vet`: `golang:1.26-bookworm`; resolved image ID retained |
-| go-test | [upstream](https://go.dev/doc/); BSD-3-Clause | >=1.24,<2 | `tools install go-test`: `golang:1.26-bookworm`; resolved image ID retained |
-| gofmt | [upstream](https://go.dev/doc/); BSD-3-Clause | >=1.24,<2 | `tools install gofmt`: `golang:1.26-bookworm`; resolved image ID retained |
-| cargo-fmt | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo-fmt`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
-| cargo-clippy | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo-clippy`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
-| cargo-test | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo-test`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
-| maven-check | [upstream](https://maven.apache.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install maven-check`: `maven:3.9-eclipse-temurin-21`; resolved image ID retained |
-| maven-test | [upstream](https://maven.apache.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install maven-test`: `maven:3.9-eclipse-temurin-21`; resolved image ID retained |
-| gradle-check | [upstream](https://docs.gradle.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| gradle-test | [upstream](https://docs.gradle.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| dotnet-build | [upstream](https://learn.microsoft.com/en-us/dotnet/core/tools/); MIT | >=10,<11 | `tools install dotnet-build`: `mcr.microsoft.com/dotnet/sdk:10.0`; resolved image ID retained |
-| dotnet-test | [upstream](https://learn.microsoft.com/en-us/dotnet/core/tools/); MIT | >=10,<11 | `tools install dotnet-test`: `mcr.microsoft.com/dotnet/sdk:10.0`; resolved image ID retained |
-| php-lint | [upstream](https://www.php.net/manual/en/features.commandline.options.php); PHP-3.01 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| composer-validate | [upstream](https://getcomposer.org/doc/); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| npm-test | [upstream](https://docs.npmjs.com/cli/); Artistic-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| shellcheck | [upstream](https://github.com/koalaman/shellcheck); GPL-3.0-only | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| semgrep | [upstream](https://semgrep.dev/docs/); LGPL-2.1-only | >=1,<2 | `tools install semgrep`: `semgrep/semgrep:1.177.0`; resolved image ID retained |
-| gitleaks | [upstream](https://github.com/gitleaks/gitleaks); MIT | >=8,<9 | `tools install gitleaks`: `ghcr.io/gitleaks/gitleaks:v8.30.1`; resolved image ID retained |
-| osv-scanner | [upstream](https://google.github.io/osv-scanner/); Apache-2.0 | >=2,<3 | official release/package; pin and verify upstream checksums; explicit install only |
-| trivy | [upstream](https://trivy.dev/); Apache-2.0 | >=0.60,<1 | official release/package; pin and verify upstream checksums; explicit install only |
-| syft | [upstream](https://github.com/anchore/syft); Apache-2.0 | >=1,<2 | `tools install syft`: `anchore/syft:v1.51.1`; resolved image ID retained |
-| grype | [upstream](https://github.com/anchore/grype); Apache-2.0 | >=0.90,<1 | alternate to OSV/Trivy; explicit configured use avoids duplicate default scanning |
-| terraform | [upstream](https://developer.hashicorp.com/terraform/cli); BUSL-1.1 | >=1.6,<2 | `tools install terraform`: `hashicorp/terraform:1.16.2`; resolved image ID retained |
-| terraform-fmt | [upstream](https://developer.hashicorp.com/terraform/cli); BUSL-1.1 | >=1.6,<2 | `tools install terraform-fmt`: `hashicorp/terraform:1.16.2`; resolved image ID retained |
-| terraform-test | [upstream](https://developer.hashicorp.com/terraform/cli); BUSL-1.1 | >=1.6,<2 | `tools install terraform-test`: `hashicorp/terraform:1.16.2`; resolved image ID retained |
-| tofu | [upstream](https://opentofu.org/docs/); MPL-2.0 | >=1.8,<2 | `tools install tofu`: `ghcr.io/opentofu/opentofu:1.12.6`; resolved image ID retained |
-| tflint | [upstream](https://github.com/terraform-linters/tflint); MPL-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| checkov | [upstream](https://www.checkov.io/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| cfn-lint | [upstream](https://github.com/aws-cloudformation/cfn-lint); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| hadolint | [upstream](https://github.com/hadolint/hadolint); GPL-3.0-only | upstream stable; observed version retained, compatibility not certified | `tools install hadolint`: `hadolint/hadolint:v2.15.1`; resolved image ID retained |
-| kubeconform | [upstream](https://github.com/yannh/kubeconform); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| kube-linter | [upstream](https://github.com/stackrox/kube-linter); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| kubescape | [upstream](https://github.com/kubescape/kubescape); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | explicit compliance use; disabled by default where kube-linter already covers workload policy |
-| helm | [upstream](https://helm.sh/docs/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install helm`: `alpine/helm:3.19.0`; resolved image ID retained |
-| kustomize | [upstream](https://kubectl.docs.kubernetes.io/references/kustomize/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install kustomize`: `registry.k8s.io/kustomize/kustomize:v5.7.1`; resolved image ID retained |
-| actionlint | [upstream](https://github.com/rhysd/actionlint); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| zizmor | [upstream](https://docs.zizmor.sh/); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| spectral | [upstream](https://github.com/stoplightio/spectral); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| markdownlint-cli2 | [upstream](https://github.com/DavidAnson/markdownlint-cli2); MIT | upstream stable; observed version retained, compatibility not certified | `tools install markdownlint-cli2`: `blueprint-tools/markdownlint-cli2:0.23.2`; resolved image ID retained |
-| lychee | [upstream](https://lychee.cli.rs/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
-| conftest | [upstream](https://www.conftest.dev/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install conftest`: `openpolicyagent/conftest:v0.69.0`; resolved image ID retained |
-| ast-grep | [upstream](https://ast-grep.github.io/); MIT | upstream stable; observed version retained, compatibility not certified | `tools install ast-grep`: `blueprint-tools/ast-grep:0.45.3`; resolved image ID retained |
-| buf | [upstream](https://buf.build/docs/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install buf`: `bufbuild/buf:1.73.0`; resolved image ID retained |
-| zap-baseline | [upstream](https://www.zaproxy.org/docs/docker/baseline-scan/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official ZAP image; exact authorized endpoint and explicit trusted network required |
-| cargo | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
-| pre-commit | [upstream](https://pre-commit.com/); MIT | upstream stable; observed version retained, compatibility not certified | use a locked development dependency or explicit uv tool install pre-commit |
+| Tool | Integration / maturity | Source / license | Version policy | Acquisition |
+| --- | --- | --- | --- | --- |
+| ruff | review / supported | [upstream](https://docs.astral.sh/ruff/); MIT | >=0.13,<1 | `tools install ruff`: `ghcr.io/astral-sh/ruff:0.16.7`; resolved image ID retained |
+| mypy | review / supported | [upstream](https://mypy.readthedocs.io/); MIT | >=1,<3 | official release/package; pin and verify upstream checksums; explicit install only |
+| pytest | review / supported | [upstream](https://docs.pytest.org/); MIT | >=9.0.3,<10 | official release/package; pin and verify upstream checksums; explicit install only |
+| biome | review / supported | [upstream](https://biomejs.dev/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| eslint | review / supported | [upstream](https://eslint.org/docs/latest/); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| tsc | review / supported | [upstream](https://www.typescriptlang.org/docs/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | use the project's locked TypeScript dependency |
+| go-vet | review / supported | [upstream](https://go.dev/doc/); BSD-3-Clause | >=1.24,<2 | `tools install go-vet`: `golang:1.26-bookworm`; resolved image ID retained |
+| go-test | review / supported | [upstream](https://go.dev/doc/); BSD-3-Clause | >=1.24,<2 | `tools install go-test`: `golang:1.26-bookworm`; resolved image ID retained |
+| gofmt | review / supported | [upstream](https://go.dev/doc/); BSD-3-Clause | >=1.24,<2 | `tools install gofmt`: `golang:1.26-bookworm`; resolved image ID retained |
+| cargo-fmt | review / supported | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo-fmt`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
+| cargo-clippy | review / supported | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo-clippy`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
+| cargo-test | review / supported | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo-test`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
+| maven-check | review / supported | [upstream](https://maven.apache.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install maven-check`: `maven:3.9-eclipse-temurin-21`; resolved image ID retained |
+| maven-test | review / supported | [upstream](https://maven.apache.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install maven-test`: `maven:3.9-eclipse-temurin-21`; resolved image ID retained |
+| gradle-check | review / supported | [upstream](https://docs.gradle.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| gradle-test | review / supported | [upstream](https://docs.gradle.org/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| dotnet-build | review / supported | [upstream](https://learn.microsoft.com/en-us/dotnet/core/tools/); MIT | >=10,<11 | `tools install dotnet-build`: `mcr.microsoft.com/dotnet/sdk:10.0`; resolved image ID retained |
+| dotnet-test | review / supported | [upstream](https://learn.microsoft.com/en-us/dotnet/core/tools/); MIT | >=10,<11 | `tools install dotnet-test`: `mcr.microsoft.com/dotnet/sdk:10.0`; resolved image ID retained |
+| php-lint | deferred / deferred | [upstream](https://www.php.net/manual/en/features.commandline.options.php); PHP-3.01 | upstream stable; observed version retained, compatibility not certified | PHP CLI recognition only; dedicated review invocation deferred; use project-native PHP checks with explicit trust |
+| composer-validate | review / partial | [upstream](https://getcomposer.org/doc/); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| npm-test | review / supported | [upstream](https://docs.npmjs.com/cli/); Artistic-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| shellcheck | review / supported | [upstream](https://github.com/koalaman/shellcheck); GPL-3.0-only | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| semgrep | review / supported | [upstream](https://semgrep.dev/docs/); LGPL-2.1-only | >=1,<2 | `tools install semgrep`: `semgrep/semgrep:1.177.0`; resolved image ID retained |
+| gitleaks | review / supported | [upstream](https://github.com/gitleaks/gitleaks); MIT | >=8,<9 | `tools install gitleaks`: `ghcr.io/gitleaks/gitleaks:v8.30.1`; resolved image ID retained |
+| osv-scanner | review / supported | [upstream](https://google.github.io/osv-scanner/); Apache-2.0 | >=2,<3 | official release/package; pin and verify upstream checksums; explicit install only |
+| trivy | review / supported | [upstream](https://trivy.dev/); Apache-2.0 | >=0.60,<1 | official release/package; pin and verify upstream checksums; explicit install only |
+| syft | review / supported | [upstream](https://github.com/anchore/syft); Apache-2.0 | >=1,<2 | `tools install syft`: `anchore/syft:v1.51.1`; resolved image ID retained |
+| grype | review / partial | [upstream](https://github.com/anchore/grype); Apache-2.0 | >=0.90,<1 | alternate to OSV/Trivy; explicit configured use avoids duplicate default scanning |
+| terraform | review / supported | [upstream](https://developer.hashicorp.com/terraform/cli); BUSL-1.1 | >=1.6,<2 | `tools install terraform`: `hashicorp/terraform:1.16.2`; resolved image ID retained |
+| terraform-fmt | review / supported | [upstream](https://developer.hashicorp.com/terraform/cli); BUSL-1.1 | >=1.6,<2 | `tools install terraform-fmt`: `hashicorp/terraform:1.16.2`; resolved image ID retained |
+| terraform-test | review / supported | [upstream](https://developer.hashicorp.com/terraform/cli); BUSL-1.1 | >=1.6,<2 | `tools install terraform-test`: `hashicorp/terraform:1.16.2`; resolved image ID retained |
+| tofu | genesis / supported | [upstream](https://opentofu.org/docs/); MPL-2.0 | >=1.8,<2 | `tools install tofu`: `ghcr.io/opentofu/opentofu:1.12.6`; resolved image ID retained |
+| tflint | review / supported | [upstream](https://github.com/terraform-linters/tflint); MPL-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| checkov | review / supported | [upstream](https://www.checkov.io/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| cfn-lint | review / supported | [upstream](https://github.com/aws-cloudformation/cfn-lint); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| hadolint | review / supported | [upstream](https://github.com/hadolint/hadolint); GPL-3.0-only | upstream stable; observed version retained, compatibility not certified | `tools install hadolint`: `hadolint/hadolint:v2.15.1`; resolved image ID retained |
+| kubeconform | review / supported | [upstream](https://github.com/yannh/kubeconform); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| kube-linter | review / supported | [upstream](https://github.com/stackrox/kube-linter); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| kubescape | deferred / deferred | [upstream](https://github.com/kubescape/kubescape); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | alternate compliance scanner; no review selection/parser contract; use the official CLI separately with explicit scope/network authorization |
+| helm | review / supported | [upstream](https://helm.sh/docs/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install helm`: `alpine/helm:3.19.0`; resolved image ID retained |
+| kustomize | review / supported | [upstream](https://kubectl.docs.kubernetes.io/references/kustomize/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install kustomize`: `registry.k8s.io/kustomize/kustomize:v5.7.1`; resolved image ID retained |
+| actionlint | review / supported | [upstream](https://github.com/rhysd/actionlint); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| zizmor | review / supported | [upstream](https://docs.zizmor.sh/); MIT | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| spectral | review / supported | [upstream](https://github.com/stoplightio/spectral); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| markdownlint-cli2 | review / supported | [upstream](https://github.com/DavidAnson/markdownlint-cli2); MIT | upstream stable; observed version retained, compatibility not certified | `tools install markdownlint-cli2`: `blueprint-tools/markdownlint-cli2:0.23.2`; resolved image ID retained |
+| lychee | review / supported | [upstream](https://lychee.cli.rs/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official release/package; pin and verify upstream checksums; explicit install only |
+| conftest | review / supported | [upstream](https://www.conftest.dev/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install conftest`: `openpolicyagent/conftest:v0.69.0`; resolved image ID retained |
+| ast-grep | review / supported | [upstream](https://ast-grep.github.io/); MIT | upstream stable; observed version retained, compatibility not certified | `tools install ast-grep`: `blueprint-tools/ast-grep:0.45.3`; resolved image ID retained |
+| buf | review / supported | [upstream](https://buf.build/docs/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install buf`: `bufbuild/buf:1.73.0`; resolved image ID retained |
+| zap-baseline | review / partial | [upstream](https://www.zaproxy.org/docs/docker/baseline-scan/); Apache-2.0 | upstream stable; observed version retained, compatibility not certified | official ZAP image; exact authorized endpoint and explicit trusted network required |
+| cargo | toolchain / supported | [upstream](https://doc.rust-lang.org/cargo/); MIT OR Apache-2.0 | upstream stable; observed version retained, compatibility not certified | `tools install cargo`: `blueprint-tools/rust:1.98.1`; resolved image ID retained |
+| pre-commit | capability-kit / supported | [upstream](https://pre-commit.com/); MIT | upstream stable; observed version retained, compatibility not certified | use a locked development dependency or explicit uv tool install pre-commit; capability-kit verification only, no review adapter |
 
 ## Addable capabilities
 
-| Capability | Created files | Verification |
-| --- | --- | --- |
-| testing-python | tests/test_blueprint_generated_smoke.py | pytest -q tests/test_blueprint_generated_smoke.py |
-| testing-javascript | tests/blueprint.generated.smoke.test.cjs | node --test tests/blueprint.generated.smoke.test.cjs |
-| pre-commit | .pre-commit-config.yaml | pre-commit run --all-files |
-| github-actions-ci | .github/workflows/ci.yml | bounded structural validation |
-| terraform | .tflint.hcl | terraform fmt -check -recursive; terraform validate |
-| container | .dockerignore | bounded structural validation |
-| api-contract | .spectral.yaml | spectral lint --format json openapi.yaml |
-| observability | docs/observability.md | bounded structural validation |
-| oss-repository | SECURITY.md, CONTRIBUTING.md | bounded structural validation |
-| ai-context | docs/ai-context.md | bounded structural validation |
-| security-policy | SECURITY.md | bounded structural validation |
-| dependency-updates | renovate.json | bounded structural validation |
-| secret-scanning | .gitleaks.toml | bounded structural validation |
-| sast | .semgrep.yml | bounded structural validation |
-| devcontainer | .devcontainer/devcontainer.json | bounded structural validation |
-| release-checklist | docs/releasing.md | bounded structural validation |
+| Capability | Created files | Conflicting alternatives | Verification |
+| --- | --- | --- | --- |
+| testing-python | tests/test_blueprint_generated_smoke.py | same-path conflicts | pytest -q tests/test_blueprint_generated_smoke.py |
+| testing-javascript | tests/blueprint.generated.smoke.test.cjs | same-path conflicts | node --test tests/blueprint.generated.smoke.test.cjs |
+| pre-commit | .pre-commit-config.yaml | same-path conflicts | pre-commit run --all-files |
+| github-actions-ci | .github/workflows/ci.yml | same-path conflicts | bounded structural validation |
+| terraform | .tflint.hcl | same-path conflicts | terraform fmt -check -recursive; terraform validate |
+| container | .dockerignore | same-path conflicts | bounded structural validation |
+| api-contract | .spectral.yaml | same-path conflicts | spectral lint --format json openapi.yaml |
+| observability | docs/observability.md | same-path conflicts | bounded structural validation |
+| oss-repository | SECURITY.md, CONTRIBUTING.md | same-path conflicts | bounded structural validation |
+| ai-context | docs/ai-context.md | same-path conflicts | bounded structural validation |
+| security-policy | SECURITY.md | same-path conflicts | bounded structural validation |
+| dependency-updates | renovate.json | renovate.jsonc, renovate.json5, .github/renovate.json, .github/renovate.jsonc, .github/renovate.json5, .gitlab/renovate.json, .gitlab/renovate.jsonc, .gitlab/renovate.json5, .renovaterc, .renovaterc.json, .renovaterc.jsonc, .renovaterc.json5, package.json#renovate | bounded structural validation |
+| secret-scanning | .gitleaks.toml | same-path conflicts | bounded structural validation |
+| sast | .semgrep.yml | .semgrep.yaml | bounded structural validation |
+| devcontainer | .devcontainer/devcontainer.json | .devcontainer.json | bounded structural validation |
+| release-checklist | docs/releasing.md | same-path conflicts | bounded structural validation |

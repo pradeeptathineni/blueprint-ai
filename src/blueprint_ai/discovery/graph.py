@@ -444,6 +444,10 @@ def _source_evidence(root: Path, rel: str, c: Component, graph: ProjectGraph) ->
         if re.search(r"(?m)^\s*(?:#!\[no_main\]|fuzz_target!\s*\()", text):
             kinds.add("fuzz")
     if suffix == ".go" and scope == "test":
+        if '"net/http/httptest"' in text and re.search(
+            r"\bhttptest\.(?:NewRequest|NewRecorder|NewServer)\(", text
+        ):
+            kinds.add("integration")
         for pattern, kind in (
             (r"func Test\w+\(", "unit"),
             (r"func Fuzz\w+\(", "fuzz"),
@@ -485,6 +489,12 @@ def _source_evidence(root: Path, rel: str, c: Component, graph: ProjectGraph) ->
                 "starlette.testclient",
                 "flask.testing",
             }:
+                kinds.add("integration")
+            if (
+                scope == "test"
+                and "django.test" in imports
+                and re.search(r"\bclient\.(?:get|post|put|delete|patch|head|options)\(", text)
+            ):
                 kinds.add("integration")
             if scope == "test" and imports & {"vcr", "pytest_recording"}:
                 kinds.add("regression")

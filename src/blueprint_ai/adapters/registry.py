@@ -1,22 +1,25 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from blueprint_ai.core import ProjectFacts
 from blueprint_ai.core.project import NON_RUNTIME
 from blueprint_ai.discovery import iter_project_files
 from blueprint_ai.discovery.project import SKIP_DIRS
-from blueprint_ai.support import TOOLS
+from blueprint_ai.safety import read_text_bounded
 
 from .base import (
     ExternalToolAdapter,
     parse_actionlint,
     parse_ast_grep,
     parse_buf,
+    parse_cfn_lint,
     parse_checkov,
     parse_conftest,
     parse_grype,
     parse_json_list,
+    parse_kube_linter,
     parse_kubeconform,
     parse_lines,
     parse_lychee,
@@ -27,6 +30,7 @@ from .base import (
     parse_sarif,
     parse_semgrep,
     parse_shellcheck,
+    parse_spectral,
     parse_syft,
     parse_terraform,
     parse_tflint,
@@ -92,7 +96,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             executes_project_code=True,
         ),
         ExternalToolAdapter(
-            "biome", "code-quality", ["check", ".", "--reporter=json"], parse_json_list
+            "biome", "code-quality", ["check", ".", "--reporter=sarif"], parse_sarif
         ),
         ExternalToolAdapter(
             "eslint",
@@ -209,6 +213,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             ["fmt", "-check", "-recursive", "-diff"],
             parse_lines,
             executable="terraform",
+            expected_codes={0, 3},
         ),
         ExternalToolAdapter(
             "terraform-test",
@@ -228,13 +233,23 @@ def known_tools() -> list[ExternalToolAdapter]:
             executes_project_code=True,
         ),
         ExternalToolAdapter("checkov", "iac", ["-d", ".", "-o", "json", "--quiet"], parse_checkov),
-        ExternalToolAdapter("cfn-lint", "iac", ["--format", "json"], parse_json_list),
+        ExternalToolAdapter(
+            "cfn-lint",
+            "iac",
+            ["--format", "json"],
+            parse_cfn_lint,
+            expected_codes={0, 2, 4, 6, 8, 10, 12, 14},
+        ),
         ExternalToolAdapter("hadolint", "containers", ["--format", "json"], parse_json_list),
         ExternalToolAdapter(
-            "kubeconform", "kubernetes", ["-output", "json", "-summary"], parse_kubeconform
+            "kubeconform",
+            "kubernetes",
+            ["-output", "json", "-summary"],
+            parse_kubeconform,
+            network_required=True,
         ),
         ExternalToolAdapter(
-            "kube-linter", "kubernetes", ["lint", ".", "--format", "json"], parse_json_list
+            "kube-linter", "kubernetes", ["lint", ".", "--format", "json"], parse_kube_linter
         ),
         ExternalToolAdapter(
             "kubescape",
@@ -255,7 +270,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             "spectral",
             "api-data-config",
             ["lint", "--format", "json"],
-            parse_json_list,
+            parse_spectral,
             executes_project_code=True,
         ),
         ExternalToolAdapter(
@@ -338,16 +353,12 @@ def known_tools() -> list[ExternalToolAdapter]:
             executes_project_code=True,
         ),
     ]
-    for tool in tools:
-        spec = TOOLS[tool.name]
-        tool.recommended_version = spec.versions
-        tool.install = (
-            (f"blueprint-ai tools plan {tool.name}; " if spec.image else "")
-            + spec.acquisition
-            + "; "
-            + spec.source
-        )
     return tools
+
+
+def _file_argument(relative: str) -> str:
+    """Prevent a discovered filename from becoming an option or a negated glob."""
+    return "./" + relative if relative.startswith(("-", "!")) else relative
 
 
 def _configured(root: Path, names: tuple[str, ...]) -> bool:
@@ -394,7 +405,12 @@ def _quality_route(
         names.append("ruff")
         configured_mypy = _configured(root, ("mypy.ini", ".mypy.ini"))
         if (root / "pyproject.toml").is_file():
-            configured_mypy |= "mypy" in (root / "pyproject.toml").read_text(errors="ignore")
+            try:
+                configured_mypy |= "mypy" in read_text_bounded(
+                    root / "pyproject.toml", 1_000_000, root=root, errors="ignore"
+                )
+            except (OSError, ValueError):
+                pass
         if configured_mypy:
             names.append("mypy")
     if languages & {"JavaScript", "TypeScript"}:
@@ -416,7 +432,11 @@ def _quality_route(
         ]
         if go_files:
             tools["gofmt"] = ExternalToolAdapter(
-                "gofmt", "code-quality", ["-l", *go_files], parse_output_paths, expected_codes={0}
+                "gofmt",
+                "code-quality",
+                ["-l", *map(_file_argument, go_files)],
+                parse_output_paths,
+                expected_codes={0},
             )
             names.append("gofmt")
     if "Rust" in languages:
@@ -458,7 +478,7 @@ def _quality_route(
             for path in iter_project_files(root)[0]
             if path.suffix == ".sh"
         ]
-        tools["shellcheck"].args.extend(shell_files)
+        tools["shellcheck"].args.extend(map(_file_argument, shell_files))
         names.append("shellcheck")
     return names
 
@@ -506,9 +526,39 @@ def _testing_route(
         names.append(name)
     if "C#" in languages and any(root.glob("*.csproj")):
         names.append("dotnet-test")
-    if "Python" in languages:
+    test_suffixes = {Path(relative).suffix.lower() for relative in facts.tests}
+    # Source-language inventory can include compiler inputs or test data. A foreign native
+    # manifest owns those files until an explicit auxiliary project/test boundary is present.
+    foreign_native = _configured(
+        root,
+        ("Cargo.toml", "go.mod", "pom.xml", "build.gradle", "build.gradle.kts", "package.json"),
+    ) or any(root.glob("*.csproj"))
+    python_boundary = _configured(
+        root,
+        (
+            "pyproject.toml",
+            "requirements.txt",
+            "requirements-dev.txt",
+            "setup.py",
+            "setup.cfg",
+            "pytest.ini",
+            ".pytest.ini",
+            "pytest.toml",
+            ".pytest.toml",
+            "conftest.py",
+        ),
+    )
+    if (
+        "Python" in languages
+        and test_suffixes & {".py", ".pyi"}
+        and (not foreign_native or python_boundary)
+    ):
         names.append("pytest")
-    if languages & {"JavaScript", "TypeScript"}:
+    if (
+        languages & {"JavaScript", "TypeScript"}
+        and (root / "package.json").is_file()
+        and test_suffixes & {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".cts"}
+    ):
         tools["npm-test"].args = (
             ["test", "--", "--run"]
             if "vitest" in facts.frameworks
@@ -526,7 +576,7 @@ def _testing_route(
             if allow_project_executables and (root / "mvnw").is_file():
                 tools["maven-test"].executable = str(root / "mvnw")
             names.append("maven-test")
-        else:
+        elif _configured(root, ("build.gradle", "build.gradle.kts")):
             if allow_project_executables and (root / "gradlew").is_file():
                 tools["gradle-test"].executable = str(root / "gradlew")
             names.append("gradle-test")
@@ -560,10 +610,13 @@ def _iac_route(facts: ProjectFacts, root: Path, tools: dict[str, ExternalToolAda
         for path in iter_project_files(root)[0]:
             if path.suffix not in {".yaml", ".yml"}:
                 continue
-            text = path.read_text(encoding="utf-8", errors="ignore")[:100_000]
+            try:
+                text = read_text_bounded(path, 1_000_000, root=root, errors="ignore")[:100_000]
+            except (OSError, ValueError):
+                continue
             if "AWSTemplateFormatVersion" in text or "AWS::Serverless-2016-10-31" in text:
                 cloudformation.append(path.relative_to(root).as_posix())
-        tools["cfn-lint"].args.extend(cloudformation)
+        tools["cfn-lint"].args.extend(map(_file_argument, cloudformation))
         names.extend(["cfn-lint", "checkov", "trivy"])
     return names
 
@@ -595,7 +648,7 @@ def _ecosystem_route(
     elif blueprint == "containers":
         dockerfiles = [rel for rel in facts.containers if Path(rel).name.lower() == "dockerfile"]
         if dockerfiles:
-            tools["hadolint"].args.extend(dockerfiles)
+            tools["hadolint"].args.extend(map(_file_argument, dockerfiles))
             tools["trivy"].blueprint = "containers"
             tools["trivy"].args[4] = "misconfig"
             names.extend(["hadolint", "trivy"])
@@ -607,7 +660,7 @@ def _ecosystem_route(
             if Path(rel).suffix in {".yaml", ".yml"} and Path(rel).name.lower() not in special
         ]
         if manifests:
-            tools["kubeconform"].args.extend(manifests)
+            tools["kubeconform"].args.extend(map(_file_argument, manifests))
         names.extend(["kubeconform", "kube-linter"])
         chart_dirs = sorted(
             {
@@ -617,7 +670,7 @@ def _ecosystem_route(
             }
         )
         if chart_dirs:
-            tools["helm"].args.extend(chart_dirs)
+            tools["helm"].args.extend(map(_file_argument, chart_dirs))
             names.append("helm")
         kustomize_dirs = sorted(
             {
@@ -626,9 +679,16 @@ def _ecosystem_route(
                 if Path(rel).name.lower().startswith("kustomization")
             }
         )
-        if kustomize_dirs:
-            tools["kustomize"].args.extend(kustomize_dirs)
-            names.append("kustomize")
+        for index, directory in enumerate(kustomize_dirs):
+            name = "kustomize" if index == 0 else f"kustomize:{directory}"
+            tools[name] = ExternalToolAdapter(
+                name,
+                "kubernetes",
+                ["build", _file_argument(directory)],
+                parse_lines,
+                executable="kustomize",
+            )
+            names.append(name)
     elif blueprint == "ci-cd" and "github-actions" in facts.ci:
         workflow_files = [
             path.relative_to(root).as_posix()
@@ -636,20 +696,20 @@ def _ecosystem_route(
             if path.relative_to(root).as_posix().startswith(".github/workflows/")
             and path.suffix.lower() in {".yaml", ".yml"}
         ]
-        tools["actionlint"].args.extend(workflow_files)
+        tools["actionlint"].args.extend(map(_file_argument, workflow_files))
         names.extend(["actionlint", "zizmor"])
     elif blueprint == "api-data-config" and facts.api_specs:
         contracts = [
             rel for rel in facts.api_specs if Path(rel).suffix in {".json", ".yaml", ".yml"}
         ]
         if contracts:
-            tools["spectral"].args.extend(contracts)
+            tools["spectral"].args.extend(map(_file_argument, contracts))
             names.append("spectral")
     elif blueprint == "documentation" and facts.docs:
         markdown_files = [rel for rel in facts.docs if rel.lower().endswith(".md")]
         if markdown_files:
-            tools["markdownlint-cli2"].args.extend(markdown_files)
-            tools["lychee"].args.extend(markdown_files)
+            tools["markdownlint-cli2"].args.extend(map(_file_argument, markdown_files))
+            tools["lychee"].args.extend(map(_file_argument, markdown_files))
             names.extend(["markdownlint-cli2", "lychee"])
     return names
 
@@ -799,23 +859,43 @@ def _module_adapters(
 ) -> list[ExternalToolAdapter]:
     root = Path(facts.path)
     selected = []
-    workspace_members = {
-        edge.target for edge in facts.graph.relationships if edge.kind == "workspace-member"
-    }
+    workspace_children: dict[str, set[str]] = {}
+    for edge in facts.graph.relationships:
+        if edge.kind == "workspace-member":
+            workspace_children.setdefault(edge.source, set()).add(edge.target)
+    workspace_members = set().union(*workspace_children.values()) if workspace_children else set()
+    test_evidence = set(facts.tests)
+    for node in facts.graph.verification:
+        if node.kind in {"unit", "integration", "end-to-end", "regression", "smoke"}:
+            test_evidence.update(node.evidence)
     for component in facts.graph.components:
-        if component.scope in NON_RUNTIME | {"test", "documentation"}:
+        if component.scope in NON_RUNTIME | {"documentation"} or (
+            component.scope == "test" and blueprint != "testing"
+        ):
             continue
         component_root = root / component.root
         owned = facts.graph.source_files(component)
+        local_tests = {relative for relative in test_evidence if relative in owned}
+        cargo_workspace = (
+            component.id in workspace_children and (component_root / "Cargo.toml").is_file()
+        )
+        if cargo_workspace and blueprint == "testing":
+            for relative in test_evidence:
+                owner = facts.graph.owner(relative)
+                if (
+                    Path(relative).suffix == ".rs"
+                    and facts.graph.scope(relative) not in NON_RUNTIME
+                    and owner is not None
+                    and owner.id in workspace_children[component.id]
+                ):
+                    local_tests.add(relative)
         local_facts = facts.model_copy(
             update={
                 "path": str(component_root),
                 "languages": {language: 1 for language in component.languages},
                 "frameworks": component.frameworks,
                 "tests": [
-                    str((root / rel).relative_to(component_root))
-                    for rel in facts.tests
-                    if rel in owned
+                    os.path.relpath(root / rel, component_root) for rel in sorted(local_tests)
                 ],
             }
         )
@@ -832,6 +912,8 @@ def _module_adapters(
             # Workspace-native Rust tooling owns its members in a single invocation.
             if name.startswith("cargo-") and component.id in workspace_members:
                 continue
+            if name == "cargo-test" and cargo_workspace:
+                adapter.args.insert(1, "--workspace")
             if name in {"go-vet", "go-test"} and not (component_root / "go.mod").is_file():
                 continue
             if name.startswith("cargo-") and not (component_root / "Cargo.toml").is_file():

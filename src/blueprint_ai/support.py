@@ -83,6 +83,7 @@ class ToolSpec(BaseModel):
         "official release/package; pin and verify upstream checksums; explicit install only"
     )
     maturity: Literal["supported", "partial", "experimental", "deferred"] = "supported"
+    integration: Literal["review", "genesis", "toolchain", "capability-kit", "deferred"] = "review"
     update: str = (
         "explicit upgrade; rerun native contract fixtures before changing the selected version"
     )
@@ -551,7 +552,9 @@ for _ids, _provider in [
 ]:
     for _id in _ids.split():
         TOOLS[_id].image = PROVIDERS[_provider].image
-        TOOLS[_id].container_executable = PROVIDERS[_provider].executable
+        TOOLS[_id].container_executable = (
+            "gofmt" if _id == "gofmt" else PROVIDERS[_provider].executable
+        )
         TOOLS[_id].acquisition_tool = _provider
         if _provider in TOOLS:
             TOOLS[_id].base_image = TOOLS[_provider].base_image
@@ -565,3 +568,35 @@ TOOLS["pre-commit"] = ToolSpec(
 )
 TOOLS["php-lint"].source = "https://www.php.net/manual/en/features.commandline.options.php"
 TOOLS["php-lint"].license = "PHP-3.01"
+TOOLS["php-lint"].maturity = "deferred"
+TOOLS["php-lint"].integration = "deferred"
+TOOLS["php-lint"].acquisition = (
+    "PHP CLI recognition only; dedicated review invocation deferred; "
+    "use project-native PHP checks with explicit trust"
+)
+TOOLS["kubescape"].maturity = "deferred"
+TOOLS["kubescape"].integration = "deferred"
+TOOLS["kubescape"].acquisition = (
+    "alternate compliance scanner; no review selection/parser contract; "
+    "use the official CLI separately with explicit scope/network authorization"
+)
+TOOLS[
+    "tofu"
+].acquisition += (
+    "; Genesis provider verification only; existing HCL review currently uses Terraform adapters"
+)
+TOOLS["cargo"].acquisition = "managed Rust toolchain acquisition; cargo-fmt/clippy/test own review"
+TOOLS["cargo"].integration = "toolchain"
+TOOLS["tofu"].integration = "genesis"
+TOOLS["pre-commit"].acquisition += "; capability-kit verification only, no review adapter"
+TOOLS["pre-commit"].integration = "capability-kit"
+FAMILIES["kubernetes"].maturity = "partial"
+FAMILIES["kubernetes"].boundary = (
+    "Namespace-only generation and built-in structural validation; "
+    "no workload, live API-server, cluster or deployment verification"
+)
+FAMILIES["pulumi"].maturity = "partial"
+FAMILIES["pulumi"].boundary = (
+    "generate-only empty program and selected cloud SDK installation; "
+    "no SDK resource API, preview, state or deployment verification"
+)

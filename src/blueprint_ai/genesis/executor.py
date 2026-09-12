@@ -25,7 +25,13 @@ from blueprint_ai.genesis.assets import strengthen
 from blueprint_ai.genesis.files import json_file
 from blueprint_ai.genesis.models import GenesisPlan, GenesisResult, Operation, OperationResult
 from blueprint_ai.genesis.plan import PROVIDERS, plan_project
-from blueprint_ai.safety import controlled_env, run_process
+from blueprint_ai.safety import (
+    MAX_MANIFEST_BYTES,
+    controlled_env,
+    read_bytes_bounded,
+    read_text_bounded,
+    run_process,
+)
 from blueprint_ai.sandbox import (
     SandboxPolicy,
     SandboxUnavailable,
@@ -400,9 +406,11 @@ def _inventory(stage: Path) -> dict[str, str]:
                 raise ValueError(f"provider generated a symbolic link: {path.relative_to(stage)}")
             if not path.is_file() and not path.is_dir():
                 raise ValueError(f"provider generated a special file: {path.relative_to(stage)}")
-    source_files, _ = iter_project_files(stage)
+    source_files, _ = iter_project_files(stage, reject_oversized=True)
     return {
-        p.relative_to(stage).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        p.relative_to(stage).as_posix(): hashlib.sha256(
+            read_bytes_bounded(p, MAX_MANIFEST_BYTES, root=stage)
+        ).hexdigest()
         for p in source_files
     }
 
@@ -520,7 +528,11 @@ def create_project(
                     if operation.id == "verify:kubernetes":
                         import yaml
 
-                        manifest = yaml.safe_load((stage / "namespace.yaml").read_text())
+                        manifest = yaml.safe_load(
+                            read_text_bounded(
+                                stage / "namespace.yaml", MAX_MANIFEST_BYTES, root=stage
+                            )
+                        )
                         if (
                             manifest.get("kind") != "Namespace"
                             or manifest.get("apiVersion") != "v1"
@@ -531,7 +543,11 @@ def create_project(
 
                         for spec in stage.rglob("openapi.json"):
                             if "node_modules" not in spec.parts and ".venv" not in spec.parts:
-                                validate(json.loads(spec.read_text()))
+                                validate(
+                                    json.loads(
+                                        read_text_bounded(spec, MAX_MANIFEST_BYTES, root=stage)
+                                    )
+                                )
                     result.operations.append(
                         OperationResult(
                             id=operation.id,

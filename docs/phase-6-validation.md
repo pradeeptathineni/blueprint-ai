@@ -1,5 +1,9 @@
 # Phase 6 validation and release decision
 
+**Historical candidate report.** The independent [release red team](phase-6-redteam.md) found
+and corrected defects after `6c376b9`. Its final gate supersedes the readiness decision below.
+The never-published local `0.6.0` tag remains untouched on that original candidate and is stale.
+
 Prepared 2026-09-12. Recommended release: **0.6.0, ready for the documented local creation,
 strengthening, review, and isolated-execution scope** with the final gate recorded below.
 The release is prepared locally on `codex/phase-6-ecosystem-sandbox`. No remote push, GitHub Release,
@@ -73,7 +77,7 @@ dropped capabilities, no-new-privileges, private IPC, no host credentials/socket
 Docker client configuration that cannot inherit host credential/proxy settings. Synthetic account
 records provide the numeric UID identity without exposing host account databases. Defaults are 120 s,
 2 CPU quota, 1 GiB RAM without additional swap, 128 PIDs, 256 MiB scratch, a 128 MiB individual-file
-limit and 4 MB captured output. A rejected container startup cannot claim isolation ran.
+limit and 4 MB captured output per stream. A rejected container startup cannot claim isolation ran.
 
 `none`/`loopback` prohibit egress through a private network namespace. Both may have internal loopback.
 An unenforceable destination allowlist is rejected. Normal networking requires explicit trust and

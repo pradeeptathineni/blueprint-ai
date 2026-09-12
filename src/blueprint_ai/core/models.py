@@ -84,6 +84,8 @@ class Finding(BaseModel):
             "file": self.file,
             "line": self.range.start_line if self.range else None,
         }
+        if self.provenance == "model":
+            material["provenance"] = "model"
         if self.category == "dependency-vulnerability":
             material.update(
                 {

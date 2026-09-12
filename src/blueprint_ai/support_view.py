@@ -18,7 +18,9 @@ def support_data() -> dict:
         adapter = adapters.get(name)
         tool_rows[name] = {
             **spec.model_dump(mode="json"),
-            "parser": adapter.parser.__name__ if adapter else "native lifecycle/dynamic route",
+            "parser": adapter.parser.__name__
+            if adapter
+            else ("dynamic review route" if spec.integration == "review" else spec.integration),
             "executable": adapter.executable if adapter else name,
             "network_required": adapter.network_required if adapter else None,
             "executes_project_code": adapter.executes_project_code if adapter else None,
@@ -38,6 +40,8 @@ def support_data() -> dict:
             k: {
                 "files": list(v.files),
                 "verification": v.verification,
+                "alternative_files": v.alternative_files,
+                "alternative_json_sections": v.alternative_json_sections,
                 "mode": "create-only transaction",
             }
             for k, v in KITS.items()
@@ -81,8 +85,8 @@ def support_markdown() -> str:
         "",
         "## External tools",
         "",
-        "| Tool | Source / license | Version policy | Acquisition |",
-        "| --- | --- | --- | --- |",
+        "| Tool | Integration / maturity | Source / license | Version policy | Acquisition |",
+        "| --- | --- | --- | --- | --- |",
     ]
     for tool in TOOLS.values():
         acquisition = (
@@ -91,20 +95,25 @@ def support_markdown() -> str:
             else tool.acquisition
         )
         lines.append(
-            f"| {tool.id} | [upstream]({tool.source}); {tool.license} | "
+            f"| {tool.id} | {tool.integration} / {tool.maturity} | "
+            f"[upstream]({tool.source}); {tool.license} | "
             f"{tool.versions} | {acquisition} |"
         )
     lines += [
         "",
         "## Addable capabilities",
         "",
-        "| Capability | Created files | Verification |",
-        "| --- | --- | --- |",
+        "| Capability | Created files | Conflicting alternatives | Verification |",
+        "| --- | --- | --- | --- |",
     ]
     for name, kit in data["addable"].items():
         verification = "; ".join(" ".join(c) for c in kit["verification"])
+        alternatives = kit["alternative_files"] + [
+            f"{file}#{section}" for file, section in kit["alternative_json_sections"].items()
+        ]
         lines.append(
             f"| {name} | {', '.join(kit['files'])} | "
+            f"{', '.join(alternatives) or 'same-path conflicts'} | "
             f"{verification or 'bounded structural validation'} |"
         )
     return "\n".join(lines) + "\n"

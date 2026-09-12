@@ -311,7 +311,7 @@ def _finalize_findings(
                 )
         scoped.append(item)
     findings = deduplicate(scoped, facts.project_types)
-    if context.changed_only and facts.changed_files:
+    if context.changed_only:
         changed = set(facts.changed_files)
         findings = [item for item in findings if item.file is None or item.file in changed]
     findings = _classify(findings, baseline, settings)
@@ -340,6 +340,9 @@ def _run_model_review(
 ) -> tuple[dict[str, int | float | str | None], int, int, int]:
     if settings.offline:
         notes.append("model review disabled by offline mode")
+        return {}, 1, 0, model_calls
+    if default_budget < 64:
+        notes.append("model review skipped because the allocated context budget is too small")
         return {}, 1, 0, model_calls
     if model_calls >= settings.model_max_calls:
         notes.append("model review skipped because the per-run call budget was exhausted")
@@ -392,7 +395,7 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
         if catalog[name].model_review and catalog[name].applicability(facts)
     ]
     allocated_calls = max(1, min(len(model_names), settings.model_max_calls))
-    default_budget = max((context.model_budget * 4 // 5) // allocated_calls, 64)
+    default_budget = max((context.model_budget * 4 // 5) // allocated_calls, 1)
     builder = ContextBuilder(context.root, default_budget, settings.ignores, facts.changed_files)
     baseline = _load_baseline(context.root, settings)
     results = []
@@ -410,12 +413,20 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
                 )
             )
             continue
-        findings = definition.check(context.root, facts)
+        check_error = None
+        try:
+            findings = definition.check(context.root, facts)
+        except (OSError, ValueError, RecursionError) as exc:
+            findings = []
+            check_error = f"Deterministic check incomplete: {exc}"
         if name == "completeness":
             findings.extend(_disabled_capability_findings(settings, facts))
         tools, notes, missing, errors = _collect_tool_results(
             context, settings, facts, name, findings
         )
+        if check_error:
+            notes.append(check_error)
+            errors += 1
         if (
             definition.model_review
             and context.model_mode == "off"
