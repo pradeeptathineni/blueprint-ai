@@ -277,6 +277,21 @@ def _discover_iac(files: list[Path], rels: list[str]) -> list[str]:
 
 def _discover_test_capabilities(root: Path, tests: list[str], rels: list[str]) -> list[str]:
     capabilities = set()
+    javascript_cli_targets: set[str] = set()
+    package_json = root / "package.json"
+    if package_json.is_file():
+        try:
+            package = json.loads(package_json.read_text(encoding="utf-8", errors="ignore"))
+            binaries = package.get("bin", {}) if isinstance(package, dict) else {}
+            if isinstance(binaries, str):
+                javascript_cli_targets.add(binaries.removeprefix("./"))
+            elif isinstance(binaries, dict):
+                javascript_cli_targets.update(str(name) for name in binaries)
+                javascript_cli_targets.update(
+                    str(target).removeprefix("./") for target in binaries.values()
+                )
+        except (OSError, ValueError):
+            pass
     markers = {
         "unit": ("unit",),
         "integration": ("integration",),
@@ -312,6 +327,15 @@ def _discover_test_capabilities(root: Path, tests: list[str], rels: list[str]) -
             capabilities.add("smoke" if generated_smoke else "unit")
         if "subprocess.run" in test_text and (
             "blueprint_ai.cli" in test_text or "blueprint-ai" in test_text
+        ):
+            capabilities.add("smoke")
+        if (
+            javascript_cli_targets
+            and ("node:child_process" in test_text or "child_process" in test_text)
+            and any(
+                call in test_text for call in ("spawn(", "spawnSync(", "execFile(", "execFileSync(")
+            )
+            and any(target in test_text for target in javascript_cli_targets)
         ):
             capabilities.add("smoke")
     browser_configs = {

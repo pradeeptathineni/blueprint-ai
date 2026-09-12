@@ -401,6 +401,7 @@ def _ecosystem_route(
                 tools["semgrep"].args[2] = ".semgrep.yaml"
             names.append("semgrep")
     elif blueprint == "supply-chain":
+        tools["trivy"].args[4] = "vuln"
         names.extend(["osv-scanner", "trivy"])
         if (root / ".syft.yaml").is_file():
             names.append("syft")
@@ -408,8 +409,12 @@ def _ecosystem_route(
             names.append("grype")
     elif blueprint == "iac":
         if "terraform" in facts.iac:
-            names.extend(["terraform-fmt", "terraform", "tflint", "checkov"])
+            tools["trivy"].blueprint = "iac"
+            tools["trivy"].args[4] = "misconfig"
+            names.extend(["terraform-fmt", "terraform", "tflint", "checkov", "trivy"])
         if "cloudformation" in facts.iac:
+            tools["trivy"].blueprint = "iac"
+            tools["trivy"].args[4] = "misconfig"
             cloudformation = []
             for path in iter_project_files(root)[0]:
                 if path.suffix not in {".yaml", ".yml"}:
@@ -418,12 +423,14 @@ def _ecosystem_route(
                 if "AWSTemplateFormatVersion" in text or "AWS::Serverless-2016-10-31" in text:
                     cloudformation.append(path.relative_to(root).as_posix())
             tools["cfn-lint"].args.extend(cloudformation)
-            names.extend(["cfn-lint", "checkov"])
+            names.extend(["cfn-lint", "checkov", "trivy"])
     elif blueprint == "containers":
         dockerfiles = [rel for rel in facts.containers if Path(rel).name.lower() == "dockerfile"]
         if dockerfiles:
             tools["hadolint"].args.extend(dockerfiles)
-            names.append("hadolint")
+            tools["trivy"].blueprint = "containers"
+            tools["trivy"].args[4] = "misconfig"
+            names.extend(["hadolint", "trivy"])
     elif blueprint == "kubernetes":
         special = {"chart.yaml", "kustomization.yaml", "kustomization.yml"}
         manifests = [

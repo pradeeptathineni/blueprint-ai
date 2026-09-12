@@ -42,6 +42,30 @@ def test_priority_adapter_commands_match_current_upstream_contracts() -> None:
     assert "--exclude-loopback" in tools["lychee"].args
 
 
+def test_trivy_scanner_scope_follows_blueprint_applicability(tmp_path: Path) -> None:
+    (tmp_path / "main.tf").write_text('resource "aws_vpc" "main" {}\n')
+    facts = discover_project(tmp_path)
+    iac_trivy = next(tool for tool in applicable_adapters(facts, "iac") if tool.name == "trivy")
+    assert iac_trivy.blueprint == "iac"
+    assert iac_trivy.args[4] == "misconfig"
+
+    (tmp_path / "package-lock.json").write_text('{"lockfileVersion":3,"packages":{}}\n')
+    facts = discover_project(tmp_path)
+    supply_trivy = next(
+        tool for tool in applicable_adapters(facts, "supply-chain") if tool.name == "trivy"
+    )
+    assert supply_trivy.blueprint == "supply-chain"
+    assert supply_trivy.args[4] == "vuln"
+
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    facts = discover_project(tmp_path)
+    container_trivy = next(
+        tool for tool in applicable_adapters(facts, "containers") if tool.name == "trivy"
+    )
+    assert container_trivy.blueprint == "containers"
+    assert container_trivy.args[4] == "misconfig"
+
+
 def test_lockfile_only_project_is_supply_chain_applicable(tmp_path: Path) -> None:
     (tmp_path / "package-lock.json").write_text('{"lockfileVersion": 3, "packages": {}}')
     facts = discover_project(tmp_path)
@@ -169,6 +193,35 @@ def test_lychee_json_error_map_preserves_location_and_url(tmp_path: Path) -> Non
     assert findings[0].file == "README.md"
     assert findings[0].range and findings[0].range.start_line == 7
     assert "missing.md" in findings[0].message
+
+
+def test_lychee_collapses_repeated_blocked_urls_as_inconclusive(tmp_path: Path) -> None:
+    payload = {
+        "errors": 2,
+        "error_map": {
+            "README.md": [
+                {
+                    "url": "https://example.com/blocked",
+                    "status": {"text": "Rejected status code: 403 Forbidden", "code": 403},
+                    "span": {"line": 7, "column": 1},
+                },
+                {
+                    "url": "https://example.com/blocked",
+                    "status": {"text": "Error (cached)"},
+                    "span": {"line": 12, "column": 1},
+                },
+            ]
+        },
+    }
+    findings = _adapter("lychee", parse_lychee).parse(
+        CommandResult([], 2, json.dumps(payload), ""), tmp_path
+    )
+    assert len(findings) == 1
+    assert findings[0].category == "link-check-inconclusive"
+    assert findings[0].confidence == 0.5
+    assert findings[0].tool_metadata["occurrences"] == 2
+    assert findings[0].range and findings[0].range.start_line == 7
+    assert "also at line 12" in findings[0].evidence
 
 
 def test_osv_parser_uses_advisory_severity_version_and_fix(tmp_path: Path) -> None:

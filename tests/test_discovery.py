@@ -63,3 +63,14 @@ def test_cloudformation_content_marker_is_detected(tmp_path: Path) -> None:
         'AWSTemplateFormatVersion: "2010-09-09"\nResources: {}\n'
     )
     assert discover_project(tmp_path).iac == ["cloudformation"]
+
+
+def test_javascript_cli_process_test_is_smoke_coverage(tmp_path: Path) -> None:
+    (tmp_path / "package.json").write_text('{"name":"demo","bin":{"demo":"./bin/demo.js"}}\n')
+    test = tmp_path / "tests" / "cli.test.js"
+    test.parent.mkdir()
+    test.write_text(
+        "import { spawnSync } from 'node:child_process'\n"
+        "spawnSync(process.execPath, ['bin/demo.js', '--help'])\n"
+    )
+    assert "smoke" in discover_project(tmp_path).test_capabilities
