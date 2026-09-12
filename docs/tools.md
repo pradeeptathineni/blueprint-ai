@@ -46,5 +46,7 @@ The canonical registry distinguishes review, genesis, toolchain acquisition, cap
 verification, and deferred entries. The 52 IDs comprise 47 review integrations, OpenTofu genesis,
 Cargo toolchain acquisition, pre-commit kit verification, and deferred PHP lint/Kubescape entries.
 Registration alone does not claim an executable review integration. The generated support table
-shows both role and maturity; the [independent tool inventory](redteam-tool-inventory.json) records
-all 52 lifecycles. The [native audit](redteam-tools.md) records parser corrections and actual runs.
+derives an intentional classification for every entry: managed OCI, safely acquirable,
+platform-constrained, experimental, deferred, or superseded/rejected. Runtime availability remains a
+separate `doctor` result. The [independent tool inventory](redteam-tool-inventory.json) records all 52
+lifecycles. The [native audit](redteam-tools.md) records parser corrections and actual runs.

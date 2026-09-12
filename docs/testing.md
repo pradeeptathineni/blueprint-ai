@@ -48,3 +48,13 @@ loopback applications. See the linked audit documents for prerequisites, exact c
 images and runs the full suite on Python 3.12–3.14. After building both distributions, its `--installs`
 mode checks each artifact in separate fresh Linux and native environments. Output paths must be fresh
 and outside the checkout; images and native Python interpreters must already be available.
+
+## Hosted CI contract
+
+CI runs on pull requests, pushes to `main`, semantic release tags without a `v` prefix, and manual
+dispatch. It has read-only repository permissions and ref-scoped concurrency; release-tag runs are
+never canceled by a later run. Quality/build/audit/SBOM work runs once on Linux, while the full test
+suite covers Python 3.12–3.14. A dedicated Docker job exercises live sandbox policy. A native
+`windows-latest` job runs representative CLI/config/provider tests plus the installed-style smoke
+workflow covering version, doctor, discovery, naming, deterministic genesis, no-model review, and
+transaction apply/rollback. Trigger structure is itself regression-tested in `tests/test_ci.py`.

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from blueprint_ai.support import FAMILIES, PROVIDERS, TOOLS
+from blueprint_ai.support import FAMILIES, PROVIDERS, TOOLS, tool_classification
 
 
 def support_data() -> dict:
@@ -18,6 +18,7 @@ def support_data() -> dict:
         adapter = adapters.get(name)
         tool_rows[name] = {
             **spec.model_dump(mode="json"),
+            "classification": tool_classification(spec),
             "parser": adapter.parser.__name__
             if adapter
             else ("dynamic review route" if spec.integration == "review" else spec.integration),
@@ -85,8 +86,9 @@ def support_markdown() -> str:
         "",
         "## External tools",
         "",
-        "| Tool | Integration / maturity | Source / license | Version policy | Acquisition |",
-        "| --- | --- | --- | --- | --- |",
+        "| Tool | Classification | Integration / maturity | Source / license | "
+        "Version policy | Acquisition |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for tool in TOOLS.values():
         acquisition = (
@@ -95,7 +97,8 @@ def support_markdown() -> str:
             else tool.acquisition
         )
         lines.append(
-            f"| {tool.id} | {tool.integration} / {tool.maturity} | "
+            f"| {tool.id} | {tool_classification(tool)} | "
+            f"{tool.integration} / {tool.maturity} | "
             f"[upstream]({tool.source}); {tool.license} | "
             f"{tool.versions} | {acquisition} |"
         )

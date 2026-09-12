@@ -127,6 +127,8 @@ class CachedModelReviewer:
             "estimated_input_tokens": (len(context) + 3) // 4,
             "input_tokens": response.input_tokens,
             "output_tokens": response.output_tokens,
+            "cached_input_tokens": response.cached_input_tokens,
+            "reasoning_tokens": response.reasoning_tokens,
             "cost_usd": response.cost_usd,
             "prompt_version": PROMPT_VERSION,
             "reason": "deterministic evidence could not fully evaluate this blueprint",

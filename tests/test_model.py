@@ -15,6 +15,8 @@ from blueprint_ai.model.provider import (
     ModelResponse,
     OpenAIProvider,
     _strict_schema,
+    configuration_from_environment,
+    provider_from_environment,
 )
 from blueprint_ai.model.reviewer import CachedModelReviewer
 
@@ -88,7 +90,16 @@ def test_strict_schema_requires_every_object_property() -> None:
 def test_openai_provider_uses_bounded_nonstored_structured_response() -> None:
     class Response:
         output_text = '{"findings": []}'
-        usage = None
+        usage = type(
+            "Usage",
+            (),
+            {
+                "input_tokens": 120,
+                "output_tokens": 30,
+                "input_tokens_details": type("Input", (), {"cached_tokens": 40})(),
+                "output_tokens_details": type("Output", (), {"reasoning_tokens": 10})(),
+            },
+        )()
 
     class Responses:
         def __init__(self) -> None:
@@ -103,7 +114,7 @@ def test_openai_provider_uses_bounded_nonstored_structured_response() -> None:
             self.responses = Responses()
 
     client = Client()
-    provider = OpenAIProvider(client=client)
+    provider = OpenAIProvider(client=client, reasoning_effort="low")
     response = provider.review(
         ModelRequest(
             blueprint="architecture", system="system", context="context", max_output_tokens=300
@@ -113,6 +124,9 @@ def test_openai_provider_uses_bounded_nonstored_structured_response() -> None:
     assert client.responses.arguments["store"] is False
     assert client.responses.arguments["max_output_tokens"] == 300
     assert client.responses.arguments["text"]["format"]["strict"] is True
+    assert client.responses.arguments["reasoning"] == {"effort": "low"}
+    assert response.input_tokens == 120 and response.output_tokens == 30
+    assert response.cached_input_tokens == 40 and response.reasoning_tokens == 10
 
 
 def test_openai_provider_constructs_client_with_timeout_and_retry_bound(monkeypatch) -> None:
@@ -142,6 +156,32 @@ def test_openai_provider_constructs_client_with_timeout_and_retry_bound(monkeypa
         )
     )
     assert captured == {"timeout": 12.0, "max_retries": 0}
+
+
+def test_provider_configuration_is_operator_owned_and_bounded(monkeypatch) -> None:
+    monkeypatch.setattr(OpenAIProvider, "available", lambda self: True)
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic")
+    monkeypatch.setenv("BLUEPRINT_AI_PROVIDER", "openai")
+    monkeypatch.setenv("BLUEPRINT_AI_MODEL", "operator-model")
+    monkeypatch.setenv("BLUEPRINT_AI_REASONING_EFFORT", "medium")
+    monkeypatch.setenv("BLUEPRINT_AI_MODEL_TIMEOUT", "12.5")
+    provider = provider_from_environment()
+    assert isinstance(provider, OpenAIProvider)
+    assert provider.model == "operator-model"
+    assert provider.reasoning_effort == "medium" and provider.timeout == 12.5
+    configuration = configuration_from_environment()
+    assert configuration.provider == "openai" and configuration.model == "operator-model"
+
+    monkeypatch.setenv("BLUEPRINT_AI_PROVIDER", "coding-agent")
+    assert provider_from_environment() is None
+    with pytest.raises(ValueError, match="unsupported model provider"):
+        configuration_from_environment()
+    monkeypatch.setenv("BLUEPRINT_AI_PROVIDER", "openai")
+    monkeypatch.setenv("BLUEPRINT_AI_MODEL_TIMEOUT", "601")
+    assert provider_from_environment() is None
+    monkeypatch.setenv("BLUEPRINT_AI_MODEL_TIMEOUT", "12")
+    monkeypatch.setenv("BLUEPRINT_AI_REASONING_EFFORT", "extreme")
+    assert provider_from_environment() is None
 
 
 def test_malformed_model_response_does_not_spend_an_unbudgeted_repair_call() -> None:

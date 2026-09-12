@@ -19,9 +19,10 @@ IaC CI combinations are currently rejected explicitly pending their own pinned w
 Docker build verifier. `--devcontainer` adds a separate non-root development image containing the
 selected Python/uv and/or Node toolchain, with its own Docker build. The Docker verifier uses a local
 Unix socket; a missing daemon is partial. No host credentials or Docker socket are mounted into images.
-Core generation targets Windows, but native Windows execution remains unverified. This release's
-Docker verifier requires a local Unix socket and does not support Windows named pipes.
-Dev Container editor attachment and cross-platform image execution are not claimed as validated.
+Core generation targets Windows. The 0.6.1 hosted gate exercises a representative built-in genesis
+path natively on `windows-latest`; it does not extend the Docker verifier, which requires a local
+Unix socket and does not support Windows named pipes. Dev Container editor attachment and
+cross-platform image execution are not claimed as validated.
 
 Full stack uses independent component manifests and lockfiles under `backend` and `frontend`.
 It does not introduce Nx, Turbo, or a second workspace task engine. Production routing, a database,

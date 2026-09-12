@@ -191,7 +191,7 @@ def _run_tools(context: RunContext, settings: Settings, facts, blueprint: str):
     policy = SandboxPolicy.model_validate(
         {
             "trusted": context.trust_project_executables,
-            "network": "normal"
+            "network": "unrestricted"
             if context.trust_project_executables and not settings.offline
             else "none",
             "authorize_network": context.trust_project_executables and not settings.offline,

@@ -3,7 +3,8 @@
 Release from a clean branch after the code, native execution, hostile input, documentation, and
 package gates pass. A zero-finding review is only one input. Existing release tags are immutable;
 use the repository's no-`v` convention. The [independent Phase 6 audit](phase-6-redteam.md) records the observed
-0.6.0 gate and its limits; [release notes](release-notes-0.6.0.md) are ready for a later authorized release.
+0.6.0 gate and its limits; the [0.6.1 validation](release-validation-0.6.1.md) records the maintenance
+release delta and [release notes](release-notes-0.6.1.md).
 
 ## Source and boundary gate
 
@@ -44,7 +45,8 @@ PYTHONPATH=src uv run python benchmarks/run.py
 
 Without those environment variables the ordinary suite skips live OCI boundary tests. Set both in
 release verification; a missing runtime/image is not a successful isolation test. CI has a dedicated
-Linux Docker job and a Python 3.12/3.13/3.14 quality matrix. A configured job is not a completed remote run.
+Linux Docker job, a Python 3.12/3.13/3.14 compatibility matrix, one Linux quality/build/audit job,
+and a native Windows smoke job. A configured job is not a completed remote run.
 
 ## Native projects and scanners
 
@@ -74,13 +76,14 @@ snapshots and component/context evidence; total findings depend on optional tool
 ## Wheel and source distribution
 
 ```bash
-uv build
+uv build --out-dir /tmp/blueprint-0.6.1-dist
 uv venv /tmp/blueprint-fresh
-uv pip install --python /tmp/blueprint-fresh/bin/python dist/blueprint_ai-0.6.0-py3-none-any.whl
+uv pip install --python /tmp/blueprint-fresh/bin/python \
+  /tmp/blueprint-0.6.1-dist/blueprint_ai-0.6.1-py3-none-any.whl
 env -u PYTHONPATH /tmp/blueprint-fresh/bin/python benchmarks/release_smoke.py \
   --output /tmp/blueprint-wheel-smoke.json --image python:3.12-slim-bookworm
 uv pip install --python /tmp/blueprint-fresh/bin/python --reinstall-package blueprint-ai \
-  dist/blueprint_ai-0.6.0.tar.gz
+  /tmp/blueprint-0.6.1-dist/blueprint_ai-0.6.1.tar.gz
 env -u PYTHONPATH /tmp/blueprint-fresh/bin/python benchmarks/release_smoke.py \
   --output /tmp/blueprint-sdist-smoke.json
 ```
@@ -93,9 +96,9 @@ record SHA-256 sums alongside the artifacts, and rerun smoke checks on the final
 
 ## Tag and publication
 
-After explicit release authorization, commit the verified tree and create an annotated `0.6.0` tag
-on that exact commit. Check `git status --porcelain`, `git cat-file -t 0.6.0`, and
-`git rev-parse '0.6.0^{commit}'`. Preparing an artifact or tag does not itself authorize pushing it,
+After release authorization, commit the verified tree and create an annotated `0.6.1` tag on that
+exact commit. Check `git status --porcelain`, `git cat-file -t 0.6.1`, and
+`git rev-parse '0.6.1^{commit}'`. Preparing an artifact or tag does not itself authorize pushing it,
 creating a public GitHub Release, or uploading a package.
 
 For a later authorized PyPI release, prefer [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
@@ -106,10 +109,6 @@ Configure publisher identity at the registry before enabling a release job, pin 
 commits, and scope `id-token: write` to that job. No publisher credentials or automatic upload workflow
 are introduced by this release.
 
-## Independent 0.6.0 correction gate
-
-The [independent release audit](phase-6-redteam.md) supersedes the original candidate self-review.
-Its source gate, native matrix, browser checks, hostile cases, and final installed-artifact commands
-are retained there. The existing never-published `0.6.0` tag remains on `6c376b9` and is stale after
-these corrections. Release finalization must recreate it on the independently verified audit commit,
-under separate authorization. Do not move historical published tags.
+The published `0.6.0` tag is immutable and resolves to `5e19dac`. The [independent release
+audit](phase-6-redteam.md) remains the historical source gate for that release; never reuse or move
+the tag. Maintenance releases receive a new tag after final CI succeeds on the exact merged commit.

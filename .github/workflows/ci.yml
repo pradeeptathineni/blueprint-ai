@@ -4,13 +4,49 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 jobs:
   quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy .
+      - run: uv run pip-audit
+      - run: uv build
+      - name: Verify release tag matches package version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: test "$GITHUB_REF_NAME" = "$(uv run python -c 'import blueprint_ai; print(blueprint_ai.__version__)')"
+      - run: uv run blueprint-ai schema report > blueprint-ai-report.schema.json
+      - run: uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format sarif > blueprint-ai.sarif
+      - run: uv run blueprint-ai review . --profile production --no-model --format junit > blueprint-ai.junit.xml
+      - run: uv run blueprint-ai support --markdown > blueprint-support.md && cmp docs/support.md blueprint-support.md
+      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+  compatibility:
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
@@ -20,23 +56,9 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          enable-cache: true
           python-version: ${{ matrix.python }}
       - run: uv sync --extra dev --locked
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run mypy .
       - run: uv run pytest -W error::DeprecationWarning --cov=blueprint_ai --cov-report=term-missing
-      - run: uv run pip-audit
-      - run: uv build
-      - run: uv run blueprint-ai schema report > blueprint-ai-report.schema.json
-      - run: uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format sarif > blueprint-ai.sarif
-      - run: uv run blueprint-ai review . --profile production --no-model --format junit > blueprint-ai.junit.xml
-      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
-        with:
-          path: .
-          format: spdx-json
-          output-file: sbom.spdx.json
 
   sandbox:
     runs-on: ubuntu-latest
@@ -49,6 +71,28 @@ jobs:
           python-version: "3.12"
       - run: uv sync --extra dev --locked
       - run: docker pull python:3.12-slim-bookworm
-      - run: uv run pytest tests/test_phase6.py -W error::DeprecationWarning
+      - run: docker pull node:24-bookworm-slim
+      - run: uv run pytest tests/test_phase6.py tests/test_redteam_sandbox.py -W error::DeprecationWarning
         env:
           BLUEPRINT_SANDBOX_TEST_IMAGE: python:3.12-slim-bookworm
+          BLUEPRINT_SANDBOX_NODE_IMAGE: node:24-bookworm-slim
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - run: uv sync --extra dev --locked
+      - run: uv run pytest tests/test_cli.py tests/test_config.py tests/test_model.py -W error::DeprecationWarning
+      - run: uv build --out-dir windows-dist
+      - name: Smoke test the installed Windows wheel
+        shell: pwsh
+        run: |
+          uv venv windows-smoke
+          $wheel = (Get-ChildItem windows-dist/*.whl).FullName
+          uv pip install --python windows-smoke/Scripts/python.exe $wheel
+          & "windows-smoke/Scripts/python.exe" benchmarks/release_smoke.py --output windows-smoke.json

@@ -28,7 +28,7 @@ from blueprint_ai.genesis import IntentSpec, plan_project
 from blueprint_ai.genesis.archive import unpack_source
 from blueprint_ai.remediation import KITS, CapabilityKit, rollback_operation
 from blueprint_ai.sandbox import SandboxPolicy, SandboxUnavailable, container_command, execute
-from blueprint_ai.support import FAMILIES, TOOLS
+from blueprint_ai.support import FAMILIES, TOOLS, tool_classification
 from blueprint_ai.support_view import support_markdown
 from blueprint_ai.tooling import cached_image, tool_plan
 
@@ -45,8 +45,9 @@ def files(root: Path) -> dict[str, bytes]:
     "options",
     [
         {"backend": "host"},
-        {"network": "normal"},
-        {"network": "normal", "trusted": True},
+        {"network": "unrestricted"},
+        {"network": "unrestricted", "trusted": True},
+        {"network": "restricted"},
         {"network": "allowlist"},
         {"writable": True},
         {"pids": 0},
@@ -101,7 +102,7 @@ def test_symlink_directory_boundary(tmp_path: Path) -> None:
 
 def test_oci_policy_is_common_to_docker_podman_runsc(tmp_path: Path) -> None:
     for backend in ("docker", "podman", "gvisor"):
-        for network in ("none", "loopback"):
+        for network in ("none",):
             policy = SandboxPolicy(network=network)
             argv = container_command(
                 ["runtime"],
@@ -124,6 +125,16 @@ def test_oci_policy_is_common_to_docker_podman_runsc(tmp_path: Path) -> None:
                 "SSH_AUTH_SOCK" in a or "OPENAI_API_KEY" in a or "docker.sock" in a for a in argv
             )
             assert ("--runtime=runsc" in argv) == (backend == "gvisor")
+
+
+@pytest.mark.parametrize(
+    ("legacy", "canonical"), [("loopback", "none"), ("normal", "unrestricted")]
+)
+def test_legacy_network_names_are_normalized(legacy: str, canonical: str) -> None:
+    options: dict[str, object] = {"network": legacy}
+    if canonical == "unrestricted":
+        options.update(trusted=True, authorize_network=True)
+    assert SandboxPolicy.model_validate(options).network == canonical
 
 
 def test_runtime_requires_confirmed_resource_support(monkeypatch) -> None:
@@ -179,14 +190,24 @@ def test_rejected_container_does_not_claim_isolation(tmp_path: Path, monkeypatch
     assert result.result.returncode == 125 and result.evidence.teardown
     assert not result.evidence.isolated
     assert not result.evidence.network_enforced and not result.evidence.limits_enforced
+    assert not result.evidence.workspace_writable_limit_enforced
 
 
 def test_tool_registry_covers_all_registered_adapters() -> None:
+    assert len(TOOLS) == 52
     assert {tool.name for tool in known_tools()} <= TOOLS.keys()
     for spec in TOOLS.values():
         assert (
             spec.source.startswith("https://") and spec.license and spec.acquisition and spec.update
         )
+        assert tool_classification(spec) in {
+            "managed-oci",
+            "safely-acquirable",
+            "platform-constrained",
+            "experimental",
+            "deferred",
+            "superseded-rejected",
+        }
     assert tool_plan("ruff")["command"] == ["docker", "pull", TOOLS["ruff"].image]
     assert not tool_plan("tsc")["command"]
     with pytest.raises(ValueError):

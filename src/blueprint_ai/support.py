@@ -90,6 +90,29 @@ class ToolSpec(BaseModel):
     reviewed: str = "2026-09-12"
 
 
+ToolClassification = Literal[
+    "managed-oci",
+    "safely-acquirable",
+    "platform-constrained",
+    "experimental",
+    "deferred",
+    "superseded-rejected",
+]
+
+
+def tool_classification(spec: ToolSpec) -> ToolClassification:
+    """Project canonical metadata into one intentional support state."""
+    if spec.integration == "deferred" or spec.maturity == "deferred":
+        return "deferred"
+    if spec.maturity == "experimental":
+        return "experimental"
+    if set(spec.platforms) != {"Linux", "macOS", "Windows"}:
+        return "platform-constrained"
+    if spec.image:
+        return "managed-oci"
+    return "safely-acquirable"
+
+
 def _tool(ids: str, source: str, license: str, **kwargs) -> dict[str, ToolSpec]:
     return {
         name: ToolSpec(id=name, source=source, license=license, **kwargs) for name in ids.split()
