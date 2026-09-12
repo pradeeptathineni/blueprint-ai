@@ -11,9 +11,11 @@ local execution, CI suitability, startup/runtime cost, macOS/Linux/Windows avail
 configuration burden, and false-positive behavior. Tools remain optional CLIs; none of their code is
 redistributed. Blueprint AI never silently downloads a tool.
 
-The Phase 3 refresh rechecked the actively changing defaults against upstream releases. Ruff remains
+The Phase 4 refresh rechecked the actively changing defaults against upstream releases and then ran
+the priority tools against controlled defects. Ruff remains
 the Python default and documents JSON/SARIF output. Semgrep remains on major version 1 with frequent
-2026 releases. Gitleaks remains on major version 8. OSV-Scanner v2 documents `scan --format json -r`
+2026 releases. Gitleaks remains on major version 8. OSV-Scanner v2 documents
+`scan source --format json`
 and guarantees compatible JSON/CLI behavior within a major release. Trivy 0.72, Syft 1.51, and Grype
 0.116 publish checksums plus signed bundles or release attestations. The broad compatible ranges in
 `doctor` intentionally avoid claiming exact reproducibility; CI should pin an exact release and
@@ -27,7 +29,7 @@ not a runtime dependency.
 ## Language authorities
 
 | Stack | Default | Useful alternate | Decision |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Python | [Ruff](https://github.com/astral-sh/ruff), configured mypy, pytest | Pyright, Pylint | Ruff is fast, cross-platform, MIT, and emits JSON/SARIF. Type checking runs only when the project configures it. pytest remains the suite authority. |
 | JavaScript/TypeScript | project-configured [ESLint](https://github.com/eslint/eslint) or [Biome](https://github.com/biomejs/biome), `tsc --noEmit`, package test script | oxlint, project framework CLI | `tsc` owns type correctness. Configured lint avoids inventing policy and avoids duplicate Biome/ESLint noise. Package scripts preserve Vitest/Jest/Node conventions. |
 | Go | `gofmt`, `go vet`, `go test` | golangci-lint | Native commands are maintained with Go, cross-platform, fast, and need no extra policy. `go test` also vets package/test source. |
@@ -43,7 +45,7 @@ This is deliberate graceful coverage, not a claim of native compilation support.
 Applicability is evidence-driven: absence of an irrelevant test class is not a finding.
 
 | Capability | Preferred route | Why / boundary |
-|---|---|---|
+| --- | --- | --- |
 | Unit/regression/smoke | existing native runner | Project configuration and fixtures are semantic authority. Deterministic smoke generation is limited to Python/JS layouts, marked as generated, executed immediately, and never masks a product failure. |
 | Browser E2E | [Playwright](https://github.com/microsoft/playwright) | Mature Apache-2.0 project with cross-browser CI and strong auto-waiting. Recommended only for detected web UI; not auto-installed. |
 | Property-based | [Hypothesis](https://github.com/HypothesisWorks/hypothesis) or ecosystem-native fuzz/property tools | High value for pure/stateful surfaces, but behavior and invariants require project judgment. |
@@ -55,7 +57,7 @@ Applicability is evidence-driven: absence of an irrelevant test class is not a f
 ## API, security, and supply chain
 
 | Capability | Default | Alternates / overlap decision |
-|---|---|---|
+| --- | --- | --- |
 | OpenAPI/AsyncAPI lint | [Spectral](https://github.com/stoplightio/spectral) plus native parser | Spectral is Apache-2.0, local/CI capable, and JSON/JUnit/SARIF-friendly. The official AsyncAPI CLI/parser is preferable for specification validity; Spectral adds governance. GraphQL uses its project compiler because generic lint policy varies. |
 | SAST | [Semgrep](https://github.com/semgrep/semgrep) when a local config exists | Broad language coverage and JSON/SARIF. No `--config auto` default because fetching a registry ruleset is an implicit network/dependency action and can change false-positive behavior. |
 | Secrets | [Gitleaks](https://github.com/gitleaks/gitleaks) | Fast MIT single binary with JSON/SARIF. Blueprint AI's small high-confidence literal/file checks provide fallback; Trivy overlap deduplicates by rule/location. |
@@ -68,7 +70,7 @@ Applicability is evidence-driven: absence of an irrelevant test class is not a f
 ## Infrastructure and delivery
 
 | Area | Default route | Comparison |
-|---|---|---|
+| --- | --- | --- |
 | Terraform/OpenTofu | native fmt/validate, [TFLint](https://github.com/terraform-linters/tflint), then [Checkov](https://github.com/bridgecrewio/checkov) | Native syntax/provider initialization remains authoritative; TFLint adds provider rules; Checkov adds broader security policy with more overlap/noise. Trivy is an alternate misconfiguration source. |
 | CloudFormation/SAM | [cfn-lint](https://github.com/aws-cloudformation/cfn-lint), then [CloudFormation Guard](https://github.com/aws-cloudformation/cloudformation-guard) only with rules | AWS documents that Guard is policy, not syntax/property validation; cfn-lint is the correctness default. Checkov is the cross-IaC security alternate. |
 | Dockerfile/container | [Hadolint](https://github.com/hadolint/hadolint), Trivy | Hadolint is a fast Haskell binary with JSON/SARIF/Checkstyle; Trivy adds image/dependency/misconfiguration coverage. Built-in rules cover only high-confidence base/user/health concerns. |
@@ -106,3 +108,23 @@ configuration are unsupported until the operator passes `--trust-project-executa
 the separate exact `--authorize-target` scope. Network-capable tools are suppressed in offline mode.
 The `bootstrap` command only prints guidance: package-native ephemeral runners and containers are not
 invoked automatically because mutable registries/tags weaken reproducibility and trust.
+
+## Phase 4 verified command contracts
+
+These invocations were exercised with Gitleaks 8.30.1, OSV-Scanner 2.5.1, Trivy 0.74.0,
+actionlint 1.7.12, zizmor 1.30.1, markdownlint-cli2 0.23.2, and Lychee 0.24.2:
+
+| Tool | Validated contract | Normalization boundary |
+| --- | --- | --- |
+| Gitleaks | `dir --report-format json --report-path - --redact` (or `git` in a Git repository) | Rule/file/line are preserved; a generic-key duplicate at the exact same location is discarded only when a specific secret rule exists. |
+| OSV-Scanner | `scan source --format json` | Advisory severity, aliases, package/ecosystem, installed version, and fixed version are retained; a group CVE becomes the stable cross-tool rule ID. |
+| Trivy | `fs --format json --scanners vuln,misconfig` with dependency directories skipped | Vulnerabilities and nested IaC `CauseMetadata` locations are retained. Secret scanning is left to Gitleaks to avoid duplicate scope. |
+| actionlint | JSON format with explicit discovered workflow paths | Expression findings retain snippet and location and share a template-injection identity with zizmor. |
+| zizmor | `--offline --format sarif .github/workflows` | SARIF findings are accepted even though SARIF mode exits zero for audit findings; original rule IDs remain in metadata when normalized for aggregation. |
+| markdownlint-cli2 | Explicit discovered Markdown paths | Ignored/vendor files are not linted. Target configuration can execute JavaScript, so it remains behind the project-executable trust boundary. |
+| Lychee | JSON over explicit discovered Markdown paths, 10-second request timeout, one retry, loopback exclusion, 30-second adapter deadline | Exit 2 means broken links and is a finding; runtime/input failures remain tool errors. File, line, URL, and status detail are retained. |
+
+Loopback links are excluded because service documentation commonly names a deliberately unavailable
+local development endpoint. Missing local files remain checked. Network reachability and private/403
+targets can still require project-specific Lychee exclusions; Blueprint AI does not silently convert
+those results to passes.

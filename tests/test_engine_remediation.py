@@ -5,7 +5,7 @@ from blueprint_ai.core import Finding
 from blueprint_ai.core.models import Remediation
 from blueprint_ai.discovery import discover_project
 from blueprint_ai.engine import make_context, review
-from blueprint_ai.remediation import apply_findings
+from blueprint_ai.remediation import apply_findings, apply_kit
 
 
 def test_explicit_blueprints_execute_and_nonapplicable_is_reported(python_project: Path) -> None:
@@ -92,8 +92,9 @@ def test_model_remediation_is_never_applied(python_project: Path) -> None:
 
 
 def test_javascript_test_scaffold_uses_native_node_test(js_project: Path) -> None:
-    context, _ = make_context(js_project, blueprints=["testing"], model_mode="off")
-    report = review(context)
-    result = apply_findings(js_project, report.facts, report.findings)
-    assert [change.target for change in result.changed] == ["tests/smoke.test.js"]
-    assert 'from "node:test"' in (js_project / "tests" / "smoke.test.js").read_text()
+    result = apply_kit(js_project, discover_project(js_project), "testing-javascript")
+    target = js_project / "tests" / "blueprint.generated.smoke.test.cjs"
+    assert [change.target for change in result.changed] == [
+        "tests/blueprint.generated.smoke.test.cjs"
+    ]
+    assert 'require("node:test")' in target.read_text()

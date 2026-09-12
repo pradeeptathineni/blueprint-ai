@@ -391,8 +391,7 @@ def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         required.append(("performance", "low", "capacity assumptions"))
     findings = []
     for capability, severity, scope in required:
-        satisfied = capability in present or (capability == "unit" and "smoke" in present)
-        if satisfied:
+        if capability in present:
             continue
         language = (
             "python"
@@ -402,7 +401,7 @@ def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
             else None
         )
         remediation = None
-        if capability in {"unit", "smoke"} and language:
+        if capability == "smoke" and language:
             target = "tests/test_smoke.py" if language == "python" else "tests/smoke.test.js"
             remediation = Remediation(
                 kind="test-scaffold",
@@ -501,7 +500,7 @@ def supply_chain_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         "go.sum",
         "Cargo.lock",
     }
-    if facts.manifests and not any((root / marker).is_file() for marker in lock_markers):
+    if facts.manifests and not any(Path(rel).name in lock_markers for rel in facts.manifests):
         findings.append(
             _finding(
                 "supply-chain",
@@ -704,6 +703,7 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                         severity="high",
                         file=workflow.relative_to(root).as_posix(),
                         line=number,
+                        rule_id="blueprint-ai/ci-cd/unpinned-action",
                     )
                 )
         checks_out = re.search(r"(?m)^\s*-?\s*uses:\s*actions/checkout", text)
@@ -772,12 +772,6 @@ def reliability_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 "No metrics, tracing, structured logging, or error-monitoring integration was "
                 "discovered.",
                 "Add the smallest applicable signals with correlation IDs and ownership.",
-                remediation=Remediation(
-                    kind="kit",
-                    target="observability",
-                    safe=True,
-                    description="add observability guidance",
-                ),
             )
         )
     files, _ = iter_project_files(root)

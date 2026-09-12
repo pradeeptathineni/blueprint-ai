@@ -185,9 +185,15 @@ def _run_tools(context: RunContext, settings: Settings, facts, blueprint: str):
     for adapter in adapters:
         adapter.max_output_bytes = settings.max_tool_output_bytes
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="blueprint-tool") as pool:
-        futures = [
-            pool.submit(adapter.run, context.root, settings.tool_timeout) for adapter in adapters
-        ]
+        futures = []
+        for adapter in adapters:
+            default_timeout = getattr(adapter, "default_timeout", None)
+            timeout = (
+                min(settings.tool_timeout, default_timeout)
+                if isinstance(default_timeout, (int, float))
+                else settings.tool_timeout
+            )
+            futures.append(pool.submit(adapter.run, context.root, float(timeout)))
         return [future.result() for future in futures]
 
 
@@ -228,7 +234,7 @@ def _collect_tool_results(
     missing = errors = 0
     for status, adapter_findings, error in _run_tools(context, settings, facts, name):
         tools.append(status)
-        missing += status.outcome == "tool_missing"
+        missing += status.outcome in {"tool_missing", "unsupported"}
         errors += status.outcome == "tool_error"
         if error:
             notes.append(f"{status.name}: {error}")

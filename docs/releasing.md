@@ -22,11 +22,16 @@ PYTHONPATH=src uv run python benchmarks/run.py
 ```
 
 Install the wheel into a fresh environment and inspect `blueprint-ai --help`, `doctor`, and a
-no-model review. Exercise the hostile repository cases in `tests/test_phase3.py`. For destructive
-external-project work, use only a disposable `blueprint-ai/phase-3-*` branch/worktree and verify the
-source repository's default branch/ref before and after.
+no-model review. Exercise the hostile repository cases in `tests/test_phase3.py` and real-tool
+contract regressions in `tests/test_phase4.py`. Recreate scanner fixtures with synthetic credentials
+only; never commit their contents. For external-project strengthening, use a disposable copy or a
+dedicated `codex/phase-4-*` branch and verify the source repository before and after.
 
 Release notes must record missing optional OSS tools and absent model credentials as limitations,
 not successful tool/model validation. Review the JSON metadata for tool/provider/model/prompt
 versions, config hash, duration, token/call/cache metrics, and the distinction between missing,
 unsupported, failed, and finding outcomes.
+
+The Phase 4 evidence and current release classification live in
+[phase-4-validation.md](phase-4-validation.md). Existing release tags are immutable; preparing a
+version does not authorize tagging or publishing it.

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0 — 2026-09-11
+
+- Validated Gitleaks, OSV-Scanner, Trivy, actionlint, zizmor, markdownlint-cli2, and Lychee against
+  controlled defects and corrected their current command and output contracts.
+- Preserved advisory severity, affected/fixed versions, IaC source locations, broken-link locations,
+  and multi-tool provenance while suppressing only demonstrated same-location duplicates.
+- Made unavailable or trust-disabled tools explicitly partial instead of presenting an incomplete
+  blueprint as passed; bounded Lychee and OpenAI provider execution.
+- Fixed lockfile-only and nested-manifest applicability, Git-aware secret scan scope, actionlint
+  workflow scope, Trivy dependency-directory scope, and generated GitHub Actions credentials.
+- Distinguished generated smoke tests from meaningful unit coverage and stopped documentation-only
+  observability remediation from falsely closing an integration gap.
+- Added real-tool, parser, applicability, aggregation, timeout, and incomplete-report regressions,
+  plus an independent six-repository matrix and disposable service-strengthening case study.
+
 ## 0.3.0 — 2026-09-11
 
 - Established an explicit trust boundary for target-controlled tool overrides, local wrappers, and
