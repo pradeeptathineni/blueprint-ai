@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 
-from pathspec import PathSpec
+from pathspec import GitIgnoreSpec
 
 from blueprint_ai.core import ProjectFacts
 from blueprint_ai.safety import MAX_CONFIG_BYTES, read_text_bounded, run_process_bytes
@@ -60,7 +60,7 @@ def _git_run(root: Path, *arguments: str, timeout: float = 5):
     return run_process_bytes(_git_command(root, *arguments), root, timeout, output_limit=8_000_000)
 
 
-def _ignore_spec(root: Path, extra: Iterable[str]) -> PathSpec:
+def _ignore_spec(root: Path, extra: Iterable[str]) -> GitIgnoreSpec:
     patterns = list(extra)
     ignore = root / ".gitignore"
     if ignore.is_file():
@@ -71,7 +71,7 @@ def _ignore_spec(root: Path, extra: Iterable[str]) -> PathSpec:
         except (OSError, ValueError):
             pass
     patterns = [pattern for pattern in patterns[:10_000] if len(pattern) <= 1_000]
-    return PathSpec.from_lines("gitwildmatch", patterns)
+    return GitIgnoreSpec.from_lines(patterns)
 
 
 def iter_project_files(root: Path, extra_ignores: Iterable[str] = ()) -> tuple[list[Path], int]:

@@ -7,7 +7,8 @@ Date: 2026-09-11. Release candidate: 0.4.0.
 **RELEASE READY WITH DOCUMENTED LIMITATIONS.** Deterministic behavior, packaging, and the priority
 optional-tool integrations have real execution evidence. No live model credential was available, so
 remote model quality, billing, and service behavior remain an explicit release limitation. The
-existing `0.3.0` tag was not moved and no 0.4.0 tag was created or published.
+existing `0.3.0` tag was not moved. This evidence document was finalized before the annotated 0.4.0
+release tag; no package publication is part of this release.
 
 ## Baseline
 
@@ -81,6 +82,11 @@ responses, malformed responses, timeout/failure degradation, cache hits and prom
 redaction, injection isolation, budgets, metrics, and deterministic independence under `--no-model`.
 The real service path remains the principal documented limitation.
 
+The final locked OpenAI SDK is 3.13.0. A local contract check confirmed that its Responses API still
+accepts the provider's `instructions`, `input`, token limit, storage, metadata, and structured-text
+arguments, as well as the configured client timeout and retry bound. This is SDK compatibility
+evidence only; it does not substitute for a live service call.
+
 ## Real-repository matrix
 
 Six unrelated local repositories were reviewed read-only with production/no-model semantics:
@@ -117,7 +123,13 @@ as case-study evidence rather than counted as improvement.
 
 ## Final verification and performance
 
-The final gate passes Ruff formatting/linting, mypy, 92 tests, 81% coverage, dependency audit, schema
+Before the release gate, Phase 4 was rebased onto the two Dependabot merges already present on
+`main`. The current checkout/setup action pins were retained while the Phase 4 credential-persistence
+hardening was preserved. The Python constraint updates were retained and `uv.lock` was regenerated.
+That exercise exposed pathspec 1.1 deprecation warnings in discovery; ignore matching now uses its
+dedicated `GitIgnoreSpec` API, with a regression proving `.gitignore` negation remains visible.
+
+The final gate passes Ruff formatting/linting, mypy, 93 tests, 80% coverage, dependency audit, schema
 generation, wheel/sdist build, fresh-wheel installation, CLI smoke tests, and deterministic
 self-review. The package audit reports no known third-party vulnerabilities; the local package is
 properly skipped because it is not yet on PyPI.
@@ -126,14 +138,15 @@ Final synthetic benchmark:
 
 | Files | Discovery | Context | Peak memory | Files read | Estimated tokens |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 101 | 49.538 ms | 87.331 ms | 677,466 B | 101 | 5,011 |
-| 1,001 | 211.937 ms | 501.897 ms | 1,883,989 B | 500 | 12,000 |
-| 5,001 | 928.659 ms | 1,748.764 ms | 7,150,788 B | 500 | 12,000 |
+| 101 | 66.379 ms | 100.205 ms | 677,518 B | 101 | 5,011 |
+| 1,001 | 202.334 ms | 461.558 ms | 1,884,273 B | 500 | 12,000 |
+| 5,001 | 973.023 ms | 1,553.885 ms | 7,150,988 B | 500 | 12,000 |
 
 Context remains capped at 500 file reads and 12,000 estimated tokens. `--no-model` made zero model
-calls. Discovery medians improved; context construction showed host-load variance and the 5,001-file
-sample was about 17% slower than baseline in the recorded final run, so no context-speed improvement
-is claimed. Controlled cache tests prove repeat hits and content/prompt invalidation without remote
-calls. The final trusted self-review produced zero findings and passed all ten applicable tools. The
-untrusted review also produced zero findings but correctly remained partial for mypy, pytest, and
-markdownlint. No fixture, generated cache, external-repository edit, tag, or publication is included.
+calls. Discovery medians remained below baseline at every scale; context construction showed
+host-load variance and the 5,001-file sample was about 4% slower than baseline in the recorded final
+run, so no context-speed improvement is claimed. Controlled cache tests prove repeat hits and
+content/prompt invalidation without remote calls. The final trusted self-review produced zero
+findings and passed all twelve applicable blueprints using all ten tools. The untrusted review also
+produced zero findings but correctly remained partial for mypy, pytest, and markdownlint. No fixture,
+generated cache, external-repository edit, tag, or publication is included.

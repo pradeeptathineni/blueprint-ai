@@ -14,6 +14,8 @@
   observability remediation from falsely closing an integration gap.
 - Added real-tool, parser, applicability, aggregation, timeout, and incomplete-report regressions,
   plus an independent six-repository matrix and disposable service-strengthening case study.
+- Reconciled the release with the September dependency and GitHub Actions updates, regenerated the
+  locked environment, and migrated ignore matching to `GitIgnoreSpec` for pathspec 1.1 compatibility.
 
 ## 0.3.0 — 2026-09-11
 
