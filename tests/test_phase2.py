@@ -15,6 +15,7 @@ from blueprint_ai.adapters.base import (
     parse_grype,
     parse_junit,
     parse_kubeconform,
+    parse_lines,
     parse_sarif,
     parse_semgrep,
 )
@@ -276,6 +277,23 @@ def test_tool_timeout_is_a_tool_error(tmp_path: Path) -> None:
     assert status.exit_code == 124
     assert error is not None
     assert error.startswith("timed out")
+    assert findings == []
+
+
+def test_tool_error_preserves_bounded_actionable_output(tmp_path: Path) -> None:
+    executable = tmp_path / "fails"
+    executable.write_text(
+        '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "fails 1"; exit 0; fi\n'
+        "printf 'configuration is incompatible\\n' >&2\nexit 4\n"
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    adapter = ExternalToolAdapter(
+        "fails", "testing", [], parse_lines, executable=str(executable), expected_codes={0}
+    )
+    status, findings, error = adapter.run(tmp_path)
+    assert status.outcome == "tool_error"
+    assert status.detail == "exit 4: configuration is incompatible"
+    assert error == status.detail
     assert findings == []
 
 

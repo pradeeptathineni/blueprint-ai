@@ -10,6 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 import blueprint_ai.remediation as remediation_module
+from blueprint_ai import __version__
 from blueprint_ai.adapters.base import ExternalToolAdapter, parse_lines
 from blueprint_ai.adapters.registry import known_tools
 from blueprint_ai.benchmark import benchmark_repository
@@ -277,10 +278,10 @@ def test_run_metadata_junit_and_cli_exit_policy(tmp_path: Path) -> None:
     report = review(context)
     assert report.schema_version == "1.0.0"
     assert report.metadata and len(report.metadata.config_sha256) == 64
-    assert report.metadata.blueprint_ai_version == "0.4.0"
+    assert report.metadata.blueprint_ai_version == __version__
     version = CliRunner().invoke(app, ["--version"])
     assert version.exit_code == 0
-    assert version.stdout.strip() == "0.4.0"
+    assert version.stdout.strip() == __version__
     root = ET.fromstring(report_junit(report))
     assert root.tag == "testsuite"
     result = CliRunner().invoke(

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 — Unreleased
+
+- Preserve a bounded diagnostic excerpt when a trusted project tool fails instead of reporting only
+  its exit code.
+- Recognize JavaScript CLI tests that invoke declared package binaries as smoke coverage.
+- Distinguish blocked or transient link checks from confirmed broken links and collapse repeated
+  occurrences of the same URL in one file.
+- Route Trivy misconfiguration scans through IaC applicability, including IaC-only repositories,
+  and preserve container checks while keeping dependency reviews limited to vulnerability scanning.
+
 ## 0.4.0 — 2026-09-11
 
 - Validated Gitleaks, OSV-Scanner, Trivy, actionlint, zizmor, markdownlint-cli2, and Lychee against

@@ -51,6 +51,12 @@ def run_bounded_command(
     )
 
 
+def _failure_detail(result: CommandResult) -> str:
+    output = "\n".join(part.strip() for part in (result.stderr, result.stdout) if part.strip())
+    detail = f"exit {result.returncode}"
+    return f"{detail}: {sanitize_label(output, 500)}" if output else detail
+
+
 def _resolve_executable(executable: str) -> str | None:
     if os.sep in executable or (os.altsep and os.altsep in executable):
         path = Path(executable)
@@ -95,13 +101,14 @@ class ToolAdapter(ABC):
                 if result.timed_out
                 else None
                 if result.returncode in self.expected_codes
-                else f"exit {result.returncode}"
+                else _failure_detail(result)
             )
             status.exit_code = result.returncode
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.output_truncated = result.output_truncated
             status.outcome = "tool_error" if error else "finding" if findings else "passed"
             if error:
+                status.detail = error
                 findings = []
             return status, findings, error
         except subprocess.TimeoutExpired:
@@ -109,19 +116,20 @@ class ToolAdapter(ABC):
             status.exit_code = 124
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
+            status.detail = f"timed out after {timeout}s"
             return status, self.parse(result, root), f"timed out after {timeout}s"
         except OSError as exc:
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
-            return status, [], str(exc)
+            status.detail = sanitize_label(str(exc), 500)
+            return status, [], status.detail
         except Exception as exc:
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
-            return (
-                status,
-                [],
-                (f"malformed tool output: {type(exc).__name__}: {sanitize_label(str(exc), 300)}"),
+            status.detail = (
+                f"malformed tool output: {type(exc).__name__}: {sanitize_label(str(exc), 300)}"
             )
+            return status, [], status.detail
 
 
 Parser = Callable[[CommandResult, Path, "ExternalToolAdapter"], list[Finding]]
@@ -708,25 +716,52 @@ def parse_lychee(result: CommandResult, root: Path, adapter: ExternalToolAdapter
         data = json.loads(result.stdout or "{}")
     except ValueError:
         return parse_lines(result, root, adapter)
-    findings = []
+    findings: dict[tuple[str, str, str], Finding] = {}
     for filename, rows in (data.get("error_map", {}) or {}).items():
         for row in rows if isinstance(rows, list) else []:
             status = row.get("status", {}) or {}
             detail = status.get("text") or status.get("details") or "link check failed"
+            code = _int(status.get("code"))
+            lowered = str(detail).lower()
+            inconclusive = code in {401, 403, 429} or any(
+                marker in lowered
+                for marker in ("cached", "timed out", "timeout", "connection", "network", "dns")
+            )
+            category = "link-check-inconclusive" if inconclusive else "broken-link"
+            url = str(row.get("url", "unknown"))
+            line = _int((row.get("span") or {}).get("line"))
+            key = (str(filename), url, category)
+            if existing := findings.get(key):
+                occurrences = int(existing.tool_metadata.get("occurrences") or 1) + 1
+                existing.tool_metadata["occurrences"] = occurrences
+                if line:
+                    existing.evidence = sorted(set(existing.evidence + [f"also at line {line}"]))
+                continue
             item = finding(
                 adapter,
                 root=root,
-                category="broken-link",
-                rule_id="lychee/broken-link",
-                severity="low",
+                category=category,
+                rule_id=f"lychee/{category}",
+                severity="info" if inconclusive else "low",
                 file=filename,
-                line=_int((row.get("span") or {}).get("line")),
-                message=f"Broken link: {row.get('url', 'unknown')} ({detail})",
+                line=line,
+                message=(
+                    f"Link could not be verified: {url} ({detail})"
+                    if inconclusive
+                    else f"Broken link: {url} ({detail})"
+                ),
                 evidence=[str(status.get("details"))] if status.get("details") else [],
-                recommendation="Correct or remove the link, then rerun lychee.",
+                recommendation=(
+                    "Verify the link manually; the remote service may block automated clients."
+                    if inconclusive
+                    else "Correct or remove the link, then rerun lychee."
+                ),
             )
-            findings.append(item)
-    return findings
+            item.confidence = 0.5 if inconclusive else 1.0
+            item.tool_metadata["http_status"] = code
+            item.tool_metadata["occurrences"] = 1
+            findings[key] = item
+    return list(findings.values())
 
 
 def parse_checkov(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
