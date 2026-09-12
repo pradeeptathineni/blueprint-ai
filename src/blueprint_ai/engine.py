@@ -84,6 +84,7 @@ def make_context(
     base_ref: str | None = None,
     trust_project_executables: bool = False,
     authorized_target: str | None = None,
+    sandbox: dict | None = None,
 ) -> tuple[RunContext, Settings]:
     root = path.expanduser().resolve()
     settings = load_settings(
@@ -125,6 +126,7 @@ def make_context(
         / "blueprint-ai-cache"
         / hashlib.sha256(str(root).encode()).hexdigest()[:20],
         trust_project_executables=trust_project_executables,
+        sandbox=sandbox or {},
     )
     return context, settings
 
@@ -184,6 +186,22 @@ def _classify(findings: list[Finding], baseline: set[str], settings: Settings) -
 
 
 def _run_tools(context: RunContext, settings: Settings, facts, blueprint: str):
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    policy = SandboxPolicy.model_validate(
+        {
+            "trusted": context.trust_project_executables,
+            "network": "normal"
+            if context.trust_project_executables and not settings.offline
+            else "none",
+            "authorize_network": context.trust_project_executables and not settings.offline,
+            **context.sandbox,
+        }
+    )
+    if settings.offline:
+        policy = SandboxPolicy.model_validate(
+            {**policy.model_dump(), "network": "none", "authorize_network": False}
+        )
     adapters = applicable_adapters(
         facts,
         blueprint,
@@ -191,12 +209,15 @@ def _run_tools(context: RunContext, settings: Settings, facts, blueprint: str):
         authorized_target=settings.authorized_target,
         offline=settings.offline,
         allow_project_executables=context.trust_project_executables,
+        sandboxed=policy.backend != "host"
+        and (not policy.trusted or bool(policy.image) or policy.backend != "auto"),
     )
     if not adapters:
         return []
     workers = min(settings.max_workers, len(adapters))
     for adapter in adapters:
         adapter.max_output_bytes = settings.max_tool_output_bytes
+        adapter.sandbox = policy
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="blueprint-tool") as pool:
         futures = []
         for adapter in adapters:
@@ -507,7 +528,10 @@ def analyzer_identity() -> dict[str, Any]:
         digest.update(file.read_bytes())
     commit = None
     if (source.parent.parent / ".git").exists():
-        result = run_process(["git", "rev-parse", "HEAD"], source.parent.parent, 3)
-        if result.returncode == 0:
-            commit = result.stdout.strip()
+        try:
+            result = run_process(["git", "rev-parse", "HEAD"], source.parent.parent, 3)
+            if result.returncode == 0:
+                commit = result.stdout.strip()
+        except FileNotFoundError:
+            pass  # Source identity still has the package source hash when Git is unavailable.
     return {"analyzer_commit": commit, "analyzer_source_sha256": digest.hexdigest()}

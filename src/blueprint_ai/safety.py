@@ -157,15 +157,19 @@ def run_process_bytes(
                 "XDG_CACHE_HOME": str(cache),
             }
         )
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=env,
-        start_new_session=True,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=True,
+        )
+    except OSError:
+        isolated_home.cleanup()
+        raise
     stdout = bytearray()
     stderr = bytearray()
     assert process.stdout is not None and process.stderr is not None

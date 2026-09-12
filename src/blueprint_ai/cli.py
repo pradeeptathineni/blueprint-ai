@@ -240,6 +240,12 @@ def review_command(
     trust_project_executables: TrustOption = False,
     fail_on: FailOnOption = None,
     authorized_target: AuthorizeTargetOption = None,
+    sandbox: Annotated[
+        str, typer.Option(help="auto, docker, podman, gvisor, or trusted host")
+    ] = "auto",
+    sandbox_image: Annotated[
+        str | None, typer.Option(help="Local OCI image; never pulled implicitly")
+    ] = None,
 ) -> None:
     """Run read-only deterministic checks, then bounded model review when enabled."""
     if no_model and model not in {None, "off"}:
@@ -257,6 +263,15 @@ def review_command(
         fail_on,
         authorized_target,
     )
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    try:
+        policy = SandboxPolicy.model_validate(
+            {"backend": sandbox, "image": sandbox_image, "trusted": trust_project_executables}
+        )
+        context.sandbox = policy.model_dump(exclude={"network", "authorize_network"})
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     report = review(context)
     _emit_report(report, context.output_mode)
     _enforce_exit_policy(report, context)
@@ -474,6 +489,9 @@ def bootstrap(json_output: JsonOption = False) -> None:
 @app.command()
 def doctor(json_output: JsonOption = False) -> None:
     """Show runtime, external tool, and model availability."""
+    from blueprint_ai.sandbox import doctor as sandbox_doctor
+    from blueprint_ai.support_view import support_data
+
     definitions = known_tools()
     tools = [
         {**adapter.status().model_dump(mode="json"), "blueprint": adapter.blueprint}
@@ -499,6 +517,8 @@ def doctor(json_output: JsonOption = False) -> None:
             "detail": model_detail,
         },
         "tools": tools,
+        "support": support_data(),
+        "sandboxes": sandbox_doctor(),
         "contracts": {"ok": True, **contracts},
     }
     if json_output:
@@ -526,6 +546,7 @@ def schema_command(
     """Print stable machine-readable JSON schemas for integrations and extensions."""
     from blueprint_ai.core.project import ProjectGraph
     from blueprint_ai.genesis.models import GenesisPlanPreview, IntentSpec
+    from blueprint_ai.sandbox import SandboxPolicy
 
     schemas = {
         "settings": Settings.model_json_schema(),
@@ -534,6 +555,7 @@ def schema_command(
         "intent": IntentSpec.model_json_schema(),
         "genesis-plan": GenesisPlanPreview.model_json_schema(),
         "project-graph": ProjectGraph.model_json_schema(),
+        "sandbox-policy": SandboxPolicy.model_json_schema(),
     }
     if name not in schemas:
         raise typer.BadParameter("schema must be one of " + ", ".join(schemas))
@@ -613,12 +635,18 @@ def init_command(
     no_model: Annotated[
         bool, typer.Option("--no-model", help="All shipped genesis flows are deterministic.")
     ] = True,
+    sandbox: Annotated[
+        str, typer.Option(help="auto, docker, podman, gvisor, or trusted host")
+    ] = "auto",
+    sandbox_image: Annotated[str | None, typer.Option()] = None,
+    cloud: Annotated[str, typer.Option(help="Terraform/OpenTofu cloud: aws, azure, gcp")] = "aws",
 ) -> None:
     """Resolve intent, initialize, compose, strengthen, verify, and review a fresh project."""
     from blueprint_ai.config import load_yaml_mapping
     from blueprint_ai.genesis import IntentSpec, plan_project
     from blueprint_ai.genesis.executor import create_project
     from blueprint_ai.genesis.models import GenesisPlanPreview
+    from blueprint_ai.sandbox import SandboxPolicy
 
     try:
         if spec:
@@ -631,6 +659,7 @@ def init_command(
                 "ci": ci,
                 "devcontainer": devcontainer,
                 "api_client": api_client,
+                "cloud": cloud,
             }
             if backend is not None:
                 data["backend"] = backend
@@ -640,12 +669,148 @@ def init_command(
             _dump(GenesisPlanPreview(**resolved.model_dump(), plan_sha256=resolved.digest()))
             return
         result = create_project(
-            path, resolved, allow_network=allow_network, trust_providers=trust_providers
+            path,
+            resolved,
+            allow_network=allow_network,
+            trust_providers=trust_providers,
+            sandbox=SandboxPolicy.model_validate(
+                {
+                    "backend": sandbox,
+                    "image": sandbox_image,
+                    "trusted": trust_providers,
+                    "writable": trust_providers,
+                }
+            ),
         )
         _dump(result.model_dump(mode="json"))
         if result.status in {"failed", "partial"}:
             raise typer.Exit(2 if result.status == "failed" else 3)
     except (ValueError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@app.command("add")
+def add_command(
+    capability: str,
+    path: PathArg = Path("."),
+    apply_changes: Annotated[
+        bool, typer.Option("--apply", help="Apply the displayed create-only plan")
+    ] = False,
+    trust_project_executables: TrustOption = False,
+    sandbox: str = "auto",
+    sandbox_image: str | None = None,
+) -> None:
+    """Plan or transactionally add a capability to an existing project."""
+    from blueprint_ai.capabilities import add_capability, plan_add
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    root = path.resolve()
+    try:
+        plan = plan_add(root, capability)
+        if not apply_changes:
+            _dump(plan)
+            return
+        policy = SandboxPolicy.model_validate(
+            {"backend": sandbox, "image": sandbox_image, "trusted": trust_project_executables}
+        )
+        result = add_capability(root, discover_project(root), capability, policy=policy)
+        _dump(result.model_dump(mode="json"))
+        if any(v.status != "passed" for v in result.verifications) or any(
+            c.status in {"conflicted", "rolled_back", "unsupported"} for c in result.changes
+        ):
+            raise typer.Exit(3)
+    except (ValueError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@app.command("support")
+def support_command(markdown: Annotated[bool, typer.Option()] = False) -> None:
+    """Print the canonical support registry (JSON or generated Markdown)."""
+    from blueprint_ai.support_view import support_data, support_markdown
+
+    if markdown:
+        typer.echo(support_markdown(), nl=False)
+    else:
+        _dump(support_data())
+
+
+tools_app = typer.Typer(help="Inspect and explicitly acquire optional tools.")
+app.add_typer(tools_app, name="tools")
+
+
+@tools_app.command("plan")
+def tools_plan(name: str, backend: str = "docker") -> None:
+    from blueprint_ai.tooling import tool_plan
+
+    try:
+        _dump(tool_plan(name, backend))
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@tools_app.command("install")
+def tools_install(name: str, backend: str = "docker", dry_run: bool = False) -> None:
+    """Explicitly pull a registered tool image and record its immutable local identity."""
+    from blueprint_ai.sandbox import SandboxUnavailable
+    from blueprint_ai.tooling import install_tool, tool_plan
+
+    try:
+        _dump(tool_plan(name, backend) if dry_run else install_tool(name, backend))
+    except (ValueError, OSError, SandboxUnavailable) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@tools_app.command("doctor")
+def tools_doctor() -> None:
+    from blueprint_ai.sandbox import doctor as sandbox_doctor
+    from blueprint_ai.support import TOOLS
+    from blueprint_ai.tooling import cached_image
+
+    _dump(
+        {
+            "sandboxes": sandbox_doctor(),
+            "tools": [
+                {
+                    **tool.model_dump(),
+                    "docker_image": cached_image(name, "docker"),
+                    "podman_image": cached_image(name, "podman"),
+                }
+                for name, tool in TOOLS.items()
+            ],
+        }
+    )
+
+
+@app.command("sandbox")
+def sandbox_command(
+    path: Path,
+    image: str,
+    command: Annotated[list[str], typer.Argument()],
+    backend: str = "docker",
+    timeout: Annotated[float, typer.Option(min=0.1, max=3600)] = 120,
+) -> None:
+    """Execute an explicit command in a local OCI image with a read-only target and no egress."""
+    from blueprint_ai.sandbox import SandboxPolicy, SandboxUnavailable, execute
+
+    try:
+        execution = execute(
+            command,
+            path,
+            SandboxPolicy.model_validate({"backend": backend, "image": image, "timeout": timeout}),
+        )
+        _dump(
+            {
+                "evidence": execution.evidence.model_dump(mode="json"),
+                "stdout": execution.result.stdout,
+                "stderr": execution.result.stderr,
+            }
+        )
+        if execution.result.returncode:
+            raise typer.Exit(1)
+    except (ValueError, OSError, SandboxUnavailable) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
 

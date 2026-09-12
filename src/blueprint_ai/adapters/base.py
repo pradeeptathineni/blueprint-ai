@@ -18,6 +18,9 @@ from typing import Any, cast
 from blueprint_ai.core import Finding, ToolStatus
 from blueprint_ai.core.models import FileRange, Priority, Severity
 from blueprint_ai.safety import MAX_TOOL_OUTPUT_BYTES, controlled_env, run_process, sanitize_label
+from blueprint_ai.sandbox import SandboxPolicy, SandboxUnavailable, execute, resolve_backend
+from blueprint_ai.support import TOOLS
+from blueprint_ai.tooling import cached_image
 
 _TRIVY_LOCK = threading.Lock()
 _TRIVY_CACHE: tempfile.TemporaryDirectory[str] | None = None
@@ -132,19 +135,101 @@ class ToolAdapter(ABC):
     def run(self, root: Path, timeout: float = 120) -> tuple[ToolStatus, list[Finding], str | None]:
         repository_root = root
         root = root / getattr(self, "working_directory", ".")
-        status = self.status()
+        policy = getattr(self, "sandbox", SandboxPolicy())
+        sandbox_command = None
+        try:
+            backend = resolve_backend(policy)
+            if backend == "host" or getattr(self, "disabled_reason", None):
+                status = self.status()
+            else:
+                tool_id = self.name.split(":", 1)[0]
+                image = policy.image or cached_image(tool_id, backend)
+                if not image:
+                    raise SandboxUnavailable(
+                        f"{tool_id}: sandbox image unavailable; see tools plan {tool_id}"
+                    )
+                spec = TOOLS.get(tool_id)
+                executable = getattr(self, "executable", self.name)
+                if Path(executable).is_absolute():
+                    try:
+                        executable = (
+                            "/workspace/" + Path(executable).relative_to(repository_root).as_posix()
+                        )
+                    except ValueError:
+                        executable = Path(executable).name
+                if not policy.image and spec and spec.container_executable:
+                    executable = spec.container_executable
+                sandbox_command = [executable, *getattr(self, "args", [])]
+                policy = SandboxPolicy.model_validate(
+                    {**policy.model_dump(), "backend": backend, "image": image}
+                )
+                status = ToolStatus(
+                    name=self.name,
+                    available=True,
+                    network_required=getattr(self, "network_required", False),
+                )
+        except (SandboxUnavailable, OSError) as exc:
+            status = ToolStatus(
+                name=self.name,
+                available=False,
+                outcome="unsupported",
+                analysis_state="sandbox_unavailable",
+                detail=str(exc),
+                sandbox={
+                    "backend": policy.backend,
+                    "policy": policy.model_dump(),
+                    "isolated": False,
+                    "executed": False,
+                },
+            )
         status.working_directory = str(root)
+        spec = TOOLS.get(self.name.split(":", 1)[0])
+        if spec:
+            status.provenance = spec.model_dump(mode="json")
         if not status.available:
             if status.outcome != "unsupported":
                 status.outcome = "tool_missing"
             return status, [], None
-        command = self.command(root)
+        command = sandbox_command or self.command(root)
         status.command = command
         started = time.monotonic()
         try:
-            result = run_bounded_command(
-                command, root, timeout, getattr(self, "max_output_bytes", MAX_TOOL_OUTPUT_BYTES)
-            )
+            if sandbox_command:
+                policy = SandboxPolicy.model_validate(
+                    {
+                        **policy.model_dump(),
+                        "timeout": timeout,
+                        "output_bytes": getattr(self, "max_output_bytes", MAX_TOOL_OUTPUT_BYTES),
+                    }
+                )
+                execution = execute(
+                    command,
+                    repository_root,
+                    policy,
+                    cwd=getattr(self, "working_directory", "."),
+                    tool=self.name,
+                )
+                output = execution.result
+                status.sandbox = execution.evidence.model_dump(mode="json")
+                status.version = execution.evidence.image_id
+                result = CommandResult(
+                    command,
+                    output.returncode,
+                    output.stdout.replace("/workspace/", str(repository_root) + "/"),
+                    output.stderr.replace("/workspace/", str(repository_root) + "/"),
+                    output.timed_out,
+                    output.output_truncated,
+                )
+            else:
+                result = run_bounded_command(
+                    command, root, timeout, getattr(self, "max_output_bytes", MAX_TOOL_OUTPUT_BYTES)
+                )
+                status.sandbox = {
+                    "backend": "host",
+                    "isolated": False,
+                    "policy": policy.model_dump(),
+                    "detail": "explicitly trusted host; no filesystem/network/resource isolation",
+                }
             status.exit_code = result.returncode
             status.output_truncated = result.output_truncated
             if result.output_truncated:
@@ -154,6 +239,7 @@ class ToolAdapter(ABC):
                 status.duration_ms = round((time.monotonic() - started) * 1000)
                 return status, [], status.detail
             findings = [] if result.timed_out else self.parse(result, root)
+            status.output_evidence = getattr(self, "output_evidence", {})
             if root != repository_root:
                 for item in findings:
                     if item.file:
@@ -193,7 +279,7 @@ class ToolAdapter(ABC):
             status.outcome = "tool_error"
             status.detail = f"timed out after {timeout}s"
             return status, self.parse(result, root), f"timed out after {timeout}s"
-        except OSError as exc:
+        except (OSError, SandboxUnavailable) as exc:
             status.duration_ms = round((time.monotonic() - started) * 1000)
             status.outcome = "tool_error"
             status.detail = sanitize_label(str(exc), 500)
@@ -227,6 +313,8 @@ class ExternalToolAdapter(ToolAdapter):
         executes_project_code: bool = False,
         default_timeout: float | None = None,
     ):
+        self.output_evidence: dict[str, Any] = {}
+        self.sandbox = SandboxPolicy()
         self.working_directory = "."
         self.name = name
         self.blueprint = blueprint
@@ -268,7 +356,7 @@ class ExternalToolAdapter(ToolAdapter):
         version = None
         for flag in (["--version"], ["version"]):
             try:
-                output = run_bounded_command([path, *flag], Path.cwd(), 3, 16_384)
+                output = run_bounded_command([path, *flag], Path(tempfile.gettempdir()), 3, 16_384)
                 if output.returncode == 0:
                     version = (output.stdout or output.stderr).strip().splitlines()[0][:160]
                     break
@@ -479,7 +567,7 @@ def parse_markdownlint(
     if not output or (result.returncode == 0 and not result.timed_out):
         return []
     pattern = re.compile(
-        r"^(.*?):(\d+):(?:\d+)\s+\w+\s+(MD\d+)(?:/\S+)?\s+(.*)$",
+        r"^(.*?):(\d+)(?::\d+)?\s+\w+\s+(MD\d+)(?:/\S+)?\s+(.*)$",
         re.IGNORECASE,
     )
     grouped: dict[tuple[str, str], Finding] = {}
@@ -1069,3 +1157,106 @@ def parse_junit(result: CommandResult, root: Path, adapter: ExternalToolAdapter)
             )
         )
     return findings
+
+
+def parse_conftest(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    rows = json.loads(result.stdout)
+    if not isinstance(rows, list):
+        raise ValueError("Conftest must emit a JSON result array")
+    findings = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("successes", 0), int):
+            raise ValueError("invalid Conftest result envelope")
+        for level in ("failures", "warnings"):
+            diagnostics = row.get(level, []) or []
+            if not isinstance(diagnostics, list):
+                raise ValueError("invalid Conftest diagnostic array")
+            for diagnostic in diagnostics:
+                if not isinstance(diagnostic, dict) or not isinstance(diagnostic.get("msg"), str):
+                    raise ValueError("invalid Conftest diagnostic")
+                metadata = diagnostic.get("metadata") or {}
+                item = finding(
+                    adapter,
+                    root=root,
+                    message=diagnostic["msg"],
+                    file=row.get("filename"),
+                    severity="high" if level == "failures" else "medium",
+                    rule_id=str(metadata.get("rule", row.get("namespace", "policy"))),
+                )
+                item.tool_metadata = {
+                    "namespace": row.get("namespace"),
+                    "metadata": json.dumps(metadata, sort_keys=True),
+                }
+                findings.append(item)
+    return findings
+
+
+def parse_ast_grep(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    rows = json.loads(result.stdout)
+    if not isinstance(rows, list):
+        raise ValueError("ast-grep must emit a JSON diagnostic array")
+    findings = []
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("ruleId"), str)
+            or not isinstance(row.get("range"), dict)
+        ):
+            raise ValueError("invalid ast-grep diagnostic")
+        findings.append(
+            finding(
+                adapter,
+                root=root,
+                message=str(row.get("message") or row["ruleId"]),
+                file=row.get("file"),
+                line=int(row["range"]["start"]["line"]) + 1,
+                rule_id=row["ruleId"],
+                severity="medium",
+            )
+        )
+    return findings
+
+
+def parse_buf(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
+    findings = []
+    for line in (result.stdout + "\n" + result.stderr).splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict) or not isinstance(row.get("message"), str):
+            raise ValueError("invalid Buf diagnostic")
+        findings.append(
+            finding(
+                adapter,
+                root=root,
+                message=row["message"],
+                file=row.get("path"),
+                line=row.get("start_line"),
+                rule_id=row.get("type", "protobuf-lint"),
+            )
+        )
+    return findings
+
+
+def parse_syft(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
+    import hashlib
+
+    payload = json.loads(result.stdout)
+    if (
+        not isinstance(payload, dict)
+        or not isinstance(payload.get("artifacts"), list)
+        or not isinstance(payload.get("descriptor"), dict)
+    ):
+        raise ValueError("unrecognized Syft SBOM envelope")
+    if any(not isinstance(p, dict) or not p.get("name") for p in payload["artifacts"]):
+        raise ValueError("malformed Syft package inventory")
+    adapter.output_evidence = {
+        "format": "syft-json",
+        "packages": len(payload["artifacts"]),
+        "sha256": hashlib.sha256(result.stdout.encode()).hexdigest(),
+    }
+    return []

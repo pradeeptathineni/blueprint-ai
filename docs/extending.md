@@ -39,4 +39,6 @@ relative and cannot traverse upward. YAML aliases and oversized definitions are 
 
 Executable hooks are intentionally not loadable from a target repository. A distributor can add a
 trusted Python blueprint/adapter in the package and cover it with the common contract tests. Tool
-overrides or local wrappers require the explicit `--trust-project-executables` operator boundary.
+overrides and local wrappers run only in the selected OCI boundary or with explicit trusted host
+execution. Register new tools/providers in `support.py`; keep parsers and exit-code contracts in
+adapters, and reuse the common sandbox and transaction engines. See [providers](providers.md).

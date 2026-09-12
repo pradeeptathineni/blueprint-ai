@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import stat
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
@@ -272,6 +271,9 @@ def test_tool_timeout_is_a_tool_error(tmp_path: Path) -> None:
     adapter = ExternalToolAdapter(
         "slow", "testing", [], parse_junit, executable=str(executable), expected_codes={0}
     )
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    adapter.sandbox = SandboxPolicy(backend="host", trusted=True)
     status, findings, error = adapter.run(tmp_path, timeout=0.05)
     assert status.outcome == "tool_error"
     assert status.exit_code == 124
@@ -290,6 +292,9 @@ def test_tool_error_preserves_bounded_actionable_output(tmp_path: Path) -> None:
     adapter = ExternalToolAdapter(
         "fails", "testing", [], parse_lines, executable=str(executable), expected_codes={0}
     )
+    from blueprint_ai.sandbox import SandboxPolicy
+
+    adapter.sandbox = SandboxPolicy(backend="host", trusted=True)
     status, findings, error = adapter.run(tmp_path)
     assert status.outcome == "tool_error"
     assert status.detail == "exit 4: configuration is incompatible"
@@ -324,12 +329,16 @@ def test_generated_test_failure_remains_a_product_finding(python_project: Path) 
 def test_independent_tools_run_with_bounded_concurrency(
     python_project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import threading
+
+    concurrent = threading.Barrier(2)
+
     class SlowAdapter:
         def __init__(self, name: str):
             self.name = name
 
         def run(self, root, timeout):
-            time.sleep(0.15)
+            concurrent.wait(timeout=3)
             return ToolStatus(name=self.name, available=True, outcome="passed"), [], None
 
     monkeypatch.setattr(
@@ -338,10 +347,7 @@ def test_independent_tools_run_with_bounded_concurrency(
         lambda *args, **kwargs: [SlowAdapter("one"), SlowAdapter("two")],
     )
     context, _ = make_context(python_project, blueprints=["code-quality"], model_mode="off")
-    started = time.monotonic()
     report = review(context)
-    elapsed = time.monotonic() - started
-    assert elapsed < 0.27
     assert [tool.outcome for tool in report.results[0].tools] == ["passed", "passed"]
 
 

@@ -11,9 +11,16 @@ from pathspec import GitIgnoreSpec
 
 from blueprint_ai.core import ProjectFacts
 from blueprint_ai.discovery.graph import build_graph, graph_project_types
-from blueprint_ai.safety import MAX_CONFIG_BYTES, read_text_bounded, run_process_bytes
+from blueprint_ai.safety import (
+    MAX_CONFIG_BYTES,
+    RawProcessResult,
+    read_text_bounded,
+    run_process_bytes,
+)
 
 SKIP_DIRS = {
+    ".blueprint-state",
+    ".next",
     ".git",
     ".blueprint-ai",
     ".mypy_cache",
@@ -59,7 +66,13 @@ LANGUAGE_SUFFIXES = {
 
 
 def _git_run(root: Path, *arguments: str, timeout: float = 5):
-    return run_process_bytes(_git_command(root, *arguments), root, timeout, output_limit=8_000_000)
+    try:
+        return run_process_bytes(
+            _git_command(root, *arguments), root, timeout, output_limit=8_000_000
+        )
+    except FileNotFoundError:
+        # Filesystem discovery and built-in genesis do not require an installed Git client.
+        return RawProcessResult(127, b"", b"Git client unavailable", False, False)
 
 
 def _ignore_spec(root: Path, extra: Iterable[str]) -> GitIgnoreSpec:
@@ -243,6 +256,8 @@ def _discover_kubernetes(files: list[Path], rels: list[str]) -> list[str]:
 
 def _discover_iac(files: list[Path], rels: list[str]) -> list[str]:
     detected = {"terraform" for rel in rels if rel.endswith(".tf")}
+    if any(Path(rel).name == "Pulumi.yaml" for rel in rels):
+        detected.add("pulumi")
     for path, rel in zip(files, rels, strict=True):
         if "cloudformation" in rel.lower() or "sam-template" in rel.lower():
             detected.add("cloudformation")
@@ -377,7 +392,9 @@ def discover_project(
         "composer.json",
         "composer.lock",
     }
-    manifests = sorted(rel for rel in rels if Path(rel).name in manifest_names)
+    manifests = sorted(
+        rel for rel in rels if Path(rel).name in manifest_names or rel.endswith(".csproj")
+    )
     managers = []
     for marker, manager in (
         ("uv.lock", "uv"),
@@ -452,7 +469,7 @@ def discover_project(
             "asyncapi.yml",
             "schema.graphql",
         }
-        or rel.lower().endswith((".graphql", ".gql"))
+        or rel.lower().endswith((".graphql", ".gql", ".proto"))
     ]
     kubernetes = _discover_kubernetes(files, rels)
     migrations = [
@@ -518,6 +535,9 @@ def discover_project(
                 ("hashicorp/aws", "aws"),
                 ("hashicorp/azurerm", "azure"),
                 ("hashicorp/google", "gcp"),
+                ("@pulumi/aws", "aws"),
+                ("@pulumi/azure-native", "azure"),
+                ("@pulumi/gcp", "gcp"),
             )
             if dep == token
         }

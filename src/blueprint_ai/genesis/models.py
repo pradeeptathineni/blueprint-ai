@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from blueprint_ai.core.project import Component
+from blueprint_ai.core.provider import Provider as Provider
 from blueprint_ai.naming import IdentityMap
 
 Kind = Literal[
@@ -20,6 +21,27 @@ Kind = Literal[
     "react",
     "full-stack",
     "openapi",
+    "go-library",
+    "go-cli",
+    "go-api",
+    "rust-library",
+    "rust-cli",
+    "csharp-library",
+    "csharp-cli",
+    "dotnet-api",
+    "vue",
+    "svelte",
+    "django",
+    "flask",
+    "terraform",
+    "opentofu",
+    "kubernetes",
+    "helm",
+    "kustomize",
+    "java-library",
+    "spring-boot",
+    "nextjs",
+    "pulumi",
 ]
 
 
@@ -29,6 +51,7 @@ class IntentSpec(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     kind: Kind = "repository"
     backend: Literal["python", "node"] = "python"
+    cloud: Literal["aws", "azure", "gcp"] = "aws"
     maturity: Literal["starter", "team"] = "starter"
     container: bool = False
     ci: bool = False
@@ -44,6 +67,37 @@ class IntentSpec(BaseModel):
             raise ValueError("generated API client requires full-stack composition")
         if self.backend != "python" and self.kind != "full-stack":
             raise ValueError("backend is only configurable for full-stack intent")
+        if self.cloud != "aws" and self.kind not in {"terraform", "opentofu", "pulumi"}:
+            raise ValueError("cloud selection requires Terraform/OpenTofu intent")
+        if self.devcontainer and self.kind not in {
+            "repository",
+            "python-library",
+            "python-cli",
+            "python-api",
+            "typescript-library",
+            "typescript-cli",
+            "node-api",
+            "react",
+            "full-stack",
+            "openapi",
+        }:
+            raise ValueError(
+                "Dev Container composition is currently supported for Python/Node families"
+            )
+        if (self.ci or self.maturity == "team") and self.kind in {
+            "terraform",
+            "opentofu",
+            "kubernetes",
+            "helm",
+            "kustomize",
+            "java-library",
+            "spring-boot",
+            "nextjs",
+            "pulumi",
+        }:
+            raise ValueError(
+                "IaC CI requires an explicit pinned toolchain; use add after initialization"
+            )
         return self
 
 
@@ -53,20 +107,6 @@ class Capability(BaseModel):
     conflicts: list[str] = Field(default_factory=list)
     provider: str
     description: str
-
-
-class Provider(BaseModel):
-    id: str
-    executable: str | None = None
-    supported_versions: str | None = None
-    package: str | None = None
-    version: str | None = None
-    registry_integrity: str | None = None
-    source: str
-    license: str
-    network: bool = False
-    executes_code: bool = False
-    reviewed: str = "2026-09-12"
 
 
 class Operation(BaseModel):
@@ -123,6 +163,7 @@ class OperationResult(BaseModel):
     artifact_id: str | None = None
     duration_ms: int = 0
     detail: str = ""
+    sandbox: dict | None = None
 
 
 class GenesisResult(BaseModel):

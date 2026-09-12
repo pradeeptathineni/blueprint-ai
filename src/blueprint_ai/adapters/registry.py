@@ -6,11 +6,15 @@ from blueprint_ai.core import ProjectFacts
 from blueprint_ai.core.project import NON_RUNTIME
 from blueprint_ai.discovery import iter_project_files
 from blueprint_ai.discovery.project import SKIP_DIRS
+from blueprint_ai.support import TOOLS
 
 from .base import (
     ExternalToolAdapter,
     parse_actionlint,
+    parse_ast_grep,
+    parse_buf,
     parse_checkov,
+    parse_conftest,
     parse_grype,
     parse_json_list,
     parse_kubeconform,
@@ -23,6 +27,7 @@ from .base import (
     parse_sarif,
     parse_semgrep,
     parse_shellcheck,
+    parse_syft,
     parse_terraform,
     parse_tflint,
     parse_trivy,
@@ -32,6 +37,47 @@ from .base import (
 def known_tools() -> list[ExternalToolAdapter]:
     """Return replaceable tool definitions; selection happens from discovered evidence."""
     tools = [
+        ExternalToolAdapter(
+            "conftest", "iac", ["test", "--output", "json", "--no-color"], parse_conftest
+        ),
+        ExternalToolAdapter(
+            "ast-grep",
+            "code-quality",
+            ["scan", "--json", "."],
+            parse_ast_grep,
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "buf",
+            "api-data-config",
+            ["lint", "--error-format=json"],
+            parse_buf,
+            expected_codes={0, 100},
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "dotnet-build",
+            "code-quality",
+            ["build", "--no-restore", "--nologo"],
+            parse_lines,
+            executable="dotnet",
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "dotnet-test",
+            "testing",
+            ["test", "--no-restore", "--nologo"],
+            parse_lines,
+            executable="dotnet",
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
+            "composer-validate",
+            "code-quality",
+            ["validate", "--strict", "--no-plugins", "--no-scripts"],
+            parse_lines,
+            executable="composer",
+        ),
         ExternalToolAdapter(
             "ruff",
             "code-quality",
@@ -80,7 +126,19 @@ def known_tools() -> list[ExternalToolAdapter]:
         ExternalToolAdapter(
             "semgrep",
             "security",
-            ["scan", "--config", ".semgrep.yml", "--json", "--metrics=off", "."],
+            [
+                "scan",
+                "--config",
+                ".semgrep.yml",
+                "--json",
+                "--metrics=off",
+                "--disable-version-check",
+                "--jobs",
+                "2",
+                "--max-memory",
+                "256",
+                ".",
+            ],
             parse_semgrep,
         ),
         ExternalToolAdapter(
@@ -132,7 +190,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             "syft",
             "supply-chain",
             ["scan", "dir:.", "-o", "json"],
-            parse_json_list,
+            parse_syft,
             expected_codes={0},
         ),
         ExternalToolAdapter(
@@ -280,18 +338,15 @@ def known_tools() -> list[ExternalToolAdapter]:
             executes_project_code=True,
         ),
     ]
-    recommended = {
-        "ruff": ">=0.13,<1",
-        "pytest": ">=9.0.3,<10",
-        "semgrep": ">=1,<2",
-        "gitleaks": ">=8,<9",
-        "osv-scanner": ">=2,<3",
-        "trivy": ">=0.60,<1",
-        "syft": ">=1,<2",
-        "grype": ">=0.90,<1",
-    }
     for tool in tools:
-        tool.recommended_version = recommended.get(tool.name)
+        spec = TOOLS[tool.name]
+        tool.recommended_version = spec.versions
+        tool.install = (
+            (f"blueprint-ai tools plan {tool.name}; " if spec.image else "")
+            + spec.acquisition
+            + "; "
+            + spec.source
+        )
     return tools
 
 
@@ -329,6 +384,12 @@ def _quality_route(
 ) -> list[str]:
     languages = set(facts.languages)
     names: list[str] = []
+    if _configured(root, ("sgconfig.yml", "sgconfig.yaml")):
+        names.append("ast-grep")
+    if "C#" in languages and any(root.glob("*.csproj")):
+        names.append("dotnet-build")
+    if "PHP" in languages and (root / "composer.json").is_file():
+        names.append("composer-validate")
     if "Python" in languages:
         names.append("ruff")
         configured_mypy = _configured(root, ("mypy.ini", ".mypy.ini"))
@@ -443,6 +504,8 @@ def _testing_route(
             executes_project_code=True,
         )
         names.append(name)
+    if "C#" in languages and any(root.glob("*.csproj")):
+        names.append("dotnet-test")
     if "Python" in languages:
         names.append("pytest")
     if languages & {"JavaScript", "TypeScript"}:
@@ -545,7 +608,7 @@ def _ecosystem_route(
         ]
         if manifests:
             tools["kubeconform"].args.extend(manifests)
-        names.extend(["kubeconform", "kube-linter", "kubescape"])
+        names.extend(["kubeconform", "kube-linter"])
         chart_dirs = sorted(
             {
                 str((root / rel).parent.relative_to(root))
@@ -576,8 +639,12 @@ def _ecosystem_route(
         tools["actionlint"].args.extend(workflow_files)
         names.extend(["actionlint", "zizmor"])
     elif blueprint == "api-data-config" and facts.api_specs:
-        tools["spectral"].args.extend(facts.api_specs)
-        names.append("spectral")
+        contracts = [
+            rel for rel in facts.api_specs if Path(rel).suffix in {".json", ".yaml", ".yml"}
+        ]
+        if contracts:
+            tools["spectral"].args.extend(contracts)
+            names.append("spectral")
     elif blueprint == "documentation" and facts.docs:
         markdown_files = [rel for rel in facts.docs if rel.lower().endswith(".md")]
         if markdown_files:
@@ -595,6 +662,7 @@ def applicable_adapters(
     authorized_target: str | None = None,
     offline: bool = False,
     allow_project_executables: bool = False,
+    sandboxed: bool = False,
 ) -> list[ExternalToolAdapter]:
     root = Path(facts.path)
     tools = {adapter.name: adapter for adapter in known_tools()}
@@ -625,6 +693,19 @@ def applicable_adapters(
         selected = [a for a in selected if a.name.startswith("terraform-test")] + _module_adapters(
             facts, blueprint, allow_project_executables
         )
+    if blueprint == "iac" and (root / "policy").is_dir():
+        policy_inputs = [
+            "./" + str(p.relative_to(root))
+            for p in iter_project_files(root)[0]
+            if p.suffix in {".tf", ".yaml", ".yml", ".json"}
+            and not p.relative_to(root).as_posix().startswith("policy/")
+        ]
+        if policy_inputs and sum(map(len, policy_inputs)) < 80_000:
+            policy_adapter = tools["conftest"]
+            policy_adapter.args.extend(policy_inputs)
+            selected.append(policy_adapter)
+    if blueprint == "api-data-config" and (root / "buf.yaml").is_file():
+        selected.append(tools["buf"])
     if blueprint == "supply-chain" and facts.graph.components:
         # Scope source scans explicitly. Dependency resolution remains the native scanner's job.
         excluded = sorted(
@@ -679,7 +760,7 @@ def applicable_adapters(
         if offline and adapter.network_required:
             adapter.disabled_reason = "disabled by offline mode because the adapter may use network"
             continue
-        if adapter.executes_project_code and not allow_project_executables:
+        if adapter.executes_project_code and not (allow_project_executables or sandboxed):
             adapter.disabled_reason = (
                 "disabled for an untrusted repository; pass --trust-project-executables "
                 "after reviewing the target"
@@ -700,7 +781,11 @@ def applicable_adapters(
                 "global compiler is not authoritative"
             )
             continue
-        if allow_project_executables and local.is_file() and adapter.name not in {"npm-test"}:
+        if (
+            (allow_project_executables or sandboxed)
+            and local.is_file()
+            and adapter.name not in {"npm-test"}
+        ):
             adapter.executable = str(local)
         override_name = adapter.name.split(":", 1)[0]
         if allow_project_executables and overrides and override_name in overrides:

@@ -201,3 +201,99 @@ Selected-provider primary references were refreshed: [uv CLI](https://docs.astra
 Fetched source is not vendored. MIT/UNLICENSED is an explicit generated-project choice; provider
 licenses and resulting dependency licenses remain distinct. Deferred-candidate evidence comes from
 the supplied supplement and has not been recertified as a newly shipped integration.
+
+## Phase 6 decisions — 2026-09-12
+
+This refresh builds on the released Phase 5 evidence and its locally available ecosystem supplement.
+The [support registry](support.md) contains executable version/source/license/acquisition metadata;
+[the gap inventory](phase-6-gaps.json) records classifications and final outcomes. These decisions
+select representative paths rather than promise every framework or deployment permutation.
+
+**Isolation and acquisition.** Docker's native controls supply mounts, non-root execution, resource
+limits, and private networking; recursive bind mounts are disabled. Podman uses the same policy
+contract on local Linux. Configured runsc supplies an optional stronger boundary. Bubblewrap/nsjail
+need deployment-specific namespace/seccomp/cgroup policies and remain deferred. Official sources:
+[Docker run](https://docs.docker.com/engine/containers/run/),
+[bind mounts](https://docs.docker.com/engine/storage/bind-mounts/),
+[rootless Docker](https://docs.docker.com/engine/security/rootless/),
+[Podman run](https://docs.podman.io/en/latest/markdown/podman-run.1.html),
+[gVisor](https://gvisor.dev/docs/user_guide/quick_start/docker/),
+[bubblewrap](https://github.com/containers/bubblewrap), and [nsjail](https://github.com/google/nsjail).
+
+Explicit OCI acquisition avoids global host installs. Small tool-image recipes use a resolved base
+digest and pinned packages/components. Native ephemeral generators keep their upstream ownership;
+Blueprint AI verifies available registry integrity and records output/image hashes. Read the
+[uv tool model](https://docs.astral.sh/uv/concepts/tools/),
+[uv Docker guidance](https://docs.astral.sh/uv/guides/integration/docker/), and
+[npm exec contract](https://docs.npmjs.com/cli/v11/commands/npm-exec/).
+The Helm image selected for these local tests is the community `alpine/helm` distribution; the Helm
+CLI source is authoritative, but that image is not represented as an official Helm publication.
+
+**Application foundations.** Keep uv/FastAPI and TypeScript/Fastify; add Django and Flask through
+native Python packaging, Go modules, Cargo, dotnet templates, Maven's quickstart archetype, and the
+official Initializr service. HTTP tests exercise generated Spring Boot and ASP.NET health/404 routes.
+These choices follow [Django](https://docs.djangoproject.com/en/5.2/ref/django-admin/),
+[Flask](https://flask.palletsprojects.com/en/stable/),
+[Go](https://go.dev/doc/tutorial/create-module),
+[Cargo](https://doc.rust-lang.org/cargo/commands/cargo-init.html),
+[dotnet new](https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-new),
+[ASP.NET integration tests](https://learn.microsoft.com/en-us/aspnet/core/test/integration-tests?view=aspnetcore-10.0),
+[Maven quickstart](https://maven.apache.org/archetypes/maven-archetype-quickstart/),
+[Initializr](https://docs.spring.io/initializr/docs/current/reference/html/), and
+[Spring Boot testing](https://docs.spring.io/spring-boot/reference/testing/spring-boot-applications.html).
+
+Use Vite's native React/Vue/Svelte TypeScript starters and pinned create-next-app for Next.js.
+Keep full stack as separate native components with a generated OpenAPI client option.
+Angular and Nx are capable choices, but their CLI/builder/plugin/version matrices add a distinct
+maintenance obligation; this release recognizes projects and defers dedicated initialization.
+See [Vite](https://vite.dev/guide/), [Vue](https://vuejs.org/guide/quick-start),
+[Svelte testing](https://svelte.dev/docs/svelte/testing),
+[Next CLI](https://nextjs.org/docs/app/api-reference/cli/create-next-app),
+[Angular CLI](https://angular.dev/cli/new), and [Nx commands](https://nx.dev/docs/reference/nx-commands).
+Laravel/Symfony initialization and Rust asynchronous APIs remain deferred pending dedicated
+application/database or async-runtime fixtures. Existing Composer/Rust inventory and native review
+remain available. Sources: [Laravel](https://laravel.com/framework/docs/installation),
+[Symfony](https://symfony.com/doc/current/setup.html), [Axum](https://docs.rs/axum/latest/axum/).
+Express/NestJS skeletons are not additional defaults alongside the existing Fastify service path.
+
+**Infrastructure.** Terraform/OpenTofu perform local format/init/validate with backend initialization
+explicitly disabled. Pulumi uses generate-only and type checks. The three clouds receive provider
+requirements without billable resources, credentials, remote state, or deployment commands.
+Kubernetes uses a Namespace baseline; Helm and Kustomize own native rendering.
+[Terraform validate](https://developer.hashicorp.com/terraform/cli/commands/validate),
+[OpenTofu validate](https://opentofu.org/docs/cli/commands/validate/),
+[Pulumi new](https://www.pulumi.com/docs/iac/cli/commands/pulumi_new/),
+[Helm create](https://helm.sh/docs/helm/helm_create/) document the selected mechanics.
+CDK/SAM and Bicep/azd are deferred as separate synthesis/template matrices; current multi-cloud
+foundations cover the local creation need. GCP Infrastructure Manager is a managed Terraform
+workflow, and Crossplane requires explicit provider/schema/cluster context. Sources:
+[CDK init](https://docs.aws.amazon.com/cdk/v2/guide/ref-cli-cmd-init.html),
+[azd init](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/azd-init-workflow),
+[Infrastructure Manager](https://docs.cloud.google.com/infrastructure-manager/docs/overview),
+[Crossplane composition](https://docs.crossplane.io/latest/composition/).
+
+**Complementary hardening.** Conftest executes configured Rego policies; ast-grep executes configured
+structural rules; Buf lints configured Protobuf projects. No remote breaking-change baseline is guessed.
+Syft's SBOM envelope is normalized as inventory evidence, separately from vulnerabilities. Semgrep
+uses local rules, bounded jobs/memory, disabled metrics and disabled version checks. Gitleaks retains
+redacted output. Kubescape/Grype remain explicit alternatives to default Kubernetes/vulnerability
+routes to limit duplicate signal. See [Conftest](https://www.conftest.dev/),
+[ast-grep scan](https://ast-grep.github.io/guide/scan-project.html),
+[Buf](https://buf.build/docs/cli/installation/),
+[Syft installation](https://oss.anchore.com/docs/installation/syft/),
+[Semgrep CLI](https://docs.semgrep.dev/cli-reference), and
+[Gitleaks](https://github.com/gitleaks/gitleaks).
+
+OpenAPI remains the generated contract/client foundation. GraphQL recognition and configured
+AsyncAPI/Spectral governance remain partial; native schema/client generation and Pact/Schemathesis
+live-service testing need explicit service/baseline intent. No DAST target is inferred from a repo.
+[AsyncAPI validation](https://www.asyncapi.com/docs/guides/validate) distinguishes schema validation
+from governance and generation. Existing native tests and deterministic AST/dependency facts remain
+authoritative; no new default model dependency or scanner bundle is introduced.
+
+**Release and hosting.** GitHub Actions stays the generated CI default; GitLab inventory is retained,
+with hosted lint/generation deferred. Package publishing remains manual preparation. Prefer a scoped
+OIDC/trusted publisher and protected release environment over a stored long-lived token when a
+registry owner configures publication. This session neither configures a registry account nor publishes.
+Sources: [GitLab CI](https://docs.gitlab.com/ci/) and
+[PyPA trusted publishing guidance](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/).

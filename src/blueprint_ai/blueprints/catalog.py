@@ -394,12 +394,22 @@ def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     present = set(facts.test_capabilities)
     types = set(facts.project_types)
     application_languages = set(facts.languages) - {"HCL", "Markdown", "Shell", "YAML"}
-    iac_focused = bool(facts.iac) and not application_languages
+    iac_focused = bool(facts.iac) and (
+        not application_languages
+        or all(
+            not set(component.roles) & {"frontend", "backend", "api", "service", "library", "cli"}
+            for component in facts.graph.components
+        )
+    )
     required: list[tuple[str, Severity, str]] = [
         (
             "unit",
             "medium" if iac_focused else "high",
-            "Terraform module behavior" if iac_focused else "core behavior",
+            "Terraform module behavior"
+            if iac_focused and "terraform" in facts.iac
+            else "infrastructure behavior"
+            if iac_focused
+            else "core behavior",
         )
     ]
     if types & {"api", "backend-service", "full-stack"}:
@@ -471,6 +481,8 @@ def api_data_config_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     findings = []
     for rel in facts.api_specs:
         path = root / rel
+        if path.suffix.lower() in {".graphql", ".gql", ".proto"}:
+            continue  # Native GraphQL/Protobuf compilers own these grammars.
         try:
             raw = read_text_bounded(path, 2_000_000, root=root)
             data = (

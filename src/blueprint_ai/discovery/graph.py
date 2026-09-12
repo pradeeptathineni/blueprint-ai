@@ -40,6 +40,7 @@ MANIFEST_LANGUAGES = {
     "build.gradle.kts": "Kotlin",
     "Gemfile": "Ruby",
     "composer.json": "PHP",
+    "Pulumi.yaml": "YAML",
 }
 FRAMEWORKS = {
     "react",
@@ -113,7 +114,17 @@ def _requirements(component: Component, values: Any, rel: str, scope: str) -> No
 def _manifest(root: Path, rel: str, c: Component) -> None:
     name = Path(rel).name
     text = _read(root, rel, 2_000_000)
-    if name == "pyproject.toml":
+    if name == "Pulumi.yaml":
+        data = load_yaml_mapping(root / rel, root, label=rel)
+        runtime = data.get("runtime", "unknown")
+        if isinstance(runtime, dict):
+            runtime = runtime.get("name", "unknown")
+        if not isinstance(runtime, str):
+            raise ValueError("Pulumi runtime must be a name or mapping")
+        c.name = str(data.get("name") or c.name or "")
+        c.roles.append("infrastructure-module")
+        c.evidence.append(Evidence(file=rel, kind="iac-runtime", detail=runtime))
+    elif name == "pyproject.toml":
         data = tomllib.loads(text)
         project = data.get("project", {})
         c.name = project.get("name") or c.name
@@ -219,6 +230,63 @@ def _manifest(root: Path, rel: str, c: Component) -> None:
     elif name == "composer.json":
         data = json.loads(text)
         c.name = data.get("name")
+        for field, scope in (("require", "runtime"), ("require-dev", "development")):
+            for dep, requirement in data.get(field, {}).items():
+                c.dependencies.append(
+                    Dependency(
+                        name=dep,
+                        ecosystem="Packagist",
+                        source=rel,
+                        scope=cast(Scope, scope),
+                        requirement=str(requirement),
+                    )
+                )
+    elif name == "pom.xml":
+        import xml.etree.ElementTree as ET
+
+        if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
+            raise ValueError("XML declarations/entities are not allowed")
+        tree = ET.fromstring(text)
+        c.name = tree.findtext("{*}artifactId") or c.name
+        c.package_manager = "maven"
+        for node in tree.findall("{*}dependencies/{*}dependency"):
+            group = node.findtext("{*}groupId")
+            artifact = node.findtext("{*}artifactId")
+            if group and artifact:
+                c.dependencies.append(
+                    Dependency(
+                        name=group + ":" + artifact,
+                        ecosystem="Maven",
+                        source=rel,
+                        requirement=node.findtext("{*}version") or "",
+                        scope="test" if node.findtext("{*}scope") == "test" else "runtime",
+                    )
+                )
+    elif name.endswith(".csproj"):
+        import xml.etree.ElementTree as ET
+
+        if "<!DOCTYPE" in text.upper() or "<!ENTITY" in text.upper():
+            raise ValueError("XML declarations/entities are not allowed")
+        tree = ET.fromstring(text)
+        c.name = Path(name).stem
+        c.package_manager = "dotnet"
+        for node in tree.iter():
+            tag = node.tag.rsplit("}", 1)[-1]
+            if tag == "PackageReference" and node.get("Include"):
+                c.dependencies.append(
+                    Dependency(
+                        name=node.attrib["Include"],
+                        ecosystem="NuGet",
+                        source=rel,
+                        requirement=node.get("Version", ""),
+                    )
+                )
+            if tag == "OutputType" and node.text == "Exe":
+                c.roles.append("cli")
+        if "Microsoft.NET.Sdk.Web" in tree.get("Sdk", ""):
+            c.roles.extend(["api", "service"])
+        if not c.roles:
+            c.roles.append("library")
     # JVM/Ruby configuration is recorded, never evaluated as executable build scripts.
 
 
@@ -298,6 +366,23 @@ def _roles(c: Component) -> None:
         c.roles.append("frontend")
     if runtime & {"fastapi", "flask", "django", "express", "fastify"}:
         c.roles.extend(["backend", "api", "service"])
+    for framework, dependencies in {
+        "spring-boot": {
+            "org.springframework.boot:spring-boot-starter-web",
+            "org.springframework.boot:spring-boot-starter-webmvc",
+            "org.springframework.boot:spring-boot-starter-webflux",
+        },
+        "nestjs": {"@nestjs/core"},
+        "axum": {"axum"},
+        "laravel": {"laravel/framework"},
+        "symfony": {"symfony/framework-bundle"},
+    }.items():
+        if runtime & dependencies:
+            c.frameworks.append(framework)
+            c.roles.extend(["backend", "api", "service"])
+    if "@angular/core" in runtime:
+        c.roles.append("frontend")
+        c.frameworks.append("angular")
     if runtime & AI:
         c.roles.append("ai-subsystem")
     if runtime & AGENTS:
@@ -312,7 +397,11 @@ def _roles(c: Component) -> None:
         c.roles.append(c.scope)
     if not c.roles and c.name:
         c.roles.append("library")
-    if "deployed-iac" in c.roles:
+    if "infrastructure-module" in c.roles:
+        # A Pulumi package's main points to its infrastructure program, not a library API.
+        c.roles = [role for role in c.roles if role != "library"]
+        c.lifecycle = "infrastructure-program"
+    elif "deployed-iac" in c.roles:
         c.lifecycle = "active-application"
     elif "reusable-iac-module" in c.roles:
         c.lifecycle = "reusable-infrastructure-module"
@@ -428,14 +517,18 @@ def build_graph(root: Path, files: list[Path], languages: dict[str, str]) -> Pro
         if any(rel.startswith(prefix) for prefix in corpus_roots):
             graph.file_scopes[rel] = "fixture"
     components: dict[str, Component] = {".": Component(id=".", root=".")}
-    manifests = [rel for rel in rels if Path(rel).name in MANIFEST_LANGUAGES or rel.endswith(".tf")]
+    manifests = [
+        rel
+        for rel in rels
+        if Path(rel).name in MANIFEST_LANGUAGES or rel.endswith((".tf", ".csproj"))
+    ]
     for rel in manifests:
         directory = Path(rel).parent.as_posix()
         c = components.setdefault(
             directory, Component(id=directory, root=directory, scope=graph.scope(rel))
         )
         c.manifests.append(rel)
-        if lang := MANIFEST_LANGUAGES.get(Path(rel).name):
+        if lang := ("C#" if rel.endswith(".csproj") else MANIFEST_LANGUAGES.get(Path(rel).name)):
             c.languages.append(lang)
         try:
             if rel.endswith(".tf"):
