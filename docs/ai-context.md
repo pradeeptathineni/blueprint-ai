@@ -1,7 +1,7 @@
 # AI context contract
 
 Blueprint AI uses a model only after deterministic project discovery, built-in checks, and optional
-native/OSS tools. Model review is optional; `--model off` performs a complete deterministic run.
+native/OSS tools. Model review is optional; `--model off` runs deterministic checks; semantic concerns remain explicitly partial.
 
 ## Trust and permissions
 
@@ -20,7 +20,7 @@ never suppress deterministic results.
 
 ## Budgets, cache, and reproducibility
 
-`.blueprint-ai.yml` controls a per-run model token budget, per-blueprint budgets, maximum uncached
+`.blueprint-ai.yml` controls an estimated repository-context token budget, per-blueprint ceilings, maximum uncached
 calls, and `read-write`, `read-only`, `refresh`, or `off` cache behavior. The context
 contains compact facts, normalized findings, an index, a symbol/dependency map, and only ranked
 snippets. Git changed-file mode prioritizes relevant diffs. Cache keys include the model, system
@@ -36,3 +36,20 @@ provenance, token bounds, secret redaction, injection isolation, and provider fa
 Versioned property/rubric cases in `tests/evals/review_cases.json` cover architecture, documentation,
 naming, testing, AI context, reliability, and security. Prompt/context changes must compare rubric
 quality and total token use; exact prose is deliberately not an assertion.
+
+## Phase 5 retrieval and budget boundary
+
+One `ContextBuilder` shares a read cache across concerns. It uses the component graph, verification
+nodes, relevant paths, findings, and changed files to rank before reading. Each concern reads at most
+24 new candidates, reserves source space after compact facts/map/findings, and removes duplicate
+snippets. File reads are bounded at 2 MB and compressed to source excerpts/signatures. The character
+ceiling is four times the allocated estimated context tokens. Component scopes exclude compiler
+fixtures, generated outputs, and dependencies. No second full discovery occurs per model call.
+
+The engine allocates 80% of the configured context budget across the smaller of applicable concerns
+and the call ceiling; per-blueprint overrides cannot exceed that allocation. Output tokens are bounded
+separately. Estimates exclude schema/system/transport overhead and are not a hard billing quota.
+Actual provider usage is reported when supplied. No silent malformed-response repair call occurs;
+default SDK retries are zero. Exhausted call budgets, missing models, and malformed results produce
+partial concern analysis while retaining deterministic findings. Cache hits do not consume uncached
+call capacity; cached input/output usage describes the original response, not a new billable call.

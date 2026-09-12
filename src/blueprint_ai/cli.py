@@ -516,16 +516,27 @@ def doctor(json_output: JsonOption = False) -> None:
 
 @app.command("schema")
 def schema_command(
-    name: Annotated[str, typer.Argument(help="settings, report, or custom-blueprint")] = "report",
+    name: Annotated[
+        str,
+        typer.Argument(
+            help="settings, report, custom-blueprint, intent, genesis-plan, project-graph"
+        ),
+    ] = "report",
 ) -> None:
     """Print stable machine-readable JSON schemas for integrations and extensions."""
+    from blueprint_ai.core.project import ProjectGraph
+    from blueprint_ai.genesis.models import GenesisPlan, IntentSpec
+
     schemas = {
         "settings": Settings.model_json_schema(),
         "report": RunReport.model_json_schema(mode="serialization"),
         "custom-blueprint": custom_blueprint_schema(),
+        "intent": IntentSpec.model_json_schema(),
+        "genesis-plan": GenesisPlan.model_json_schema(),
+        "project-graph": ProjectGraph.model_json_schema(),
     }
     if name not in schemas:
-        raise typer.BadParameter("schema must be settings, report, or custom-blueprint")
+        raise typer.BadParameter("schema must be one of " + ", ".join(schemas))
     _dump({"schema_version": "1.0.0", "schema": schemas[name]})
 
 
@@ -536,6 +547,106 @@ def benchmark_command(
 ) -> None:
     """Measure discovery and model-context construction without invoking tools or a model."""
     _dump(benchmark_repository(path, repeats))
+
+
+@app.command("name")
+def name_command(
+    value: Annotated[str, typer.Argument(help="Project display name to normalize.")],
+    ecosystem: Annotated[str, typer.Option(help="repository, python, or npm")] = "repository",
+) -> None:
+    """Validate and normalize names; availability and semantic quality remain separate."""
+    from blueprint_ai.naming import resolve_identity
+
+    try:
+        _dump(resolve_identity(value, ecosystem).model_dump(mode="json"))
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@app.command("catalog")
+def genesis_catalog() -> None:
+    """List supported deterministic genesis intents and providers."""
+    from blueprint_ai.genesis.models import IntentSpec
+    from blueprint_ai.genesis.plan import CAPABILITIES, PROVIDERS
+
+    _dump(
+        {
+            "kinds": IntentSpec.model_json_schema()["properties"]["kind"]["enum"],
+            "capabilities": {
+                name: value.model_dump(mode="json") for name, value in CAPABILITIES.items()
+            },
+            "providers": {name: value.model_dump(mode="json") for name, value in PROVIDERS.items()},
+        }
+    )
+
+
+@app.command("init")
+def init_command(
+    path: Annotated[Path, typer.Argument(help="New project directory; must not exist.")],
+    kind: Annotated[
+        str, typer.Option(help="Project kind from blueprint-ai catalog.")
+    ] = "repository",
+    name: Annotated[
+        str | None, typer.Option(help="Display name; defaults to directory name.")
+    ] = None,
+    spec: Annotated[Path | None, typer.Option(help="Strict JSON or YAML IntentSpec.")] = None,
+    backend: Annotated[str | None, typer.Option(help="Full-stack backend: python or node.")] = None,
+    container: Annotated[bool, typer.Option(help="Compose a service Dockerfile.")] = False,
+    ci: Annotated[bool, typer.Option(help="Compose GitHub CI and dependency automation.")] = False,
+    devcontainer: Annotated[
+        bool, typer.Option(help="Compose Dev Container configuration.")
+    ] = False,
+    api_client: Annotated[
+        bool, typer.Option(help="Generate OpenAPI types for full-stack frontend.")
+    ] = False,
+    dry_run: Annotated[
+        bool, typer.Option(help="Print a pure plan without probes, execution, or writes.")
+    ] = False,
+    allow_network: Annotated[
+        bool, typer.Option(help="Allow declared provider downloads and dependency installation.")
+    ] = False,
+    trust_providers: Annotated[
+        bool,
+        typer.Option(help="Execute the listed native providers and staged generated verification."),
+    ] = False,
+    no_model: Annotated[
+        bool, typer.Option("--no-model", help="All shipped genesis flows are deterministic.")
+    ] = True,
+) -> None:
+    """Resolve intent, initialize, compose, strengthen, verify, and review a fresh project."""
+    from blueprint_ai.config import load_yaml_mapping
+    from blueprint_ai.genesis import IntentSpec, plan_project
+    from blueprint_ai.genesis.executor import create_project
+
+    try:
+        if spec:
+            data = load_yaml_mapping(spec.resolve(), spec.resolve().parent, label="intent")
+        else:
+            data = {
+                "name": name or path.name,
+                "kind": kind,
+                "container": container,
+                "ci": ci,
+                "devcontainer": devcontainer,
+                "api_client": api_client,
+            }
+            if backend is not None:
+                data["backend"] = backend
+        intent = IntentSpec.model_validate(data)
+        resolved = plan_project(intent)
+        if dry_run:
+            _dump({"plan_sha256": resolved.digest(), **resolved.model_dump(mode="json")})
+            return
+        result = create_project(
+            path, resolved, allow_network=allow_network, trust_providers=trust_providers
+        )
+        _dump(result.model_dump(mode="json"))
+        if result.status in {"failed", "partial"}:
+            raise typer.Exit(2 if result.status == "failed" else 3)
+    except (ValueError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
 
 
 if __name__ == "__main__":

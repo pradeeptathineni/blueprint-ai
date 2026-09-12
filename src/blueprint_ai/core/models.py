@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from blueprint_ai.core.project import ProjectGraph, Scope
+
 Severity = Literal["critical", "high", "medium", "low", "info"]
 Priority = Literal["P0", "P1", "P2", "P3"]
 Provenance = Literal["deterministic", "model"]
@@ -59,6 +61,10 @@ class Finding(BaseModel):
     verification: str = "rerun blueprint"
     disposition: Disposition = "new"
     suppression: Suppression | None = None
+    component: str | None = None
+    scope: Scope = "runtime"
+    advisory_aliases: list[str] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
 
     @computed_field
     @property
@@ -78,10 +84,21 @@ class Finding(BaseModel):
             "file": self.file,
             "line": self.range.start_line if self.range else None,
         }
+        if self.category == "dependency-vulnerability":
+            material.update(
+                {
+                    "component": self.component,
+                    "scope": self.scope,
+                    "package": self.tool_metadata.get("package"),
+                    "ecosystem": self.tool_metadata.get("ecosystem"),
+                    "installed_version": self.tool_metadata.get("installed_version"),
+                }
+            )
         return hashlib.sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()[:16]
 
 
 class ProjectFacts(BaseModel):
+    graph: ProjectGraph = Field(default_factory=ProjectGraph)
     path: str
     name: str
     is_git: bool = False
@@ -124,6 +141,8 @@ class ToolStatus(BaseModel):
     network_required: bool = False
     recommended_version: str | None = None
     requires_project_trust: bool = False
+    working_directory: str | None = None
+    analysis_state: str | None = None
 
 
 class Applicability(BaseModel):
@@ -139,6 +158,8 @@ class BlueprintResult(BaseModel):
     notes: list[str] = Field(default_factory=list)
     applicability: Applicability | None = None
     model_metrics: dict[str, int | float | str | None] = Field(default_factory=dict)
+    assessment: str = "checks_only"
+    checks_passed: list[str] = Field(default_factory=list)
 
 
 class RunContext(BaseModel):
@@ -169,6 +190,8 @@ class RunMetadata(BaseModel):
     model_name: str | None = None
     prompt_versions: dict[str, str] = Field(default_factory=dict)
     tool_versions: dict[str, str | None] = Field(default_factory=dict)
+    analyzer_commit: str | None = None
+    analyzer_source_sha256: str | None = None
 
 
 class RunReport(BaseModel):

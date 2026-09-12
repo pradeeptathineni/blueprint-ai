@@ -5,7 +5,7 @@ import os
 from abc import ABC, abstractmethod
 from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 from blueprint_ai.core import Finding
 
@@ -63,7 +63,7 @@ class OpenAIProvider(ModelProvider):
         client: Any = None,
         *,
         timeout: float = 60.0,
-        max_retries: int = 1,
+        max_retries: int = 0,
     ):
         self.model = model
         self._client = client
@@ -94,33 +94,24 @@ class OpenAIProvider(ModelProvider):
                 "additionalProperties": False,
             }
         )
-        response = None
-        findings = []
-        for attempt in range(2):
-            response = self._client.responses.create(
-                model=self.model,
-                instructions=request.system,
-                input=request.context,
-                max_output_tokens=request.max_output_tokens,
-                store=False,
-                metadata={"prompt_version": request.prompt_version},
-                text={
-                    "format": {
-                        "type": "json_schema",
-                        "name": "blueprint_findings",
-                        "strict": True,
-                        "schema": schema,
-                    }
-                },
-            )
-            try:
-                payload = json.loads(response.output_text)
-                findings = [Finding.model_validate(item) for item in payload.get("findings", [])]
-                break
-            except (json.JSONDecodeError, TypeError, ValidationError):
-                if attempt:
-                    raise
-        assert response is not None
+        response = self._client.responses.create(
+            model=self.model,
+            instructions=request.system,
+            input=request.context,
+            max_output_tokens=request.max_output_tokens,
+            store=False,
+            metadata={"prompt_version": request.prompt_version},
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "blueprint_findings",
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+        )
+        payload = json.loads(response.output_text)
+        findings = [Finding.model_validate(item) for item in payload["findings"]]
         usage = getattr(response, "usage", None)
         return ModelResponse(
             findings=findings,

@@ -1,7 +1,10 @@
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+
+import pytest
 
 from blueprint_ai.core import Finding
 from blueprint_ai.discovery import discover_project
@@ -139,3 +142,23 @@ def test_openai_provider_constructs_client_with_timeout_and_retry_bound(monkeypa
         )
     )
     assert captured == {"timeout": 12.0, "max_retries": 0}
+
+
+def test_malformed_model_response_does_not_spend_an_unbudgeted_repair_call() -> None:
+    class Client:
+        calls = 0
+
+        @property
+        def responses(self):
+            return self
+
+        def create(self, **kwargs):
+            self.calls += 1
+            return type("Response", (), {"output_text": "invalid JSON"})()
+
+    client = Client()
+    with pytest.raises(json.JSONDecodeError):
+        OpenAIProvider(client=client).review(
+            ModelRequest(blueprint="architecture", system="review", context="source")
+        )
+    assert client.calls == 1

@@ -128,3 +128,76 @@ Loopback links are excluded because service documentation commonly names a delib
 local development endpoint. Missing local files remain checked. Network reachability and private/403
 targets can still require project-specific Lychee exclusions; Blueprint AI does not silently convert
 those results to passes.
+
+## Phase 5 decisions — 2026-09-12
+
+The supplied ecosystem supplement was reassessed against the nine-repository audit. The following
+supersedes earlier launch recommendations where the scope differs. Existing scanner adapters remain
+optional; genesis explicitly authorizes a small registered set of ephemeral providers. “Defer” means
+no new implementation or verification claim in 0.5.0, even when an older guidance/adapter entry exists.
+No remote service is silently activated. Grouped candidates share the stated decision and boundary.
+
+| Capability / candidates | Phase 5 decision | Evidence, value, and boundary |
+| --- | --- | --- |
+| PyPA rules, `packaging`, npm naming | source/reuse + integrate | `packaging` parses requirements and canonicalizes names; distinct display/repo/package/module namespaces fix the Flask audit defect. Availability remains unchecked. |
+| DNS/IDNA, OCI, Kubernetes and cloud resource naming | defer | No corresponding genesis deployment provider ships; do not imply one slug satisfies every platform. |
+| uv init (MIT/Apache-2.0), npm init (Artistic-2.0) | wrap/adapt | Maintained native noninteractive initializers; installed versions probed, executable hashes recorded, fresh staging tested. |
+| Vite/create-vite (MIT) | wrap/adapt | Current maintained SPA foundation; exact 9.2.1 version and registry integrity verified. Native configuration is retained. React SSR/framework selection requires different intent. |
+| Create React App | reject for genesis | Upstream deprecation plus audited maintenance state; recognize existing projects without recommending it for new ones. |
+| create-next-app, create-vue, Svelte, Angular, Astro | defer | Separate framework/runtime verification matrices would exceed this release's useful scope. |
+| Go/Cargo/.NET/Spring/Quarkus initializers | defer genesis | Existing-review native tool routing remains; launch coverage concentrates on actually built Python/TS compositions. |
+| Copier, Cookiecutter, GitHub templates/gh repo create, Yeoman | defer | Remote archives, hooks, answer-file updates, auth, and conflict semantics deserve a separate verified trust/transaction boundary. Native initializers meet the present common paths. |
+| Backstage, Plop, Hygen | inspire | Portable intent/ownership/verification contracts; no embedded portal or generic template engine. |
+| npm/pnpm/Cargo/uv workspace metadata | integrate discovery | Component roots and manifest workspace edges support real polyglot reviews. Generated full stack uses independent native component manifests. |
+| Nx, Turbo, Pants, Bazel, Buck2 | defer | No task/build engine duplication; graph facts do not pretend to replace compiler or build-system graphs. |
+| OpenAPI 3.1, JSON Schema; openapi-spec-validator | source/reuse + integrate | Native schema validation rather than a custom spec validator; Python library dependency exercised on real generated contracts. |
+| openapi-typescript (MIT) | wrap/adapt | Exact 7.13.0 plus registry integrity; smaller TS-only client-type surface than Java-based OpenAPI Generator, compiled with the generated frontend. |
+| Spectral/Redocly, oasdiff, OpenAPI Generator | defer new default | Existing configured Spectral adapter retained. Governance, cross-language generation, and contract evolution need explicit policies/baselines; no second default lint engine. |
+| Schemathesis, AsyncAPI, Buf/Protobuf, Pact, GraphQL tooling | defer genesis | Contract graph accommodates them; active tests need declared service/channel/consumer boundaries and authorized endpoints. |
+| Playwright, Hypothesis, cargo-fuzz, Testcontainers | integrate inventory; defer automatic new stacks | Real inline/fuzz/cassette/integration evidence replaces filename-only inventory. Starter UI render tests do not claim end-to-end coverage. |
+| Stryker/PIT, Toxiproxy, Chaos Mesh/Litmus | defer | Mutation/fault/cluster tests need meaningful invariants and explicit execution/impact budgets. |
+| Tree-sitter, Aider/Repomix maps | inspire | Bounded graph-ranked native retrieval fixes facts-only contexts without another parser/runtime distribution. Multi-language compiler-level indexing remains deferred. |
+| Python AST; python-hcl2 (MIT) | integrate | Compact AST evidence and real HCL parsing resolve demonstrated API/test/module/caller-context gaps. No HCL evaluator or compiler is recreated. |
+| ast-grep, LibCST, jscodeshift, OpenRewrite, Clang/LSP refactoring | defer | Future staged transforms can use the existing ownership/verification contracts; no speculative migration engine. |
+| Ruff, mypy, TypeScript, Biome/ESLint, native Go/Rust/JVM tools | integrate/adapt | Module roots, scope filters, project trust, and explicit compiler prerequisites correct empirical routing failures. Generated stacks run their native checks. |
+| dependency-cruiser, Import Linter, ArchUnit, Knip | defer | Useful once projects declare enforceable boundaries; do not invent architecture rules from weak metadata. |
+| Renovate/Dependabot | source/reuse | Genesis optionally writes one Renovate policy; no hosting configuration or bot activation. Existing configurations count as evidence. |
+| Gitleaks, OSV-Scanner, Trivy | integrate/adapt | Existing structured adapters, scope/package/advisory identity, malformed/truncated evidence, external caches. Trivy remote-module downloads now remain unsupported without a hard bounded network path. |
+| Semgrep, Checkov, Hadolint, kubeconform/kube-linter/Kubescape | retain adapters | No integration sweep; target code/config execution and missing prerequisites remain explicit. Hadolint was unavailable in this environment. |
+| CodeQL, TruffleHog, Scorecard | defer expansion | Licensing/hosting/dataflow or overlapping default scans add little to the bounded local launch scope. |
+| Syft/Grype, SPDX/CycloneDX, REUSE, ORT/ScanCode | retain existing guidance; defer new defaults | SBOM/license policy and deep download surfaces require a declared release/compliance purpose. No legal compatibility claims. |
+| SLSA/in-toto, cosign, GitHub attestations | source/reuse concepts; defer signing | Receipts identify input/tool/output, but are not signed attestations or a SLSA level. Identity/auth/publish remain separate. |
+| OPA/Conftest, Kyverno/Gatekeeper, CUE | defer; inspire constraints | Strict typed schemas and a small dependency/conflict resolver suffice; no mandatory policy language or solver. |
+| Git attributes/ignores, CODEOWNERS, GitHub rulesets/APIs | source/reuse hygiene; defer remote governance | Generated local hygiene is small; owners/teams and remote changes are never invented. |
+| actionlint/zizmor, SHA pins/least permissions/reusable workflows | integrate/adapt | Real CI checks pass on generated Python/Node workflows; valid same-repository `$/.github/workflows/...` is recognized. |
+| Harden-Runner, GitLab/CircleCI/Buildkite/Jenkins | defer | Egress telemetry and separate hosting models require provider-specific review. |
+| Docker/BuildKit, Dev Container specification | wrap/adapt + source/reuse | Real app and development image builds, non-root users, explicit runtimes, local daemon prerequisite. No Docker credential/socket mounting into images. |
+| Compose | integrate discovery; defer service generation | Build/service relationships recognized; no database/dependency service is invented for an empty starter. |
+| Helm/Kustomize, OpenTofu/Terraform, Pulumi, CDK/Bicep/SAM/azd | defer genesis | Provider credentials, backend/state policy, cost, runtime/platform choices, and meaningful cloud tests would dilute verified local composition. Existing IaC review improved. |
+| Crossplane, Terragrunt, Infrastructure Manager, Infracost | defer | Platform orchestration, live cloud APIs, and cost assumptions remain explicit future scope. Implicit `azd up`/cloud apply is rejected. |
+| uvx/npm runners | wrap/adapt | Selected package/version/integrity only; explicit network and provider trust, no arbitrary remote template commands. |
+| mise, Nix/devenv/Flox, Make/Just/Task | defer new defaults | Use native package scripts; no extra runtime/task system for the starter. |
+| C4/ADRs, Diátaxis, native docs builders/TechDocs | inspire; defer new generators | Inventory and concise runnable README guidance before generic documentation machinery. |
+| OTel/Prometheus, SLOs, k6/Lighthouse/profilers, WCAG/axe | integrate existing evidence; defer automated policy | Detect telemetry and tests; generate health endpoints/accessibility-conscious markup. No SLO, performance, accessibility-conformance, or production guarantee. |
+| Alembic/Prisma, Flyway/Liquibase, Atlas, SQLFluff | defer | Migration scope is modeled, but schema/data changes need declared database ownership and rollback evidence. |
+| Changesets, semantic-release, release-please, GoReleaser, commitlint | defer | Packaging is verified; publish workflows and commit conventions are not imposed on starters. |
+| AGENTS.md/skills/MCP | source/reuse inventory; defer generated integrations | AI instruction files trigger their own profile without implying the application uses AI. No autonomous execution server. |
+| Structured model output and regression rubrics | integrate/adapt | Existing provider protocol, bounded contexts/calls, cache identity, strict validation; no repair call outside the call budget. |
+| Semantic intent/naming, architecture/test-completeness judgment | model-assist design; defer genesis invocation | Deterministic intent/name validation is authoritative. Existing review can request semantic judgment; no live model result is claimed for this release. |
+| OpenHands, Aider, SWE-agent patterns | inspire | Small evidence packages, bounded commands, and verified transactions; reject an embedded open-ended coding agent or unbounded prompt-to-patch provider. |
+| Promptfoo, Langfuse, Phoenix/OpenInference | defer | Current graph captures AI dependency/cassette evidence; evaluation/telemetry platform setup is separate. |
+
+Selected-provider primary references were refreshed: [uv CLI](https://docs.astral.sh/uv/reference/cli/),
+[npm init](https://docs.npmjs.com/cli/v11/commands/npm-init),
+[Vite guide](https://vite.dev/guide/),
+[React's CRA retirement](https://react.dev/blog/2025/02/14/sunsetting-create-react-app),
+[python-hcl2](https://github.com/amplify-education/python-hcl2),
+[openapi-spec-validator](https://github.com/python-openapi/openapi-spec-validator),
+[OpenAPI TypeScript](https://openapi-ts.dev/introduction),
+[PyPA normalization](https://packaging.python.org/en/latest/specifications/name-normalization/),
+[setup-node](https://github.com/actions/setup-node),
+[Dev Container specification](https://github.com/devcontainers/spec), and
+[Docker build](https://docs.docker.com/reference/cli/docker/buildx/build/).
+Fetched source is not vendored. MIT/UNLICENSED is an explicit generated-project choice; provider
+licenses and resulting dependency licenses remain distinct. Deferred-candidate evidence comes from
+the supplied supplement and has not been recertified as a newly shipped integration.

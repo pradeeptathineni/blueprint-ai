@@ -10,6 +10,7 @@ from pathlib import Path
 from pathspec import GitIgnoreSpec
 
 from blueprint_ai.core import ProjectFacts
+from blueprint_ai.discovery.graph import build_graph, graph_project_types
 from blueprint_ai.safety import MAX_CONFIG_BYTES, read_text_bounded, run_process_bytes
 
 SKIP_DIRS = {
@@ -26,6 +27,7 @@ SKIP_DIRS = {
     "dist",
     "node_modules",
     "target",
+    ".terraform",
     "vendor",
 }
 GENERATED_SUFFIXES = {".min.js", ".min.css", ".map", ".lockb"}
@@ -217,25 +219,6 @@ def _git_command(root: Path, *arguments: str) -> list[str]:
     ]
 
 
-def _package_json_hints(path: Path) -> tuple[list[str], list[str]]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")[:200_000])
-    except (OSError, ValueError):
-        return [], []
-    deps = set(data.get("dependencies", {})) | set(data.get("devDependencies", {}))
-    frameworks = [
-        name
-        for name in ("react", "next", "vue", "svelte", "express", "fastify", "vitest", "jest")
-        if name in deps
-    ]
-    types = ["cli"] if data.get("bin") else []
-    if {"react", "next", "vue", "svelte"} & deps:
-        types.append("web-app")
-    if {"express", "fastify"} & deps:
-        types.append("api")
-    return frameworks, types
-
-
 def _discover_kubernetes(files: list[Path], rels: list[str]) -> list[str]:
     kubernetes = []
     for path, rel in zip(files, rels, strict=True):
@@ -355,47 +338,6 @@ def _discover_test_capabilities(root: Path, tests: list[str], rels: list[str]) -
     return sorted(capabilities)
 
 
-def _augment_project_types(
-    root: Path,
-    project_types: list[str],
-    observation_text: str,
-    iac: list[str],
-    containers: list[str],
-    kubernetes: list[str],
-    manifests: list[str],
-) -> list[str]:
-    if iac:
-        project_types.append("iac")
-    if "terraform" in iac:
-        project_types.append("terraform")
-    if containers:
-        project_types.append("container")
-    if kubernetes:
-        project_types.append("kubernetes")
-    if any(
-        marker in observation_text for marker in ("openai", "anthropic", "langchain", "llamaindex")
-    ):
-        project_types.append("ai-app")
-    if any(
-        marker in observation_text for marker in ("agents sdk", "autogen", "crewai", "langgraph")
-    ):
-        project_types.append("ai-agent")
-    if "api" in project_types:
-        project_types.append("backend-service")
-    if "web-app" in project_types and "api" in project_types:
-        project_types.append("full-stack")
-    elif "web-app" in project_types:
-        project_types.append("frontend")
-    if any(marker in observation_text for marker in ("airflow", "dagster", "prefect", "spark")):
-        project_types.append("data-pipeline")
-    public_candidate = bool((root / "CONTRIBUTING.md").is_file() or (root / ".github").is_dir())
-    if (root / "LICENSE").is_file() and public_candidate:
-        project_types.append("open-source")
-    if not project_types and manifests:
-        project_types.append("library")
-    return sorted(set(project_types))
-
-
 def discover_project(
     root: Path,
     extra_ignores: Iterable[str] = (),
@@ -449,23 +391,16 @@ def discover_project(
     ):
         if marker in names:
             managers.append(manager)
-    frameworks: list[str] = []
-    project_types: list[str] = []
-    if (root / "pyproject.toml").is_file():
-        text = (root / "pyproject.toml").read_text(encoding="utf-8", errors="ignore")[:200_000]
-        frameworks += [
+    graph = build_graph(root, files, LANGUAGE_SUFFIXES)
+    frameworks = sorted(
+        {
             name
-            for name in ("django", "fastapi", "flask", "pytest", "typer")
-            if name in text.lower()
-        ]
-        if "[project.scripts]" in text:
-            project_types.append("cli")
-        if "fastapi" in frameworks or "flask" in frameworks or "django" in frameworks:
-            project_types.append("api")
-    if (root / "package.json").is_file():
-        js_frameworks, js_types = _package_json_hints(root / "package.json")
-        frameworks += js_frameworks
-        project_types += js_types
+            for c in graph.components
+            if c.scope not in {"fixture", "example", "test", "generated"}
+            for name in c.frameworks
+        }
+    )
+    project_types = graph_project_types(graph)
     iac = _discover_iac(files, rels)
     containers = [
         rel
@@ -543,44 +478,82 @@ def discover_project(
         "logback": "logging",
         "sentry": "error-monitoring",
     }
-    observation_text = " ".join(rels + frameworks).lower()
-    for manifest in manifests:
-        try:
-            observation_text += (
-                " "
-                + (root / manifest).read_text(encoding="utf-8", errors="ignore")[:200_000].lower()
-            )
-        except OSError:
-            pass
+    dependencies = {
+        dep.name
+        for c in graph.components
+        if c.scope not in {"fixture", "example", "test", "generated"}
+        for dep in c.dependencies
+    }
     observability = sorted(
         {
             capability
             for marker, capability in observability_markers.items()
-            if marker in observation_text
+            if any(
+                dep == marker or dep.startswith(marker + "-") or dep.startswith("@" + marker + "/")
+                for dep in dependencies
+            )
         }
     )
-    test_capabilities = _discover_test_capabilities(root, tests, rels)
+    tests = [rel for rel in tests if graph.scope(rel) not in {"fixture", "generated", "vendor"}]
+    test_capabilities = sorted(
+        set(_discover_test_capabilities(root, tests, rels))
+        | {
+            node.kind
+            for node in graph.verification
+            if node.kind not in {"build", "typecheck", "external-workflow"}
+        }
+    )
     cloud = sorted(
         {
-            provider
-            for rel in rels
-            for marker, provider in (("aws", "aws"), ("azure", "azure"), ("gcp", "gcp"))
-            if marker in rel.lower()
+            cloud
+            for c in graph.components
+            for evidence in c.evidence
+            for prefix, cloud in (("aws_", "aws"), ("azurerm_", "azure"), ("google_", "gcp"))
+            if evidence.kind == "resource" and evidence.detail.startswith(prefix)
+        }
+        | {
+            cloud
+            for dep in dependencies
+            for token, cloud in (
+                ("hashicorp/aws", "aws"),
+                ("hashicorp/azurerm", "azure"),
+                ("hashicorp/google", "gcp"),
+            )
+            if dep == token
         }
     )
-    project_types = _augment_project_types(
-        root,
-        project_types,
-        observation_text,
-        iac,
-        containers,
-        kubernetes,
-        manifests,
+    if iac:
+        project_types.append("iac")
+    if "terraform" in iac:
+        project_types.append("terraform")
+    if containers:
+        project_types.append("container")
+    if kubernetes:
+        project_types.append("kubernetes")
+    if ai_context:
+        project_types.append("ai-context")
+    license_present = any(
+        Path(rel).name.lower() in {"license", "license.txt", "license.md", "copying"}
+        for rel in rels
     )
+    license_present = license_present and not any(
+        "No license to redistribute is granted"
+        in read_text_bounded(root / rel, 2_000_000, root=root)
+        for rel in rels
+        if Path(rel).name.lower() in {"license", "license.txt", "license.md", "copying"}
+        and Path(rel).parent == Path(".")
+    )
+    if license_present and (
+        (root / ".github").is_dir()
+        or any(Path(rel).name.lower() == "contributing.md" for rel in rels)
+    ):
+        project_types.append("open-source")
+    project_types = sorted(set(project_types))
     is_git, branch, dirty = _git_facts(root)
     changed_files = _git_changed_files(root, base_ref) if changed_only and is_git else []
     suggested_profiles = sorted(set(project_types)) or ["default"]
     return ProjectFacts(
+        graph=graph,
         path=str(root),
         name=root.name,
         is_git=is_git,

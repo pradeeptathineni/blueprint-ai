@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from blueprint_ai.core import ProjectFacts
+from blueprint_ai.core.project import NON_RUNTIME
 from blueprint_ai.discovery import iter_project_files
 from blueprint_ai.discovery.project import SKIP_DIRS
 
@@ -32,7 +33,10 @@ def known_tools() -> list[ExternalToolAdapter]:
     """Return replaceable tool definitions; selection happens from discovered evidence."""
     tools = [
         ExternalToolAdapter(
-            "ruff", "code-quality", ["check", ".", "--output-format", "json"], parse_ruff
+            "ruff",
+            "code-quality",
+            ["check", ".", "--output-format", "json", "--no-cache"],
+            parse_ruff,
         ),
         ExternalToolAdapter(
             "mypy",
@@ -51,7 +55,13 @@ def known_tools() -> list[ExternalToolAdapter]:
             parse_json_list,
             executes_project_code=True,
         ),
-        ExternalToolAdapter("tsc", "code-quality", ["--noEmit", "--pretty", "false"], parse_lines),
+        ExternalToolAdapter(
+            "tsc",
+            "code-quality",
+            ["--noEmit", "--pretty", "false"],
+            parse_lines,
+            executes_project_code=True,
+        ),
         ExternalToolAdapter(
             "go-vet", "code-quality", ["vet", "./..."], parse_lines, executable="go"
         ),
@@ -105,6 +115,9 @@ def known_tools() -> list[ExternalToolAdapter]:
                 "--scanners",
                 "vuln,misconfig",
                 "--no-progress",
+                "--config",
+                "/dev/null",
+                "--tf-exclude-downloaded-modules",
                 *[
                     argument
                     for directory in sorted(SKIP_DIRS)
@@ -205,7 +218,13 @@ def known_tools() -> list[ExternalToolAdapter]:
                 "10",
                 "--max-retries",
                 "1",
-                "--exclude-loopback",
+                "--config",
+                "/dev/null",
+                "--exclude-all-private",
+                "--scheme",
+                "https",
+                "--scheme",
+                "http",
             ],
             parse_lychee,
             expected_codes={0, 2},
@@ -602,7 +621,61 @@ def applicable_adapters(
         names.append("zap-baseline")
 
     selected = [tools[name] for name in dict.fromkeys(names)]
+    if facts.graph.components and blueprint in {"code-quality", "testing"}:
+        selected = [a for a in selected if a.name.startswith("terraform-test")] + _module_adapters(
+            facts, blueprint, allow_project_executables
+        )
+    if blueprint == "supply-chain" and facts.graph.components:
+        # Scope source scans explicitly. Dependency resolution remains the native scanner's job.
+        excluded = sorted(
+            {
+                str(Path(rel).parent)
+                for rel in facts.manifests
+                if facts.graph.scope(rel) in NON_RUNTIME | {"documentation", "test"}
+            }
+        )
+        for adapter in selected:
+            if adapter.name == "trivy":
+                adapter.args[-1:-1] = [arg for rel in excluded for arg in ("--skip-dirs", rel)]
+            elif adapter.name == "osv-scanner":
+                locks = [
+                    rel
+                    for rel in facts.manifests
+                    if Path(rel).name
+                    in {
+                        "uv.lock",
+                        "poetry.lock",
+                        "requirements.txt",
+                        "package-lock.json",
+                        "pnpm-lock.yaml",
+                        "yarn.lock",
+                        "Cargo.lock",
+                        "go.mod",
+                        "pom.xml",
+                    }
+                    and facts.graph.scope(rel) not in NON_RUNTIME | {"documentation", "test"}
+                ]
+                if locks:
+                    adapter.args = [
+                        "scan",
+                        "source",
+                        "--format",
+                        "json",
+                        *[arg for rel in locks for arg in ("--lockfile", "./" + rel)],
+                    ]
+                else:
+                    adapter.disabled_reason = (
+                        "no supported owned dependency lockfiles; dependency inventory only"
+                    )
+
     for adapter in selected:
+        if adapter.name == "trivy" and any(
+            edge.kind == "module-call" and edge.external for edge in facts.graph.relationships
+        ):
+            adapter.disabled_reason = (
+                "remote Terraform module resolution has no bounded network authorization; "
+                "local HCL inventory and other applicable checks remain available"
+            )
         if offline and adapter.network_required:
             adapter.disabled_reason = "disabled by offline mode because the adapter may use network"
             continue
@@ -612,11 +685,97 @@ def applicable_adapters(
                 "after reviewing the target"
             )
             continue
-        local = root / "node_modules" / ".bin" / Path(adapter.executable).name
+        local = (
+            root
+            / adapter.working_directory
+            / "node_modules"
+            / ".bin"
+            / Path(adapter.executable).name
+        )
+        if not local.is_file():
+            local = root / "node_modules" / ".bin" / Path(adapter.executable).name
+        if adapter.name.split(":", 1)[0] == "tsc" and not local.is_file():
+            adapter.disabled_reason = (
+                "project TypeScript compiler/dependencies unavailable; "
+                "global compiler is not authoritative"
+            )
+            continue
         if allow_project_executables and local.is_file() and adapter.name not in {"npm-test"}:
             adapter.executable = str(local)
         override_name = adapter.name.split(":", 1)[0]
         if allow_project_executables and overrides and override_name in overrides:
             override = Path(overrides[override_name])
             adapter.executable = str(override if override.is_absolute() else root / override)
+    return selected
+
+
+def _module_adapters(
+    facts: ProjectFacts, blueprint: str, trusted: bool
+) -> list[ExternalToolAdapter]:
+    root = Path(facts.path)
+    selected = []
+    workspace_members = {
+        edge.target for edge in facts.graph.relationships if edge.kind == "workspace-member"
+    }
+    for component in facts.graph.components:
+        if component.scope in NON_RUNTIME | {"test", "documentation"}:
+            continue
+        component_root = root / component.root
+        owned = facts.graph.source_files(component)
+        local_facts = facts.model_copy(
+            update={
+                "path": str(component_root),
+                "languages": {language: 1 for language in component.languages},
+                "frameworks": component.frameworks,
+                "tests": [
+                    str((root / rel).relative_to(component_root))
+                    for rel in facts.tests
+                    if rel in owned
+                ],
+            }
+        )
+        tools = {tool.name: tool for tool in known_tools()}
+        names = (
+            _quality_route(local_facts, component_root, tools, trusted)
+            if blueprint == "code-quality"
+            else _testing_route(local_facts, component_root, tools, trusted)
+        )
+        for name in names:
+            adapter = tools[name]
+            if name.startswith("terraform-test"):
+                continue
+            # Workspace-native Rust tooling owns its members in a single invocation.
+            if name.startswith("cargo-") and component.id in workspace_members:
+                continue
+            if name in {"go-vet", "go-test"} and not (component_root / "go.mod").is_file():
+                continue
+            if name.startswith("cargo-") and not (component_root / "Cargo.toml").is_file():
+                continue
+            if name == "ruff":
+                python_files = [
+                    "./" + str((root / rel).relative_to(component_root))
+                    for rel in owned
+                    if Path(rel).suffix in {".py", ".pyi"}
+                ]
+                if not python_files:
+                    continue
+                # Bounded argv; Ruff's native excludes still apply to explicit file arguments.
+                if sum(map(len, python_files)) > 80_000:
+                    adapter.disabled_reason = (
+                        "source argument set exceeds safe command size; split the component"
+                    )
+                adapter.args = [
+                    "check",
+                    "--output-format",
+                    "json",
+                    "--no-cache",
+                    "--force-exclude",
+                    *python_files,
+                ]
+            if name == "pytest":
+                adapter.args.extend(["-p", "no:cacheprovider"])
+            adapter.working_directory = component.root
+            if component.root != ".":
+                adapter.name += ":" + component.root
+            selected.append(adapter)
     return selected

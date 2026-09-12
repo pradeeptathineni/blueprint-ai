@@ -7,6 +7,7 @@ import json
 import re
 import tokenize
 import tomllib
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,7 +18,9 @@ import yaml
 from blueprint_ai.config import load_yaml_mapping
 from blueprint_ai.core import Applicability, Finding, ProjectFacts
 from blueprint_ai.core.models import FileRange, Priority, Remediation, Severity
+from blueprint_ai.core.project import NON_RUNTIME
 from blueprint_ai.discovery import iter_project_files
+from blueprint_ai.naming import validate_name
 from blueprint_ai.safety import read_text_bounded
 
 Check = Callable[[Path, ProjectFacts], list[Finding]]
@@ -115,6 +118,11 @@ def _manifest_identity(root: Path) -> tuple[str | None, list[str]]:
 
 def identity_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     name, commands = _manifest_identity(root)
+    if not name and (
+        facts.graph.lifecycle in {"documentation-project", "template-generator"}
+        or any(c.name for c in facts.graph.components)
+    ):
+        return []
     if not name:
         return [
             _finding(
@@ -126,7 +134,15 @@ def identity_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
             )
         ]
     findings = []
-    if not re.fullmatch(r"(?:@[a-z0-9._-]+/)?[a-z0-9][a-z0-9._/-]*", name):
+    namespace = (
+        "python"
+        if (root / "pyproject.toml").is_file()
+        else "npm"
+        if (root / "package.json").is_file()
+        else "repository"
+    )
+    valid = validate_name(name, namespace).syntax_valid
+    if not valid:
         findings.append(
             _finding(
                 "identity",
@@ -134,19 +150,6 @@ def identity_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 f"Package name '{name}' is not portable.",
                 "Use the ecosystem's lowercase portable package naming convention.",
                 severity="high",
-            )
-        )
-    normalized_dir = re.sub(r"[^a-z0-9]+", "-", facts.name.lower()).strip("-")
-    normalized_name = re.sub(r"[^a-z0-9]+", "-", name.split("/")[-1].lower()).strip("-")
-    if normalized_dir != normalized_name:
-        findings.append(
-            _finding(
-                "identity",
-                "name-mismatch",
-                f"Directory '{facts.name}' and package '{name}' differ.",
-                "Choose a consistent repository/package identity or document the distinction.",
-                severity="low",
-                evidence=commands,
             )
         )
     return findings
@@ -167,8 +170,10 @@ def repository_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         ),
         "LICENSE": ("Add or document the project's license.", None),
     }
+    if facts.graph.lifecycle == "documentation-project":
+        baseline = {key: value for key, value in baseline.items() if key == "LICENSE"}
     for filename, (recommendation, remediation) in baseline.items():
-        if not (root / filename).is_file():
+        if not _conventional_file(root, filename):
             findings.append(
                 _finding(
                     "repository",
@@ -180,7 +185,11 @@ def repository_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     remediation=remediation,
                 )
             )
-    if not (root / ".pre-commit-config.yaml").is_file():
+    if (
+        not facts.ci
+        and facts.graph.lifecycle != "documentation-project"
+        and not (root / ".pre-commit-config.yaml").is_file()
+    ):
         findings.append(
             _finding(
                 "repository",
@@ -199,7 +208,7 @@ def repository_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         )
     if "open-source" in facts.project_types:
         for filename in ("SECURITY.md", "CONTRIBUTING.md"):
-            if not (root / filename).is_file():
+            if not _conventional_file(root, filename):
                 findings.append(
                     _finding(
                         "repository",
@@ -247,12 +256,17 @@ def code_design_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     files, _ = iter_project_files(root)
     imports: dict[str, set[str]] = defaultdict(set)
     for path in files:
-        if path.suffix != ".py":
+        if (
+            path.suffix != ".py"
+            or facts.graph.scope(path.relative_to(root).as_posix()) in NON_RUNTIME
+        ):
             continue
         rel = path.relative_to(root).as_posix()
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
-            tree = ast.parse(text)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(text)
         except (OSError, SyntaxError):
             continue
         module = rel.removesuffix(".py").replace("/", ".").removeprefix("src.")
@@ -332,16 +346,23 @@ def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         if path.name == ".env" or (
             path.name.startswith(".env.") and path.name not in {".env.example", ".env.template"}
         ):
-            findings.append(
-                _finding(
-                    "security",
-                    "sensitive-file",
-                    f"Potential environment secret file '{rel}' is visible to analysis.",
-                    "Ensure the file is ignored and contains no committed credentials.",
-                    severity="high",
-                    file=rel,
+            text = read_text_bounded(path, 300_000, root=root, errors="ignore")
+            values = [
+                value.strip().strip("\"'")
+                for key, value in re.findall(r"(?m)^([A-Za-z_][\w]*)\s*=\s*([^\n#]*)", text)
+                if re.search(r"(?i)(?:secret|password|token|api_key)", key)
+            ]
+            if any(not _placeholder(value) for value in values):
+                findings.append(
+                    _finding(
+                        "security",
+                        "sensitive-file",
+                        f"Potential credentials in environment file '{rel}'.",
+                        "Rotate if real and keep credentials outside source control.",
+                        severity="high",
+                        file=rel,
+                    )
                 )
-            )
         if path.suffix.lower() not in code_suffixes:
             continue
         try:
@@ -350,7 +371,9 @@ def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
             continue
         for match in secret_pattern.finditer(text):
             value = match.group(2)
-            if any(marker in value.lower() for marker in ("example", "placeholder", "changeme")):
+            if _placeholder(value):
+                continue
+            if _public_search_key(text, match.start(), rel):
                 continue
             findings.append(
                 _finding(
@@ -606,7 +629,9 @@ def container_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     file=rel,
                 )
             )
-        if not re.search(r"(?mi)^USER\s+\S+", text):
+        final_stage = re.split(r"(?mi)^FROM\s+", text)[-1]
+        runtime = facts.graph.scope(rel) == "runtime-image" if facts.graph.components else True
+        if runtime and not re.search(r"(?mi)^USER\s+(?!root\b|0\b)\S+", final_stage):
             findings.append(
                 _finding(
                     "containers",
@@ -617,7 +642,12 @@ def container_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     file=rel,
                 )
             )
-        if "production" in facts.project_types and "HEALTHCHECK" not in text.upper():
+        if (
+            runtime
+            and "production" in facts.project_types
+            and "HEALTHCHECK" not in final_stage.upper()
+            and "api" in facts.project_types
+        ):
             findings.append(
                 _finding(
                     "containers",
@@ -711,7 +741,7 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
             continue
         for number, line in enumerate(text.splitlines(), 1):
             match = re.search(r"\buses:\s*([^\s#]+)", line)
-            if not match or match.group(1).startswith(("./", "docker://")):
+            if not match or match.group(1).startswith(("./", "$/", "docker://")):
                 continue
             reference = match.group(1).rsplit("@", 1)[-1]
             if not sha.fullmatch(reference):
@@ -729,7 +759,11 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     )
                 )
         checks_out = re.search(r"(?m)^\s*-?\s*uses:\s*actions/checkout", text)
-        if "pull_request_target" in text and checks_out:
+        if (
+            "pull_request_target" in text
+            and checks_out
+            and re.search(r"github\.event\.pull_request\.head", text)
+        ):
             findings.append(
                 _finding(
                     "ci-cd",
@@ -745,7 +779,11 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         dependency_updates = (root / ".github" / "dependabot.yml").is_file() or any(
             (root / name).is_file() for name in ("renovate.json", "renovate.json5")
         )
-        if not dependency_updates:
+        if (
+            facts.manifests
+            and facts.graph.lifecycle != "documentation-project"
+            and not dependency_updates
+        ):
             findings.append(
                 _finding(
                     "ci-cd",
@@ -755,7 +793,9 @@ def ci_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                     severity="low",
                 )
             )
-        if not any((root / name).is_file() for name in ("CHANGELOG.md", "CHANGES.md")):
+        if facts.graph.lifecycle != "documentation-project" and not _conventional_file(
+            root, "CHANGELOG.md"
+        ):
             findings.append(
                 _finding(
                     "ci-cd",
@@ -798,10 +838,14 @@ def reliability_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
         )
     files, _ = iter_project_files(root)
     for path in files:
-        if path.suffix != ".py" or "tests" in path.parts:
+        if path.suffix != ".py" or facts.graph.scope(
+            path.relative_to(root).as_posix()
+        ) in NON_RUNTIME | {"test"}:
             continue
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(read_text_bounded(path, 2_000_000, root=root))
         except (OSError, SyntaxError):
             continue
         for node in ast.walk(tree):
@@ -890,9 +934,18 @@ def documentation_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
             )
         ]
     text = readme.read_text(encoding="utf-8", errors="ignore")[:100_000].lower()
+    if facts.graph.lifecycle == "documentation-project":
+        return []
     concepts = {
-        "install": ("install", "setup", "getting started"),
-        "usage": ("usage", "commands", "example"),
+        "install": (
+            "install",
+            "setup",
+            "getting started",
+            "how to use",
+            'module "',
+            "terraform-docs",
+        ),
+        "usage": ("usage", "commands", "example", "how to use", 'module "', "terraform-docs"),
     }
     missing = [
         name for name, aliases in concepts.items() if not any(alias in text for alias in aliases)
@@ -946,7 +999,7 @@ def ai_context_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     if set(facts.project_types) & {"ai-app", "ai-agent"}:
         files, _ = iter_project_files(root)
         rels = [path.relative_to(root).as_posix().lower() for path in files]
-        if not any("eval" in rel for rel in rels):
+        if not any("eval" in rel for rel in rels) and "regression" not in facts.test_capabilities:
             findings.append(
                 _finding(
                     "ai-context",
@@ -972,7 +1025,7 @@ def completeness_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     security_workflow = bool(list(root.glob(".github/workflows/*security*")))
     families = {
         "testing": bool(facts.tests),
-        "security": (root / "SECURITY.md").is_file() or security_workflow,
+        "security": _conventional_file(root, "SECURITY.md") or security_workflow,
         "ci-cd": bool(facts.ci),
         "documentation": bool(facts.docs),
         "reliability": bool(facts.observability),
@@ -1017,6 +1070,8 @@ def no_builtin_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 
 
 def _has_code(facts: ProjectFacts) -> bool:
+    if facts.graph.lifecycle == "documentation-project":
+        return False
     return bool(set(facts.languages) - {"Markdown", "YAML", "HCL"})
 
 
@@ -1026,7 +1081,7 @@ BLUEPRINTS: dict[str, Blueprint] = {
         "Project, package, and CLI naming consistency",
         lambda f: bool(f.manifests),
         identity_checks,
-        True,
+        False,
         "no native package manifest was discovered",
     ),
     "repository": Blueprint(
@@ -1099,7 +1154,7 @@ BLUEPRINTS: dict[str, Blueprint] = {
     "supply-chain": Blueprint(
         "supply-chain",
         "Dependencies, SCA, SBOM, licenses, signing, and provenance",
-        lambda f: bool(f.manifests or f.containers),
+        lambda f: bool(f.manifests or f.containers or f.iac),
         supply_chain_checks,
         True,
         "no dependencies or build artifacts were discovered",
@@ -1208,6 +1263,10 @@ CORE = [
 ]
 SERVICE = ["architecture", "api-data-config", "ci-cd", "reliability", "operations"]
 PROFILES = {
+    "api-contract": ["repository", "security", "api-data-config", "documentation"],
+    "documentation-project": ["repository", "security", "ci-cd", "documentation"],
+    "template-generator": CORE + ["architecture", "ci-cd", "api-data-config"],
+    "ai-context": ["ai-context"],
     "default": CORE,
     "library": CORE + ["architecture", "ci-cd"],
     "cli": CORE + ["architecture", "ci-cd", "reliability"],
@@ -1222,6 +1281,8 @@ PROFILES = {
         "supply-chain",
         "testing",
         "iac",
+        "reliability",
+        "operations",
         "ci-cd",
         "documentation",
         "completeness",
@@ -1232,6 +1293,8 @@ PROFILES = {
         "supply-chain",
         "testing",
         "iac",
+        "reliability",
+        "operations",
         "ci-cd",
         "documentation",
         "completeness",
@@ -1253,3 +1316,54 @@ def get_blueprint(name: str) -> Blueprint:
         return BLUEPRINTS[name]
     except KeyError as exc:
         raise ValueError(f"unknown blueprint: {name}") from exc
+
+
+def _conventional_file(root: Path, name: str) -> bool:
+    aliases = {
+        "LICENSE": {"license", "license.txt", "license.md", "copying", "copying.txt"},
+        "CHANGELOG.md": {
+            "changelog.md",
+            "changes.md",
+            "changes.rst",
+            "changelog.rst",
+            "release-notes.md",
+        },
+    }.get(name, {name.lower()})
+    return any(
+        path.name.lower() in aliases
+        for directory in (root, root / ".github", root / "docs")
+        if directory.is_dir()
+        for path in directory.iterdir()
+        if path.is_file() and not path.is_symlink()
+    )
+
+
+def _placeholder(value: str) -> bool:
+    lower = value.strip().lower()
+    return (
+        not lower
+        or lower
+        in {
+            "changethis",
+            "changeme",
+            "change-me",
+            "change_this",
+            "change-this",
+            "your-secret-key",
+            "your_api_key",
+            "password",
+            "secret",
+            "null",
+            "none",
+        }
+        or lower.startswith(("${", "{{", "<", "your-", "your_"))
+        or bool(re.fullmatch(r"(?:x+|0+|example[-_\w]*|placeholder[-_\w]*)", lower))
+        or bool(re.fullmatch(r"gh[pousr]_example[a-z0-9_]*", lower))
+    )
+
+
+def _public_search_key(text: str, offset: int, rel: str) -> bool:
+    # Search-only configuration has a narrow public-key contract. Generic apiKey stays flagged.
+    return "docusaurus.config." in Path(rel).name and bool(
+        re.search(r"algolia\s*:\s*\{[^}]*$", text[max(0, offset - 1500) : offset])
+    )

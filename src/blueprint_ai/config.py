@@ -15,6 +15,12 @@ from blueprint_ai.safety import MAX_CONFIG_BYTES, read_text_bounded
 
 
 class _NoAliasSafeLoader(yaml.SafeLoader):
+    def construct_mapping(self, node, deep=False):
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        if len(set(keys)) != len(keys):
+            raise ValueError("duplicate YAML mapping keys are not accepted")
+        return super().construct_mapping(node, deep=deep)
+
     def compose_node(self, parent, index):
         if self.check_event(AliasEvent):
             raise ValueError("YAML aliases are not accepted in project configuration")
