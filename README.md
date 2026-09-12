@@ -13,7 +13,9 @@ blueprint-ai --help
 ```
 
 For development, run `uv sync --extra dev --locked`. Optional model support is installed with
-`uv tool install '.[model]'` and reads `OPENAI_API_KEY` from the operator's environment.
+`uv tool install '.[model]'` and reads `OPENAI_API_KEY` from the operator's environment. Provider,
+model, reasoning effort, and timeout are operator-owned environment settings; repository content
+cannot select them. See [the AI context contract](docs/ai-context.md).
 
 ## Usage
 
@@ -60,6 +62,8 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Testing](docs/testing.md), [threat model](docs/threat-model.md), and [release gate](docs/releasing.md).
 - [Phase 6 evidence](docs/phase-6-validation.md): measured results and explicit remaining limits.
 - [Independent release audit](docs/phase-6-redteam.md): candidate defects, corrections, and final gate.
+- [0.6.1 maintenance validation](docs/release-validation-0.6.1.md): CI, Windows, provider, and
+  sandbox follow-up evidence.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or

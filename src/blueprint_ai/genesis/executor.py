@@ -325,7 +325,7 @@ def _run_sandboxed(
             "writable": True,
             "trusted": True,
             "image": policy.image or PROVIDER_IMAGES.get(operation.provider),
-            "network": "normal" if operation.network else "none",
+            "network": "unrestricted" if operation.network else "none",
             "authorize_network": operation.network and allow_network,
             "timeout": 240,
             "scratch_mb": 1024,

@@ -17,20 +17,20 @@ from blueprint_ai.safety import ProcessResult
 
 @pytest.mark.parametrize(
     ("network", "cargo_offline", "uv_offline"),
-    [("none", "true", "1"), ("loopback", "true", "1"), ("normal", "false", "0")],
+    [("none", "true", "1"), ("unrestricted", "false", "0")],
 )
 def test_package_managers_follow_network_policy(tmp_path, network, cargo_offline, uv_offline):
     policy = sandbox.SandboxPolicy(
         network=network,
-        trusted=network == "normal",
-        authorize_network=network == "normal",
+        trusted=network == "unrestricted",
+        authorize_network=network == "unrestricted",
     )
     argv = sandbox.container_command(
         ["docker"], "docker", "test", "controlled-test", tmp_path, ".", ["cargo", "test"], policy
     )
     assert f"CARGO_NET_OFFLINE={cargo_offline}" in argv
     assert f"UV_OFFLINE={uv_offline}" in argv
-    assert argv[argv.index("--network") + 1] == ("bridge" if network == "normal" else "none")
+    assert argv[argv.index("--network") + 1] == ("bridge" if network == "unrestricted" else "none")
 
 
 @pytest.mark.parametrize(
@@ -196,7 +196,7 @@ def _run(label: str, target: Path, script: str, **options):
 def test_live_writable_stage_and_cache_isolation(tmp_path):
     canary = tmp_path / "operator-owned.txt"
     canary.write_text("preserve")
-    _run(
+    writable = _run(
         "writable-stage",
         tmp_path,
         "from pathlib import Path; Path('/workspace/created.txt').write_text('created'); "
@@ -204,6 +204,9 @@ def test_live_writable_stage_and_cache_isolation(tmp_path):
         trusted=True,
         writable=True,
     )
+    assert writable.evidence.workspace_writable_limit_mb is None
+    assert not writable.evidence.workspace_writable_limit_enforced
+    assert "no portable" in writable.evidence.workspace_writable_limit_detail
     assert canary.read_text() == "preserve"
     assert (tmp_path / "created.txt").read_text() == "created"
     clean = _run(
@@ -213,6 +216,8 @@ def test_live_writable_stage_and_cache_isolation(tmp_path):
         "assert Path('/workspace/created.txt').read_text() == 'created'; print('fresh cache')",
     )
     assert clean.evidence.target_read_only
+    assert clean.evidence.workspace_writable_limit_mb == 0
+    assert clean.evidence.workspace_writable_limit_enforced
 
 
 @LIVE
@@ -240,7 +245,7 @@ def test_live_private_loopback_and_explicit_network(tmp_path):
         "import urllib.request; "
         "response=urllib.request.urlopen('https://pypi.org/simple/packaging/',timeout=10); "
         "assert response.status == 200; print(response.status); response.close()",
-        network="normal",
+        network="unrestricted",
         trusted=True,
         authorize_network=True,
     )

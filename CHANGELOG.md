@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.1 — 2026-09-12
+
+- Make hosted CI observable for `main`, release tags, manual dispatch, Linux sandbox checks, and a
+  native Windows smoke path while removing repeated quality/build/audit work from the Python matrix.
+- Keep OpenAI on bounded non-stored Responses with strict Structured Outputs; add operator-owned
+  reasoning/timeout selection and cached/reasoning token telemetry without adding an agent backend.
+- Canonicalize sandbox networking as `none` or explicitly authorized `unrestricted`, reject
+  unenforceable filtered-egress claims, and report writable-workspace quota support precisely.
+- Classify every canonical optional-tool entry, retain explicit Podman/runsc limitations, and add
+  focused CI/provider/sandbox regression coverage.
+
 ## 0.6.0 — 2026-09-12
 
 - Correct independently reproduced sandbox evidence, hostile-file reads, scanner parser/suppression, model authority/redaction/cache, and transactional rollback defects before publication.

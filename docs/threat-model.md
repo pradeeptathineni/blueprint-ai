@@ -56,9 +56,10 @@ inside OCI generation.
 ## Residual boundaries
 
 Containers share a Linux kernel; rootless operation is preferred when available. gVisor must already
-be configured. Non-OCI Linux sandboxes, native Windows named pipes, remote engines, and destination
-allowlists are unsupported. No kernel/runtime isolation proof, cross-platform certification, exhaustive browser
-journey coverage, production readiness, or live-model quality is implied by the local tests. Very large
+be configured. Non-OCI Linux sandboxes, native Windows named pipes, remote engines, destination
+allowlists, internet-only egress, and total writable bind-mount quotas are unsupported. No
+kernel/runtime isolation proof, exhaustive browser journey coverage, production readiness, or
+live-model quality is implied by the local tests. Very large
 Git indexes and upstream dependency graphs can consume resources within the documented limits.
 Concurrent hostile host administrators are outside the threat model. Keep the runtime patched and
 review explicit trust/network decisions for the task being performed.
@@ -67,5 +68,6 @@ The [Phase 6 validation report](phase-6-validation.md) separates tested controls
 
 The [independent red team](phase-6-redteam.md) supersedes candidate self-review conclusions.
 POSIX bounded reads pin parent directory descriptors and reject leaf substitution by symlinks or
-FIFOs. Native Windows does not yet carry the same descriptor-race validation claim. Browser evidence
-is limited to the generated React and Python-backed full-stack starter workflows.
+FIFOs. Native Windows CI covers representative portable workflows but does not carry that POSIX
+descriptor-race or OCI-engine claim. Browser evidence is limited to the generated React and
+Python-backed full-stack starter workflows.

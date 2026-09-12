@@ -107,7 +107,7 @@ class Gate:
                 backend="docker",
                 image=image,
                 trusted=True,
-                network="normal",
+                network="unrestricted",
                 authorize_network=True,
                 timeout=600,
                 memory_mb=3072,

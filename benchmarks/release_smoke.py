@@ -66,6 +66,8 @@ def main() -> None:
             assert json.loads(cli("schema", schema))["schema"]
         assert json.loads(cli("support"))["families"]
         assert json.loads(cli("tools", "install", "ruff", "--dry-run"))["command"]
+        identity = json.loads(cli("name", "Windows Service", "--ecosystem", "python"))
+        assert identity["package"] == "windows-service" and identity["module"] == "windows_service"
         assert not snapshot(root)
         for kind in ("repository", "openapi"):
             target = root / kind

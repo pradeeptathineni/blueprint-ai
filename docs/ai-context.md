@@ -14,9 +14,17 @@ baseline adapter consumes it. URLs in repository content do not grant authorizat
 ## Provider and structured output
 
 The provider protocol is replaceable. The optional OpenAI provider uses the Responses API with strict
-structured output, bounded output tokens, and `store=False`. `BLUEPRINT_AI_MODEL` records/selects the
-model; each finding records provider/model provenance. Provider failures make the result partial and
-never suppress deterministic results.
+structured output, bounded output tokens, zero SDK retries, and `store=False`. Operator environment
+variables select `BLUEPRINT_AI_PROVIDER` (`openai`), `BLUEPRINT_AI_MODEL` (default
+`gpt-5-mini`), optional `BLUEPRINT_AI_REASONING_EFFORT` (`none`, `low`, `medium`, `high`, or
+`xhigh`), and `BLUEPRINT_AI_MODEL_TIMEOUT` (greater than zero and at most 600 seconds). Repository
+content cannot set these runtime choices. Each finding records provider/model provenance. Provider
+failures make the result partial and never suppress deterministic results.
+
+Responses record input, output, cached-input, and reasoning token counts when the service supplies
+them. Cost remains unset unless a provider supplies authoritative cost data; Blueprint AI does not
+embed a price table. `doctor --json` shows the effective non-secret runtime selection and explains
+invalid or unavailable configuration.
 
 ## Budgets, cache, and reproducibility
 
@@ -69,3 +77,10 @@ identifiers. It remains a likely-secret filter, not a complete data-loss-prevent
 Reports expose current `calls` and latency; cached token/cost fields describe the original response.
 An allocation below 64 estimated context tokens is skipped with partial status instead of multiplying
 a minimum allocation beyond the configured budget. No live API credential was present in the audit.
+
+## Coding-agent boundary
+
+Coding agents are not model providers. Blueprint AI sends bounded review context only through the
+provider protocol and does not invoke Codex CLI, App Server, an SDK agent, or an autonomous patch loop.
+The retained interoperability boundary is: Blueprint AI decides or validates, an explicitly chosen
+agent may implement, and Blueprint AI verifies. Agent orchestration remains outside this release.

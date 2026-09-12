@@ -19,7 +19,7 @@ from blueprint_ai.core import RunReport
 from blueprint_ai.discovery import discover_project
 from blueprint_ai.engine import make_context, remediation_plan, review, write_baseline
 from blueprint_ai.extensions import custom_blueprint_schema, load_custom_blueprints
-from blueprint_ai.model import provider_from_environment
+from blueprint_ai.model import configuration_from_environment, provider_from_environment
 from blueprint_ai.output import serialize_report
 from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_operation
 from blueprint_ai.safety import sanitize_label
@@ -497,15 +497,20 @@ def doctor(json_output: JsonOption = False) -> None:
         {**adapter.status().model_dump(mode="json"), "blueprint": adapter.blueprint}
         for adapter in definitions
     ]
-    provider = provider_from_environment()
-    if provider:
+    try:
+        model_configuration = configuration_from_environment()
         model_detail = None
-    elif not os.environ.get("OPENAI_API_KEY"):
-        model_detail = "OPENAI_API_KEY is not set; deterministic review remains available"
-    elif importlib.util.find_spec("openai") is None:
-        model_detail = "install the optional model extra to enable OpenAI review"
-    else:
-        model_detail = "the configured model provider is unavailable"
+    except ValueError as exc:
+        model_configuration = None
+        model_detail = f"{exc}; deterministic review remains available"
+    provider = provider_from_environment()
+    if not provider and model_detail is None:
+        if not os.environ.get("OPENAI_API_KEY"):
+            model_detail = "OPENAI_API_KEY is not set; deterministic review remains available"
+        elif importlib.util.find_spec("openai") is None:
+            model_detail = "install the optional model extra to enable OpenAI review"
+        else:
+            model_detail = "the configured model provider is unavailable"
     contracts = validate_builtin_contracts(BLUEPRINTS, definitions)
     data = {
         "blueprint_ai": __version__,
@@ -513,7 +518,12 @@ def doctor(json_output: JsonOption = False) -> None:
         "runtime_ok": tuple(map(int, platform.python_version_tuple())) >= (3, 12, 0),
         "model": {
             "available": provider is not None,
-            "provider": provider.name if provider else None,
+            "provider": model_configuration.provider if model_configuration else None,
+            "model": model_configuration.model if model_configuration else None,
+            "reasoning_effort": (
+                model_configuration.reasoning_effort if model_configuration else None
+            ),
+            "timeout_seconds": model_configuration.timeout if model_configuration else None,
             "detail": model_detail,
         },
         "tools": tools,
@@ -766,7 +776,7 @@ def tools_install(name: str, backend: str = "docker", dry_run: bool = False) -> 
 @tools_app.command("doctor")
 def tools_doctor() -> None:
     from blueprint_ai.sandbox import doctor as sandbox_doctor
-    from blueprint_ai.support import TOOLS
+    from blueprint_ai.support import TOOLS, tool_classification
     from blueprint_ai.tooling import cached_image
 
     _dump(
@@ -775,6 +785,7 @@ def tools_doctor() -> None:
             "tools": [
                 {
                     **tool.model_dump(),
+                    "classification": tool_classification(tool),
                     "docker_image": cached_image(name, "docker"),
                     "podman_image": cached_image(name, "podman"),
                 }

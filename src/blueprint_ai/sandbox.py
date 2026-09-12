@@ -12,14 +12,14 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from blueprint_ai.safety import ProcessResult, controlled_env, run_process
 
 Backend = Literal["auto", "docker", "podman", "gvisor", "host"]
-Network = Literal["none", "loopback", "allowlist", "normal"]
+Network = Literal["none", "restricted", "allowlist", "unrestricted"]
 _CONFIG_LOCK = threading.Lock()
 _CLIENT_CONFIG: tempfile.TemporaryDirectory[str] | None = None
 
@@ -67,14 +67,31 @@ class SandboxPolicy(BaseModel):
     file_size_mb: int = Field(default=128, ge=1, le=1024)
     output_bytes: int = Field(default=4_000_000, ge=1024, le=16_000_000)
 
+    @model_validator(mode="before")
+    @classmethod
+    def legacy_network_names(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        normalized = dict(value)
+        if normalized.get("network") == "loopback":
+            normalized["network"] = "none"
+        elif normalized.get("network") == "normal":
+            normalized["network"] = "unrestricted"
+        return normalized
+
     @model_validator(mode="after")
     def authorization(self) -> SandboxPolicy:
         if self.backend == "host" and not self.trusted:
             raise ValueError("host execution requires explicit project/provider trust")
-        if self.network == "allowlist":
-            raise ValueError("allowlisted egress is unavailable; select none or loopback")
-        if self.network == "normal" and not (self.authorize_network and self.trusted):
-            raise ValueError("normal network requires explicit network authorization and trust")
+        if self.network in {"restricted", "allowlist"}:
+            raise ValueError(
+                f"{self.network} egress is unavailable because the local OCI adapters cannot "
+                "guarantee destination filtering; select none or explicitly authorize unrestricted"
+            )
+        if self.network == "unrestricted" and not (self.authorize_network and self.trusted):
+            raise ValueError(
+                "unrestricted network requires explicit network authorization and trust"
+            )
         if self.writable and not self.trusted:
             raise ValueError("writable target execution requires explicit trust")
         return self
@@ -91,6 +108,11 @@ class SandboxEvidence(BaseModel):
     target_read_only: bool = False
     network_enforced: bool = False
     limits_enforced: bool = False
+    scratch_limit_mb: int | None = None
+    file_size_limit_mb: int | None = None
+    workspace_writable_limit_mb: int | None = None
+    workspace_writable_limit_enforced: bool = False
+    workspace_writable_limit_detail: str = "not evaluated"
     exit_code: int | None = None
     timed_out: bool = False
     output_truncated: bool = False
@@ -286,7 +308,7 @@ def container_command(
         "--ulimit",
         f"fsize={policy.file_size_mb * 1024 * 1024}:{policy.file_size_mb * 1024 * 1024}",
         "--network",
-        "bridge" if policy.network == "normal" else "none",
+        "bridge" if policy.network == "unrestricted" else "none",
         "--ipc=private",
         "--shm-size=16m",
         "--log-driver=none",
@@ -343,7 +365,7 @@ def container_command(
         "UV_CACHE_DIR": "/tmp/uv",
         "UV_PYTHON_DOWNLOADS": "never",
         "UV_NO_CONFIG": "1",
-        "UV_OFFLINE": "0" if policy.network == "normal" else "1",
+        "UV_OFFLINE": "0" if policy.network == "unrestricted" else "1",
         "npm_config_cache": "/tmp/npm",
         "npm_config_ignore_scripts": "true",
         "npm_config_audit": "false",
@@ -353,7 +375,7 @@ def container_command(
         "GOTOOLCHAIN": "local",
         "CARGO_HOME": "/tmp/cargo-home",
         "CARGO_TARGET_DIR": "/tmp/cargo-target",
-        "CARGO_NET_OFFLINE": "false" if policy.network == "normal" else "true",
+        "CARGO_NET_OFFLINE": "false" if policy.network == "unrestricted" else "true",
         "TRIVY_CACHE_DIR": "/tmp/trivy",
         "DOTNET_CLI_HOME": "/tmp/dotnet",
         "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
@@ -365,6 +387,151 @@ def container_command(
         args.extend(["--env", f"{key}={value}"])
     args.extend(["--entrypoint", command[0], image, *command[1:]])
     return args
+
+
+def _initial_evidence(backend: str, tool: str, policy: SandboxPolicy) -> SandboxEvidence:
+    if backend == "host":
+        workspace_limit = None
+        workspace_detail = "trusted host execution has no workspace quota"
+    elif policy.writable:
+        workspace_limit = None
+        workspace_detail = "writable bind mounts have no portable Docker/Podman total-size quota"
+    else:
+        workspace_limit = 0
+        workspace_detail = "target is mounted read-only; writable workspace capacity is zero"
+    return SandboxEvidence(
+        backend=backend,
+        tool=tool,
+        policy=policy,
+        scratch_limit_mb=None if backend == "host" else policy.scratch_mb,
+        file_size_limit_mb=None if backend == "host" else policy.file_size_mb,
+        workspace_writable_limit_mb=workspace_limit,
+        workspace_writable_limit_detail=workspace_detail,
+    )
+
+
+def _identity_files() -> tempfile.TemporaryDirectory[str]:
+    files = tempfile.TemporaryDirectory(prefix="blueprint-identity-")
+    directory = Path(files.name)
+    uid = (os.getuid() or 10001) if hasattr(os, "getuid") else 10001
+    gid = (os.getgid() or 10001) if hasattr(os, "getgid") else 10001
+    (directory / "passwd").write_text(f"blueprint:x:{uid}:{gid}:Sandbox:/tmp:/bin/false\n")
+    (directory / "group").write_text(f"blueprint:x:{gid}:\n")
+    return files
+
+
+def _record_lifecycle(
+    prefix: list[str],
+    name: str,
+    env: dict[str, str],
+    policy: SandboxPolicy,
+    result: ProcessResult,
+    evidence: SandboxEvidence,
+) -> None:
+    state = run_process(
+        [*prefix, "inspect", name, "--format", "{{json .State}}"],
+        Path(tempfile.gettempdir()),
+        5,
+        env=env,
+        output_limit=16_384,
+    )
+    if state.returncode or state.timed_out or state.output_truncated:
+        raise SandboxUnavailable("sandbox lifecycle inspection failed; execution incomplete")
+    try:
+        lifecycle = json.loads(state.stdout)
+        if not isinstance(lifecycle, dict):
+            raise ValueError("invalid lifecycle metadata")
+        started_at = lifecycle.get("StartedAt", "")
+        # A rejected container creation is not evidence that a policy ran.
+        evidence.isolated = bool(
+            isinstance(started_at, str) and started_at and not started_at.startswith("0001-")
+        )
+        evidence.oom_killed = bool(lifecycle.get("OOMKilled", False))
+    except (ValueError, AttributeError) as exc:
+        raise SandboxUnavailable("sandbox returned malformed lifecycle metadata") from exc
+    if result.returncode == 0 and not evidence.isolated:
+        raise SandboxUnavailable("sandbox startup could not be confirmed; execution incomplete")
+    evidence.target_read_only = evidence.isolated and not policy.writable
+    evidence.network_enforced = evidence.isolated and policy.network == "none"
+    evidence.limits_enforced = evidence.isolated
+    evidence.workspace_writable_limit_enforced = evidence.isolated and not policy.writable
+
+
+def _execute_oci(
+    command: list[str],
+    root: Path,
+    cwd: str,
+    backend: str,
+    policy: SandboxPolicy,
+    evidence: SandboxEvidence,
+) -> ProcessResult:
+    if not policy.image:
+        raise SandboxUnavailable(
+            "sandbox tool image unavailable; use tools plan/install or --sandbox-image"
+        )
+    prefix, env = _local_runtime("docker" if backend == "gvisor" else backend)
+    info = runtime_info(backend)
+    identity = image_identity(backend, policy.image)
+    # Image-declared anonymous volumes can otherwise introduce unbounded writable storage.
+    inspected = run_process(
+        [*prefix, "image", "inspect", identity, "--format", "{{json .Config.Volumes}}"],
+        Path(tempfile.gettempdir()),
+        10,
+        env=env,
+        output_limit=16_384,
+    )
+    if inspected.returncode or inspected.stdout.strip() not in {"null", "{}", ""}:
+        raise SandboxUnavailable(
+            "image-declared volumes are unsupported; use a volume-free tool image"
+        )
+    name = "blueprint-sandbox-" + uuid.uuid4().hex
+    identity_files = _identity_files()
+    invocation = container_command(
+        prefix, backend, identity, name, root, cwd, command, policy, Path(identity_files.name)
+    )
+    evidence.image_id = identity
+    evidence.runtime_version = str(
+        info.get("ServerVersion", info.get("version", {}).get("Version", "unknown"))
+    )
+    evidence.rootless = bool(
+        info.get("host", {}).get("security", {}).get("rootless", False)
+        or any("rootless" in str(value) for value in info.get("SecurityOptions", []))
+    )
+    try:
+        result = run_process(
+            invocation,
+            Path(tempfile.gettempdir()),
+            policy.timeout,
+            output_limit=policy.output_bytes,
+            env=env,
+        )
+        _record_lifecycle(prefix, name, env, policy, result, evidence)
+    finally:
+        try:
+            cleanup = run_process(
+                [*prefix, "rm", "--force", "--volumes", name],
+                Path(tempfile.gettempdir()),
+                10,
+                env=env,
+                output_limit=16_384,
+            )
+            evidence.teardown = cleanup.returncode == 0 and not cleanup.timed_out
+        except OSError as exc:
+            raise SandboxUnavailable(
+                f"sandbox teardown failed for {name}; inspect the local engine"
+            ) from exc
+        finally:
+            identity_files.cleanup()
+        if not evidence.teardown:
+            raise SandboxUnavailable(
+                f"sandbox teardown failed for {name}; inspect the local engine"
+            )
+    evidence.detail = (
+        "OCI isolation; shared Linux kernel"
+        if backend != "gvisor"
+        else "OCI isolation with configured runsc runtime"
+    )
+    return result
 
 
 def execute(
@@ -379,7 +546,7 @@ def execute(
     policy = SandboxPolicy.model_validate(policy.model_dump())  # revalidate copied policies
     root = _target(root, cwd)
     backend = resolve_backend(policy)
-    evidence = SandboxEvidence(backend=backend, tool=tool or command[0], policy=policy)
+    evidence = _initial_evidence(backend, tool or command[0], policy)
     started = time.monotonic()
     if backend == "host":
         if not policy.trusted:
@@ -392,111 +559,7 @@ def execute(
         )
         evidence.teardown = True
     else:
-        if not policy.image:
-            raise SandboxUnavailable(
-                "sandbox tool image unavailable; use tools plan/install or --sandbox-image"
-            )
-        prefix, env = _local_runtime("docker" if backend == "gvisor" else backend)
-        info = runtime_info(backend)
-        identity = image_identity(backend, policy.image)
-        # Image-declared anonymous volumes can otherwise introduce unbounded writable storage.
-        inspected = run_process(
-            [*prefix, "image", "inspect", identity, "--format", "{{json .Config.Volumes}}"],
-            Path(tempfile.gettempdir()),
-            10,
-            env=env,
-            output_limit=16_384,
-        )
-        if inspected.returncode or inspected.stdout.strip() not in {"null", "{}", ""}:
-            raise SandboxUnavailable(
-                "image-declared volumes are unsupported; use a volume-free tool image"
-            )
-        name = "blueprint-sandbox-" + uuid.uuid4().hex
-        identity_files = tempfile.TemporaryDirectory(prefix="blueprint-identity-")
-        identity_directory = Path(identity_files.name)
-        uid = (os.getuid() or 10001) if hasattr(os, "getuid") else 10001
-        gid = (os.getgid() or 10001) if hasattr(os, "getgid") else 10001
-        (identity_directory / "passwd").write_text(
-            f"blueprint:x:{uid}:{gid}:Sandbox:/tmp:/bin/false\n"
-        )
-        (identity_directory / "group").write_text(f"blueprint:x:{gid}:\n")
-        invocation = container_command(
-            prefix, backend, identity, name, root, cwd, command, policy, identity_directory
-        )
-        evidence.image_id = identity
-        evidence.runtime_version = str(
-            info.get("ServerVersion", info.get("version", {}).get("Version", "unknown"))
-        )
-        evidence.rootless = bool(
-            info.get("host", {}).get("security", {}).get("rootless", False)
-            or any("rootless" in str(value) for value in info.get("SecurityOptions", []))
-        )
-        try:
-            result = run_process(
-                invocation,
-                Path(tempfile.gettempdir()),
-                policy.timeout,
-                output_limit=policy.output_bytes,
-                env=env,
-            )
-            state = run_process(
-                [*prefix, "inspect", name, "--format", "{{json .State}}"],
-                Path(tempfile.gettempdir()),
-                5,
-                env=env,
-                output_limit=16_384,
-            )
-            if state.returncode or state.timed_out or state.output_truncated:
-                raise SandboxUnavailable(
-                    "sandbox lifecycle inspection failed; execution incomplete"
-                )
-            try:
-                lifecycle = json.loads(state.stdout)
-                if not isinstance(lifecycle, dict):
-                    raise ValueError("invalid lifecycle metadata")
-                started_at = lifecycle.get("StartedAt", "")
-                # A rejected container creation is not evidence that a policy ran.
-                evidence.isolated = bool(
-                    state.returncode == 0
-                    and isinstance(started_at, str)
-                    and started_at
-                    and not started_at.startswith("0001-")
-                )
-                evidence.oom_killed = bool(lifecycle.get("OOMKilled", False))
-            except (ValueError, AttributeError) as exc:
-                raise SandboxUnavailable("sandbox returned malformed lifecycle metadata") from exc
-            if result.returncode == 0 and not evidence.isolated:
-                raise SandboxUnavailable(
-                    "sandbox startup could not be confirmed; execution incomplete"
-                )
-            evidence.target_read_only = evidence.isolated and not policy.writable
-            evidence.network_enforced = evidence.isolated and policy.network in {"none", "loopback"}
-            evidence.limits_enforced = evidence.isolated
-        finally:
-            try:
-                cleanup = run_process(
-                    [*prefix, "rm", "--force", "--volumes", name],
-                    Path(tempfile.gettempdir()),
-                    10,
-                    env=env,
-                    output_limit=16_384,
-                )
-                evidence.teardown = cleanup.returncode == 0 and not cleanup.timed_out
-            except OSError as exc:
-                raise SandboxUnavailable(
-                    f"sandbox teardown failed for {name}; inspect the local engine"
-                ) from exc
-            finally:
-                identity_files.cleanup()
-            if not evidence.teardown:
-                raise SandboxUnavailable(
-                    f"sandbox teardown failed for {name}; inspect the local engine"
-                )
-        evidence.detail = (
-            "OCI isolation; shared Linux kernel"
-            if backend != "gvisor"
-            else "OCI isolation with configured runsc runtime"
-        )
+        result = _execute_oci(command, root, cwd, backend, policy, evidence)
     evidence.exit_code = result.returncode
     evidence.timed_out = result.timed_out
     evidence.output_truncated = result.output_truncated

@@ -29,9 +29,12 @@ Docker socket or SSH agent. The only additional mounts are synthetic read-only a
 for the container UID; host account databases are never mounted. Docker and Podman target bind submounts are excluded.
 
 Defaults: 120 seconds, 2 CPU quota, 1 GiB memory with no additional swap, 128 processes, 256 MiB
-scratch, 128 MiB maximum individual file, and 4 MB captured output per stdout/stderr stream. These are policy limits,
-not a total writable-stage quota. Compilers use scratch caches. Tools that insist on writing source
-or require absent dependencies can fail under read-only review; that failure is incomplete evidence.
+scratch, 128 MiB maximum individual file, and 4 MB captured output per stdout/stderr stream. Evidence
+records the scratch and individual-file limits separately from workspace capacity. A read-only target
+has an enforced zero-byte writable-workspace limit. A trusted writable bind mount has no portable
+Docker/Podman total-size quota, and evidence reports that limit as unset and unenforced. Compilers use
+bounded scratch caches. Tools that insist on writing source or require absent dependencies can fail
+under read-only review; that failure is incomplete evidence.
 
 Generation has a writable disposable stage and explicit provider trust. Its registered operations
 use 240 seconds, 1 GiB scratch and 2 GiB memory; Terraform/OpenTofu provider installation permits
@@ -41,10 +44,13 @@ in strict OCI generation. Trusted host generation retains the existing local ima
 
 ## Network
 
-`none` and `loopback` use the container's private network namespace without egress or host-loopback
-access. An internal loopback interface may exist in both modes. An allowlist cannot be enforced by
-these adapters and is rejected explicitly. `normal` requires both explicit trust and explicit
-network authorization; it permits ordinary networking, including private destinations.
+`none` uses the container's private network namespace without egress or host-loopback access. An
+internal loopback interface can still exist. `restricted` (internet-only) and `allowlist` are rejected
+because the local adapters cannot guarantee destination filtering across Docker/Podman firewall
+backends. `unrestricted` requires both explicit trust and explicit network authorization and permits
+ordinary networking, including loopback, private, link-local, and metadata destinations. The legacy
+input names `loopback` and `normal` normalize to `none` and `unrestricted`; generated schemas and
+evidence use only canonical names.
 
 Default untrusted execution therefore cannot reach metadata services, private networks, or
 repository-supplied endpoints. Trusted online Lychee still excludes private destinations, and DAST
@@ -65,7 +71,10 @@ Docker/Podman containers share a Linux kernel. gVisor adds its configured usersp
 this release does not install or configure runsc. Bubblewrap/nsjail require deployment-specific
 seccomp, namespaces, and cgroup work and remain deferred. Runtime/host compromise and concurrent
 malicious host administrators are outside this boundary. The tests are empirical checks, not a formal
-isolation proof. [Threat model](threat-model.md) covers files, parsers, tools, and model inputs.
+isolation proof. Docker per-container storage-driver limits do not bound a host bind mount, while
+tmpfs is bounded but ephemeral; copying results through an unbounded host mount would not provide a
+security quota. Blueprint AI therefore does not claim total writable-stage enforcement. [Threat
+model](threat-model.md) covers files, parsers, tools, and model inputs.
 
 ## Independent audit
 
