@@ -34,6 +34,17 @@ def test_configured_ignore_is_applied(tmp_path: Path) -> None:
     assert ignored == 1
 
 
+def test_gitignore_negation_remains_visible(tmp_path: Path) -> None:
+    (tmp_path / ".gitignore").write_text("*.log\n!important.log\n")
+    (tmp_path / "ignored.log").write_text("ignored\n")
+    (tmp_path / "important.log").write_text("kept\n")
+
+    files, ignored = iter_project_files(tmp_path)
+
+    assert {path.name for path in files} == {".gitignore", "important.log"}
+    assert ignored == 1
+
+
 def test_git_standard_excludes_are_respected(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     hidden = tmp_path / ".ref"

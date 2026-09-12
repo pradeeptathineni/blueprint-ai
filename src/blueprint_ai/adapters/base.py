@@ -141,6 +141,7 @@ class ExternalToolAdapter(ToolAdapter):
         network_required: bool = False,
         recommended_version: str | None = None,
         executes_project_code: bool = False,
+        default_timeout: float | None = None,
     ):
         self.name = name
         self.blueprint = blueprint
@@ -153,6 +154,7 @@ class ExternalToolAdapter(ToolAdapter):
         self.recommended_version = recommended_version
         self.disabled_reason: str | None = None
         self.executes_project_code = executes_project_code
+        self.default_timeout = default_timeout
         self.max_output_bytes = MAX_TOOL_OUTPUT_BYTES
 
     def status(self) -> ToolStatus:
@@ -292,7 +294,10 @@ def parse_json_list(
         location = row.get("location", {}) or {}
         code = row.get("code", row.get("check_id", row.get("RuleID", "")))
         message = row.get("message", row.get("Description", row.get("Match", str(code))))
-        filename = row.get("filename", row.get("path", row.get("File", location.get("path"))))
+        filename = row.get(
+            "filename",
+            row.get("filepath", row.get("path", row.get("File", location.get("path")))),
+        )
         line = row.get("line", row.get("StartLine", location.get("row")))
         severity = row.get("severity", "high" if adapter.blueprint == "security" else "medium")
         findings.append(
@@ -309,6 +314,18 @@ def parse_json_list(
         )
     if not findings and result.returncode != 0 and result.stdout.strip():
         return parse_lines(result, root, adapter)
+    if adapter.name == "gitleaks":
+        specific_locations = {
+            (item.file, item.range.start_line if item.range else None)
+            for item in findings
+            if item.rule_id != "generic-api-key"
+        }
+        findings = [
+            item
+            for item in findings
+            if item.rule_id != "generic-api-key"
+            or (item.file, item.range.start_line if item.range else None) not in specific_locations
+        ]
     return findings
 
 
@@ -408,23 +425,67 @@ def parse_osv(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -
         source = result_row.get("source", {})
         for package in result_row.get("packages", []):
             package_info = package.get("package", {})
+            canonical_ids: dict[str, str] = {}
+            for group in package.get("groups", []):
+                ids = [str(value) for value in group.get("ids", [])]
+                cves = [
+                    str(value)
+                    for value in group.get("aliases", [])
+                    if str(value).upper().startswith("CVE-")
+                ]
+                if len(ids) == len(cves):
+                    canonical_ids.update(zip(ids, cves, strict=True))
             for vulnerability in package.get("vulnerabilities", []):
-                vuln_id = vulnerability.get("id", "vulnerability")
-                findings.append(
-                    finding(
-                        adapter,
-                        root=root,
-                        category="dependency-vulnerability",
-                        rule_id=vuln_id,
-                        severity="high",
-                        file=source.get("path"),
-                        message=f"{vuln_id} affects {package_info.get('name', 'dependency')}",
-                        evidence=[alias for alias in vulnerability.get("aliases", [])[:5]],
-                        recommendation=(
-                            "Upgrade to a non-vulnerable version described by the advisory."
-                        ),
-                    )
+                vuln_id = str(vulnerability.get("id", "vulnerability"))
+                canonical_id = canonical_ids.get(vuln_id, vuln_id)
+                fixed = sorted(
+                    {
+                        str(event["fixed"])
+                        for affected in vulnerability.get("affected", [])
+                        for range_row in affected.get("ranges", [])
+                        for event in range_row.get("events", [])
+                        if isinstance(event, dict) and event.get("fixed")
+                    }
                 )
+                database_severity = str(
+                    vulnerability.get("database_specific", {}).get("severity", "medium")
+                ).lower()
+                if database_severity == "moderate":
+                    database_severity = "medium"
+                elif database_severity not in {"critical", "high", "medium", "low", "info"}:
+                    database_severity = "medium"
+                installed = package_info.get("version")
+                name = package_info.get("name", "dependency")
+                evidence = [vuln_id]
+                evidence.extend(str(alias) for alias in vulnerability.get("aliases", [])[:5])
+                if summary := vulnerability.get("summary"):
+                    evidence.append(str(summary))
+                if installed:
+                    evidence.append(f"installed version: {installed}")
+                item = finding(
+                    adapter,
+                    root=root,
+                    category="dependency-vulnerability",
+                    rule_id=canonical_id,
+                    severity=database_severity,
+                    file=source.get("path"),
+                    message=f"{vuln_id} affects {name}{f' {installed}' if installed else ''}",
+                    evidence=evidence,
+                    recommendation=(
+                        f"Upgrade to {', '.join(fixed[:5])} or another non-vulnerable version."
+                        if fixed
+                        else "Upgrade to a non-vulnerable version described by the advisory."
+                    ),
+                )
+                item.tool_metadata.update(
+                    {
+                        "package": str(name),
+                        "installed_version": str(installed) if installed else None,
+                        "ecosystem": str(package_info.get("ecosystem") or "") or None,
+                        "advisory_id": vuln_id,
+                    }
+                )
+                findings.append(item)
     return findings
 
 
@@ -565,23 +626,106 @@ def parse_trivy(result: CommandResult, root: Path, adapter: ExternalToolAdapter)
             for row in scan.get(key, []) or []:
                 identifier = row.get("VulnerabilityID", row.get("ID", row.get("RuleID", "trivy")))
                 message = row.get("Title", row.get("Message", row.get("Description", identifier)))
-                findings.append(
-                    finding(
-                        adapter,
-                        root=root,
-                        category=category,
-                        rule_id=str(identifier),
-                        severity=severity_map.get(
-                            str(row.get("Severity", "MEDIUM")).upper(), "medium"
-                        ),
-                        file=target,
-                        line=_int(row.get("StartLine")),
-                        message=f"{identifier}: {message}",
-                        recommendation=row.get(
-                            "Resolution", "Review the Trivy guidance and remediate."
-                        ),
-                    )
+                cause = row.get("CauseMetadata", {}) or {}
+                installed = row.get("InstalledVersion")
+                fixed = row.get("FixedVersion")
+                evidence = []
+                if installed:
+                    evidence.append(f"installed version: {installed}")
+                if fixed:
+                    evidence.append(f"fixed version: {fixed}")
+                if primary_url := row.get("PrimaryURL"):
+                    evidence.append(str(primary_url))
+                item = finding(
+                    adapter,
+                    root=root,
+                    category=category,
+                    rule_id=str(identifier),
+                    severity=severity_map.get(str(row.get("Severity", "MEDIUM")).upper(), "medium"),
+                    file=target,
+                    line=_int(row.get("StartLine", cause.get("StartLine"))),
+                    message=f"{identifier}: {message}",
+                    evidence=evidence,
+                    recommendation=row.get(
+                        "Resolution",
+                        f"Upgrade to {fixed}."
+                        if fixed
+                        else "Review the Trivy guidance and remediate.",
+                    ),
                 )
+                item.tool_metadata.update(
+                    {
+                        "installed_version": str(installed) if installed else None,
+                        "fixed_version": str(fixed) if fixed else None,
+                    }
+                )
+                findings.append(item)
+    return findings
+
+
+def parse_actionlint(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    try:
+        decoded = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
+    except ValueError:
+        return parse_lines(result, root, adapter)
+    rows = [item for batch in decoded for item in (batch if isinstance(batch, list) else [batch])]
+    findings = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        message = str(row.get("message") or "GitHub Actions workflow error")
+        injection = "potentially untrusted" in message.lower()
+        item = finding(
+            adapter,
+            root=root,
+            category="workflow-security" if injection else "workflow-validation",
+            rule_id=(
+                "github-actions/template-injection"
+                if injection
+                else f"actionlint/{row.get('kind') or 'validation'}"
+            ),
+            severity="high" if injection else "medium",
+            file=row.get("filepath"),
+            line=_int(row.get("line")),
+            message=message,
+            evidence=[str(row["snippet"])] if row.get("snippet") else [],
+            recommendation=(
+                "Move attacker-controlled expressions into an environment variable before "
+                "using them in a script."
+                if injection
+                else "Correct the workflow syntax or expression and rerun actionlint."
+            ),
+        )
+        item.tool_metadata["kind"] = str(row.get("kind") or "") or None
+        findings.append(item)
+    return findings
+
+
+def parse_lychee(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
+    try:
+        data = json.loads(result.stdout or "{}")
+    except ValueError:
+        return parse_lines(result, root, adapter)
+    findings = []
+    for filename, rows in (data.get("error_map", {}) or {}).items():
+        for row in rows if isinstance(rows, list) else []:
+            status = row.get("status", {}) or {}
+            detail = status.get("text") or status.get("details") or "link check failed"
+            item = finding(
+                adapter,
+                root=root,
+                category="broken-link",
+                rule_id="lychee/broken-link",
+                severity="low",
+                file=filename,
+                line=_int((row.get("span") or {}).get("line")),
+                message=f"Broken link: {row.get('url', 'unknown')} ({detail})",
+                evidence=[str(status.get("details"))] if status.get("details") else [],
+                recommendation="Correct or remove the link, then rerun lychee.",
+            )
+            findings.append(item)
     return findings
 
 
@@ -632,20 +776,28 @@ def parse_sarif(result: CommandResult, root: Path, adapter: ExternalToolAdapter)
             artifact = location.get("artifactLocation", {}).get("uri")
             region = location.get("region", {})
             message = row.get("message", {})
-            findings.append(
-                finding(
-                    adapter,
-                    root=root,
-                    category="sarif",
-                    rule_id=str(row.get("ruleId") or adapter.name),
-                    severity=levels.get(str(row.get("level", "warning")).lower(), "medium"),
-                    file=artifact,
-                    line=_int(region.get("startLine")),
-                    message=str(
-                        message.get("text") or message.get("markdown") or row.get("ruleId")
-                    ),
-                )
+            original_rule = str(row.get("ruleId") or adapter.name)
+            if adapter.name == "zizmor" and original_rule.endswith("/template-injection"):
+                normalized_rule = "github-actions/template-injection"
+                category = "workflow-security"
+            elif adapter.name == "zizmor" and original_rule.endswith("/unpinned-uses"):
+                normalized_rule = "blueprint-ai/ci-cd/unpinned-action"
+                category = "unpinned-action"
+            else:
+                normalized_rule = original_rule
+                category = "workflow-security" if adapter.name == "zizmor" else "sarif"
+            item = finding(
+                adapter,
+                root=root,
+                category=category,
+                rule_id=normalized_rule,
+                severity=levels.get(str(row.get("level", "warning")).lower(), "medium"),
+                file=artifact,
+                line=_int(region.get("startLine")),
+                message=str(message.get("text") or message.get("markdown") or row.get("ruleId")),
             )
+            item.tool_metadata["original_rule_id"] = original_rule
+            findings.append(item)
     return findings
 
 

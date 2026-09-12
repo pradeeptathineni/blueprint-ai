@@ -70,6 +70,12 @@ Profiles compose without copying rules: `library`, `cli`, `api`, `backend-servic
 
 Each blueprint uses native or mature OSS tools first, small Blueprint AI rules second, and model reasoning only for questions deterministic evidence cannot answer. Missing optional tools produce partial results rather than aborting a run.
 
+Validated optional integrations include Gitleaks, OSV-Scanner, Trivy, actionlint, zizmor,
+markdownlint-cli2, and Lychee. Language and platform routes also cover configured Ruff, mypy,
+pytest, ESLint/Biome, TypeScript, Go, Rust, Java, ShellCheck, Spectral, Terraform, container, and
+Kubernetes tools. Optional tools are never downloaded automatically. A tool that is missing,
+disabled by the trust boundary, offline, fails, or times out is shown as incomplete—not as a pass.
+
 ## End-to-end example
 
 ```bash
@@ -80,6 +86,16 @@ blueprint-ai apply ./service --profile api
 blueprint-ai verify ./service --profile api
 ```
 
+A compact review excerpt looks like:
+
+```text
+P1 supply-chain CVE-2021-23337 package-lock.json
+   lodash 4.17.20; sources: osv-scanner, trivy; fixed version: 4.17.21
+P1 ci-cd github-actions/template-injection .github/workflows/ci.yml:10
+   sources: actionlint, zizmor
+PARTIAL iac: checkov missing; terraform disabled until project executables are trusted
+```
+
 Findings have message-independent fingerprints, aggregated sources, separate severity/priority,
 confidence/provenance, baseline state, and suppressions. Record accepted current findings with
 `blueprint-ai baseline PATH`.
@@ -88,10 +104,25 @@ confidence/provenance, baseline state, and suppressions. Record accepted current
 capability kits. `apply --kit NAME` uses atomic create-only writes, preserves existing files, emits an
 operation manifest, and is idempotent. `blueprint-ai rollback OPERATION_ID PATH` removes only
 unchanged files created by that operation. Generated tests are marked and immediately executed by the
-verification pass. `bootstrap` prints official install guidance and never downloads executables.
+verification pass. Generated smoke checks prove only basic execution/layout; they never satisfy the
+separate unit-test requirement. `bootstrap` prints official install guidance and never downloads
+executables.
 
 Project-local extensions are strict declarative YAML under `.blueprint-ai/blueprints/`; they cannot
 define commands, imports, templates, or model calls. See [the extension contract](docs/extending.md).
 JSON run metadata records schema and application versions, configuration hash, tool versions,
 provider/model identity, prompt versions, mode, and elapsed time. Model context is bounded, redacted,
 cache-keyed by content and prompt version, and clearly marked as untrusted repository data.
+
+## Limitations and validation evidence
+
+Model review requires the optional `model` extra and an `OPENAI_API_KEY`; deterministic analysis is
+independent of model availability. Network-backed scanners and link checks depend on their local
+databases or reachable targets, and target-controlled linters/tests require the explicit trust flag.
+Large legacy lockfiles can legitimately produce many advisories, so priority and aggregated sources
+should guide triage rather than raw finding count.
+
+The [Phase 4 validation report](docs/phase-4-validation.md) records the controlled fixtures,
+six-repository matrix, real strengthening case study, benchmarks, and release decision. See
+[tool research](docs/tool-research.md), [the threat model](docs/threat-model.md), and
+[release verification](docs/releasing.md) for maintained operational detail.

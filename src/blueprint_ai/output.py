@@ -21,8 +21,28 @@ def report_markdown(report: RunReport) -> str:
     for result in report.results:
         reason = f" — {result.applicability.reason}" if result.applicability else ""
         lines.extend([f"## {result.blueprint}: {result.status}{reason}", ""])
+        incomplete = [
+            tool
+            for tool in result.tools
+            if tool.outcome in {"tool_missing", "tool_error", "unsupported"}
+        ]
+        if incomplete:
+            lines.append(
+                "Incomplete tools: "
+                + "; ".join(
+                    f"`{tool.name}` ({tool.outcome}: "
+                    f"{sanitize_label(tool.detail or 'analysis incomplete', 300)})"
+                    for tool in incomplete
+                )
+            )
+            lines.append("")
         if not result.findings:
-            lines.extend(["No findings.", ""])
+            summary = (
+                "No findings from completed checks; analysis is incomplete."
+                if result.status == "partial"
+                else "No findings."
+            )
+            lines.extend([summary, ""])
             continue
         lines.extend(
             [

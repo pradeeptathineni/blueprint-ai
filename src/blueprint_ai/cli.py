@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import platform
 from pathlib import Path
 from typing import Annotated, Any
@@ -95,6 +97,12 @@ def _report_human(report) -> None:
     )
     for result in report.results:
         typer.echo(f"\n{result.blueprint}: {result.status} ({len(result.findings)} findings)")
+        for tool in result.tools:
+            if tool.outcome in {"tool_missing", "tool_error", "unsupported"}:
+                typer.echo(
+                    f"  tool {tool.name}: {tool.outcome}"
+                    f" ({sanitize_label(tool.detail or 'analysis incomplete', 300)})"
+                )
         for item in result.findings:
             location = f" {sanitize_label(item.file)}" if item.file else ""
             typer.echo(
@@ -472,6 +480,14 @@ def doctor(json_output: JsonOption = False) -> None:
         for adapter in definitions
     ]
     provider = provider_from_environment()
+    if provider:
+        model_detail = None
+    elif not os.environ.get("OPENAI_API_KEY"):
+        model_detail = "OPENAI_API_KEY is not set; deterministic review remains available"
+    elif importlib.util.find_spec("openai") is None:
+        model_detail = "install the optional model extra to enable OpenAI review"
+    else:
+        model_detail = "the configured model provider is unavailable"
     contracts = validate_builtin_contracts(BLUEPRINTS, definitions)
     data = {
         "blueprint_ai": __version__,
@@ -480,9 +496,7 @@ def doctor(json_output: JsonOption = False) -> None:
         "model": {
             "available": provider is not None,
             "provider": provider.name if provider else None,
-            "detail": None
-            if provider
-            else "set OPENAI_API_KEY and install the openai SDK to enable model review",
+            "detail": model_detail,
         },
         "tools": tools,
         "contracts": {"ok": True, **contracts},
@@ -496,7 +510,7 @@ def doctor(json_output: JsonOption = False) -> None:
             version = f" — {tool['version']}" if tool["version"] else ""
             typer.echo(
                 f"{tool['name']} ({tool['blueprint']}): "
-                f"{'available' if tool['available'] else 'missing'}{version}"
+                f"{'available' if tool['available'] else tool['outcome']}{version}"
             )
 
 

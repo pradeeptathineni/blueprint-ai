@@ -277,10 +277,10 @@ def test_run_metadata_junit_and_cli_exit_policy(tmp_path: Path) -> None:
     report = review(context)
     assert report.schema_version == "1.0.0"
     assert report.metadata and len(report.metadata.config_sha256) == 64
-    assert report.metadata.blueprint_ai_version == "0.3.0"
+    assert report.metadata.blueprint_ai_version == "0.4.0"
     version = CliRunner().invoke(app, ["--version"])
     assert version.exit_code == 0
-    assert version.stdout.strip() == "0.3.0"
+    assert version.stdout.strip() == "0.4.0"
     root = ET.fromstring(report_junit(report))
     assert root.tag == "testsuite"
     result = CliRunner().invoke(

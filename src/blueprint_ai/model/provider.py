@@ -57,9 +57,18 @@ class ModelProvider(ABC):
 class OpenAIProvider(ModelProvider):
     name = "openai"
 
-    def __init__(self, model: str = "gpt-5-mini", client: Any = None):
+    def __init__(
+        self,
+        model: str = "gpt-5-mini",
+        client: Any = None,
+        *,
+        timeout: float = 60.0,
+        max_retries: int = 1,
+    ):
         self.model = model
         self._client = client
+        self.timeout = timeout
+        self.max_retries = max_retries
 
     def available(self) -> bool:
         if self._client is not None:
@@ -76,7 +85,7 @@ class OpenAIProvider(ModelProvider):
         if self._client is None:
             from openai import OpenAI
 
-            self._client = OpenAI()
+            self._client = OpenAI(timeout=self.timeout, max_retries=self.max_retries)
         schema = _strict_schema(
             {
                 "type": "object",

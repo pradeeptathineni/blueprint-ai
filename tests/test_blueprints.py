@@ -35,8 +35,11 @@ def test_repository_and_testing_offer_safe_remediation(python_project: Path) -> 
         ".editorconfig",
         ".pre-commit-config.yaml",
     }
-    assert testing[0].remediation is not None
-    assert testing[0].remediation.target == "tests/test_smoke.py"
+    unit = next(finding for finding in testing if finding.category == "missing-unit-tests")
+    smoke = next(finding for finding in testing if finding.category == "missing-smoke-tests")
+    assert unit.remediation is None
+    assert smoke.remediation is not None
+    assert smoke.remediation.target == "tests/test_smoke.py"
 
 
 def test_ci_pin_check(tmp_path: Path) -> None:

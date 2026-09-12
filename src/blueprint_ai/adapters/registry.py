@@ -4,15 +4,17 @@ from pathlib import Path
 
 from blueprint_ai.core import ProjectFacts
 from blueprint_ai.discovery import iter_project_files
+from blueprint_ai.discovery.project import SKIP_DIRS
 
 from .base import (
     ExternalToolAdapter,
+    parse_actionlint,
     parse_checkov,
     parse_grype,
-    parse_json_lines,
     parse_json_list,
     parse_kubeconform,
     parse_lines,
+    parse_lychee,
     parse_osv,
     parse_output_paths,
     parse_ruff,
@@ -72,28 +74,41 @@ def known_tools() -> list[ExternalToolAdapter]:
             "gitleaks",
             "security",
             [
-                "detect",
-                "--source",
-                ".",
+                "dir",
                 "--report-format",
                 "json",
                 "--report-path",
                 "-",
                 "--no-banner",
+                "--redact",
+                ".",
             ],
             parse_json_list,
         ),
         ExternalToolAdapter(
             "osv-scanner",
             "supply-chain",
-            ["scan", "--format", "json", "-r", "."],
+            ["scan", "source", "--format", "json", "-r", "."],
             parse_osv,
             network_required=True,
         ),
         ExternalToolAdapter(
             "trivy",
             "supply-chain",
-            ["fs", "--format", "json", "--scanners", "vuln,misconfig,secret", "."],
+            [
+                "fs",
+                "--format",
+                "json",
+                "--scanners",
+                "vuln,misconfig",
+                "--no-progress",
+                *[
+                    argument
+                    for directory in sorted(SKIP_DIRS)
+                    for argument in ("--skip-dirs", directory)
+                ],
+                ".",
+            ],
             parse_trivy,
             network_required=True,
         ),
@@ -145,9 +160,12 @@ def known_tools() -> list[ExternalToolAdapter]:
         ),
         ExternalToolAdapter("helm", "kubernetes", ["lint"], parse_lines),
         ExternalToolAdapter("kustomize", "kubernetes", ["build"], parse_lines),
-        ExternalToolAdapter("actionlint", "ci-cd", ["-format", "{{json .}}"], parse_json_lines),
+        ExternalToolAdapter("actionlint", "ci-cd", ["-format", "{{json .}}"], parse_actionlint),
         ExternalToolAdapter(
-            "zizmor", "ci-cd", ["--format", "sarif", ".github/workflows"], parse_sarif
+            "zizmor",
+            "ci-cd",
+            ["--offline", "--format", "sarif", ".github/workflows"],
+            parse_sarif,
         ),
         ExternalToolAdapter(
             "spectral",
@@ -159,16 +177,27 @@ def known_tools() -> list[ExternalToolAdapter]:
         ExternalToolAdapter(
             "markdownlint-cli2",
             "documentation",
-            ["**/*.md", "#node_modules"],
+            [],
             parse_lines,
             executes_project_code=True,
         ),
         ExternalToolAdapter(
             "lychee",
             "documentation",
-            ["--format", "json", "**/*.md"],
-            parse_json_list,
+            [
+                "--format",
+                "json",
+                "--no-progress",
+                "--timeout",
+                "10",
+                "--max-retries",
+                "1",
+                "--exclude-loopback",
+            ],
+            parse_lychee,
+            expected_codes={0, 2},
             network_required=True,
+            default_timeout=30,
         ),
         ExternalToolAdapter(
             "pytest",
@@ -364,6 +393,8 @@ def _ecosystem_route(
 ) -> list[str]:
     names: list[str] = []
     if blueprint == "security":
+        if facts.is_git:
+            tools["gitleaks"].args[0] = "git"
         names.append("gitleaks")
         if _configured(root, (".semgrep.yml", ".semgrep.yaml")):
             if (root / ".semgrep.yaml").is_file():
@@ -424,12 +455,23 @@ def _ecosystem_route(
             tools["kustomize"].args.extend(kustomize_dirs)
             names.append("kustomize")
     elif blueprint == "ci-cd" and "github-actions" in facts.ci:
+        workflow_files = [
+            path.relative_to(root).as_posix()
+            for path in iter_project_files(root)[0]
+            if path.relative_to(root).as_posix().startswith(".github/workflows/")
+            and path.suffix.lower() in {".yaml", ".yml"}
+        ]
+        tools["actionlint"].args.extend(workflow_files)
         names.extend(["actionlint", "zizmor"])
     elif blueprint == "api-data-config" and facts.api_specs:
         tools["spectral"].args.extend(facts.api_specs)
         names.append("spectral")
     elif blueprint == "documentation" and facts.docs:
-        names.extend(["markdownlint-cli2", "lychee"])
+        markdown_files = [rel for rel in facts.docs if rel.lower().endswith(".md")]
+        if markdown_files:
+            tools["markdownlint-cli2"].args.extend(markdown_files)
+            tools["lychee"].args.extend(markdown_files)
+            names.extend(["markdownlint-cli2", "lychee"])
     return names
 
 

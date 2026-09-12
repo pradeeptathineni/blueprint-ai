@@ -1,4 +1,6 @@
+import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from blueprint_ai.core import Finding
@@ -108,3 +110,32 @@ def test_openai_provider_uses_bounded_nonstored_structured_response() -> None:
     assert client.responses.arguments["store"] is False
     assert client.responses.arguments["max_output_tokens"] == 300
     assert client.responses.arguments["text"]["format"]["strict"] is True
+
+
+def test_openai_provider_constructs_client_with_timeout_and_retry_bound(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class Response:
+        output_text = '{"findings": []}'
+        usage = None
+
+    class Responses:
+        def create(self, **_kwargs):
+            return Response()
+
+    class Client:
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+            self.responses = Responses()
+
+    module = ModuleType("openai")
+    module.OpenAI = Client  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "openai", module)
+
+    provider = OpenAIProvider(timeout=12.0, max_retries=0)
+    provider.review(
+        ModelRequest(
+            blueprint="architecture", system="system", context="context", max_output_tokens=100
+        )
+    )
+    assert captured == {"timeout": 12.0, "max_retries": 0}
