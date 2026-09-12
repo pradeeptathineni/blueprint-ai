@@ -96,9 +96,19 @@ class ToolAdapter(ABC):
                 command, root, timeout, getattr(self, "max_output_bytes", MAX_TOOL_OUTPUT_BYTES)
             )
             findings = [] if result.timed_out else self.parse(result, root)
+            incomplete = next(
+                (
+                    item
+                    for item in findings
+                    if item.tool_metadata.get("incomplete_analysis") is True
+                ),
+                None,
+            )
             error = (
                 f"timed out after {timeout}s"
                 if result.timed_out
+                else f"analysis prerequisite missing: {incomplete.message}"
+                if incomplete
                 else None
                 if result.returncode in self.expected_codes
                 else _failure_detail(result)
@@ -304,10 +314,16 @@ def parse_json_list(
         message = row.get("message", row.get("Description", row.get("Match", str(code))))
         filename = row.get(
             "filename",
-            row.get("filepath", row.get("path", row.get("File", location.get("path")))),
+            row.get(
+                "filepath",
+                row.get("file", row.get("path", row.get("File", location.get("path")))),
+            ),
         )
         line = row.get("line", row.get("StartLine", location.get("row")))
-        severity = row.get("severity", "high" if adapter.blueprint == "security" else "medium")
+        severity = row.get(
+            "severity",
+            row.get("level", "high" if adapter.blueprint == "security" else "medium"),
+        )
         findings.append(
             finding(
                 adapter,
@@ -335,6 +351,97 @@ def parse_json_list(
             or (item.file, item.range.start_line if item.range else None) not in specific_locations
         ]
     return findings
+
+
+def parse_tflint(result: CommandResult, root: Path, adapter: ExternalToolAdapter) -> list[Finding]:
+    try:
+        data = json.loads(result.stdout or "{}")
+    except ValueError:
+        return parse_lines(result, root, adapter)
+    severity_map = {"error": "high", "warning": "medium", "notice": "low"}
+    findings = []
+    for row in data.get("issues", []) if isinstance(data, dict) else []:
+        rule = row.get("rule", {}) or {}
+        source = row.get("range", {}) or {}
+        start = source.get("start", {}) or {}
+        rule_name = str(rule.get("name") or "tflint")
+        item = finding(
+            adapter,
+            root=root,
+            category="lint",
+            rule_id=f"tflint/{rule_name}",
+            severity=severity_map.get(str(rule.get("severity", "warning")).lower(), "medium"),
+            file=source.get("filename"),
+            line=_int(start.get("line")),
+            message=f"{rule_name}: {row.get('message', '')}",
+            recommendation="Correct the Terraform lint violation and rerun TFLint.",
+        )
+        if rule.get("link"):
+            item.evidence.append(str(rule["link"]))
+        findings.append(item)
+    return findings
+
+
+def parse_shellcheck(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    findings = parse_json_list(result, root, adapter)
+    grouped: dict[tuple[str | None, str | None], Finding] = {}
+    for item in findings:
+        key = (item.file, item.rule_id)
+        if existing := grouped.get(key):
+            occurrences = int(existing.tool_metadata.get("occurrences") or 1) + 1
+            existing.tool_metadata["occurrences"] = occurrences
+            line = item.range.start_line if item.range else None
+            if line and len(existing.evidence) < 20:
+                existing.evidence.append(f"also at line {line}")
+            continue
+        item.tool_metadata["occurrences"] = 1
+        grouped[key] = item
+    return list(grouped.values())
+
+
+def parse_markdownlint(
+    result: CommandResult, root: Path, adapter: ExternalToolAdapter
+) -> list[Finding]:
+    output = (result.stdout + "\n" + result.stderr).strip()
+    if not output or (result.returncode == 0 and not result.timed_out):
+        return []
+    pattern = re.compile(
+        r"^(.*?):(\d+):(?:\d+)\s+\w+\s+(MD\d+)(?:/\S+)?\s+(.*)$",
+        re.IGNORECASE,
+    )
+    grouped: dict[tuple[str, str], Finding] = {}
+    for raw_line in output.splitlines()[:2_000]:
+        match = pattern.match(raw_line.strip())
+        if not match:
+            continue
+        filename, line_text, rule_id, message = match.groups()
+        line = int(line_text)
+        key = (filename, rule_id.upper())
+        if existing := grouped.get(key):
+            occurrences = int(existing.tool_metadata.get("occurrences") or 1) + 1
+            existing.tool_metadata["occurrences"] = occurrences
+            if len(existing.evidence) < 20:
+                existing.evidence.append(f"also at line {line}")
+            continue
+        item = finding(
+            adapter,
+            root=root,
+            category="documentation-style",
+            rule_id=f"markdownlint/{rule_id.upper()}",
+            severity="low",
+            file=filename,
+            line=line,
+            message=f"{rule_id.upper()}: {message}",
+            recommendation=(
+                "Fix the Markdown convention or configure the rule when the repository "
+                "intentionally uses a different style."
+            ),
+        )
+        item.tool_metadata["occurrences"] = 1
+        grouped[key] = item
+    return list(grouped.values()) or parse_lines(result, root, adapter)
 
 
 def parse_json_lines(
@@ -591,22 +698,27 @@ def parse_terraform(
     for diagnostic in data.get("diagnostics", []):
         source = diagnostic.get("range", {})
         start = source.get("start", {})
-        findings.append(
-            finding(
-                adapter,
-                root=root,
-                category="validation",
-                rule_id=str(diagnostic.get("summary") or "terraform-validation"),
-                severity="high" if diagnostic.get("severity") == "error" else "medium",
-                file=source.get("filename"),
-                line=_int(start.get("line")),
-                message=(
-                    f"{diagnostic.get('summary', 'Terraform validation')}: "
-                    f"{diagnostic.get('detail', '')}"
-                ),
-                recommendation="Correct the Terraform configuration and validate again.",
-            )
+        item = finding(
+            adapter,
+            root=root,
+            category="validation",
+            rule_id=str(diagnostic.get("summary") or "terraform-validation"),
+            severity="high" if diagnostic.get("severity") == "error" else "medium",
+            file=source.get("filename"),
+            line=_int(start.get("line")),
+            message=(
+                f"{diagnostic.get('summary', 'Terraform validation')}: "
+                f"{diagnostic.get('detail', '')}"
+            ),
+            recommendation="Correct the Terraform configuration and validate again.",
         )
+        summary = str(diagnostic.get("summary") or "")
+        detail = str(diagnostic.get("detail") or "")
+        if summary in {"Module not installed", "Missing required provider"} or (
+            "cached in .terraform/providers" in detail
+        ):
+            item.tool_metadata["incomplete_analysis"] = True
+        findings.append(item)
     return findings
 
 
@@ -774,6 +886,11 @@ def parse_checkov(result: CommandResult, root: Path, adapter: ExternalToolAdapte
     findings = []
     for document in documents:
         for row in document.get("results", {}).get("failed_checks", []):
+            code_block = row.get("code_block") or []
+            if row.get("check_id") == "CKV_AWS_260" and any(
+                "referenced_security_group_id" in str(source_line) for source_line in code_block
+            ):
+                continue
             location = row.get("file_line_range") or [None]
             findings.append(
                 finding(
@@ -781,7 +898,7 @@ def parse_checkov(result: CommandResult, root: Path, adapter: ExternalToolAdapte
                     root=root,
                     category="misconfiguration",
                     rule_id=str(row.get("check_id") or "checkov"),
-                    severity="high",
+                    severity=str(row.get("severity") or "unknown"),
                     file=str(row.get("file_path", "")).lstrip("/"),
                     line=_int(location[0] if location else None),
                     message=f"{row.get('check_id', 'checkov')}: {row.get('check_name', '')}",
@@ -809,6 +926,13 @@ def parse_sarif(result: CommandResult, root: Path, adapter: ExternalToolAdapter)
         for row in run.get("results", []):
             location = (row.get("locations") or [{}])[0].get("physicalLocation", {})
             artifact = location.get("artifactLocation", {}).get("uri")
+            if (
+                adapter.name == "zizmor"
+                and artifact
+                and "/" not in artifact
+                and (root / ".github" / "workflows" / artifact).is_file()
+            ):
+                artifact = f".github/workflows/{artifact}"
             region = location.get("region", {})
             message = row.get("message", {})
             original_rule = str(row.get("ruleId") or adapter.name)

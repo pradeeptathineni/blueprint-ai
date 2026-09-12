@@ -15,12 +15,15 @@ from .base import (
     parse_kubeconform,
     parse_lines,
     parse_lychee,
+    parse_markdownlint,
     parse_osv,
     parse_output_paths,
     parse_ruff,
     parse_sarif,
     parse_semgrep,
+    parse_shellcheck,
     parse_terraform,
+    parse_tflint,
     parse_trivy,
 )
 
@@ -63,7 +66,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             executable="cargo",
             executes_project_code=True,
         ),
-        ExternalToolAdapter("shellcheck", "code-quality", ["--format=json"], parse_json_list),
+        ExternalToolAdapter("shellcheck", "code-quality", ["--format=json"], parse_shellcheck),
         ExternalToolAdapter(
             "semgrep",
             "security",
@@ -137,10 +140,20 @@ def known_tools() -> list[ExternalToolAdapter]:
             executable="terraform",
         ),
         ExternalToolAdapter(
+            "terraform-test",
+            "testing",
+            ["test", "-no-color"],
+            parse_lines,
+            executable="terraform",
+            expected_codes={0, 1},
+            executes_project_code=True,
+        ),
+        ExternalToolAdapter(
             "tflint",
             "iac",
-            ["--format", "json"],
-            parse_json_list,
+            ["--recursive", "--format", "json"],
+            parse_tflint,
+            expected_codes={0, 2},
             executes_project_code=True,
         ),
         ExternalToolAdapter("checkov", "iac", ["-d", ".", "-o", "json", "--quiet"], parse_checkov),
@@ -178,7 +191,7 @@ def known_tools() -> list[ExternalToolAdapter]:
             "markdownlint-cli2",
             "documentation",
             [],
-            parse_lines,
+            parse_markdownlint,
             executes_project_code=True,
         ),
         ExternalToolAdapter(
@@ -265,6 +278,28 @@ def known_tools() -> list[ExternalToolAdapter]:
 
 def _configured(root: Path, names: tuple[str, ...]) -> bool:
     return any((root / name).exists() for name in names)
+
+
+def _terraform_roots(root: Path) -> list[str]:
+    directories = {
+        path.parent.relative_to(root)
+        for path in iter_project_files(root)[0]
+        if path.suffix == ".tf"
+    }
+    locked = {
+        directory
+        for directory in directories
+        if (root / directory / ".terraform.lock.hcl").is_file()
+    }
+    selected = locked or {
+        directory
+        for directory in directories
+        if not any(parent in directories for parent in directory.parents if parent != directory)
+    }
+    return sorted(
+        (directory.as_posix() for directory in selected),
+        key=lambda rel: (rel != "terraform", rel != ".", rel),
+    )
 
 
 def _quality_route(
@@ -358,6 +393,37 @@ def _testing_route(
         return []
     languages = set(facts.languages)
     names = []
+    terraform_test_roots = sorted(
+        {
+            root_dir
+            for rel in facts.tests
+            if rel.endswith(".tftest.hcl")
+            for root_dir in [
+                next(
+                    (
+                        parent.as_posix()
+                        for parent in Path(rel).parents
+                        if any((root / parent).glob("*.tf"))
+                    ),
+                    ".",
+                )
+            ]
+        },
+        key=lambda rel: (rel != "terraform", rel != ".", rel),
+    )
+    for index, rel in enumerate(terraform_test_roots):
+        name = "terraform-test" if index == 0 else f"terraform-test:{rel}"
+        args = ["test", "-no-color"] if rel == "." else [f"-chdir={rel}", "test", "-no-color"]
+        tools[name] = ExternalToolAdapter(
+            name,
+            "testing",
+            args,
+            parse_lines,
+            executable="terraform",
+            expected_codes={0, 1},
+            executes_project_code=True,
+        )
+        names.append(name)
     if "Python" in languages:
         names.append("pytest")
     if languages & {"JavaScript", "TypeScript"}:
@@ -385,6 +451,41 @@ def _testing_route(
     return names
 
 
+def _iac_route(facts: ProjectFacts, root: Path, tools: dict[str, ExternalToolAdapter]) -> list[str]:
+    names: list[str] = []
+    if "terraform" in facts.iac:
+        tools["trivy"].blueprint = "iac"
+        tools["trivy"].args[4] = "misconfig"
+        names.append("terraform-fmt")
+        tools.pop("terraform")
+        for index, rel in enumerate(_terraform_roots(root)):
+            name = "terraform" if index == 0 else f"terraform:{rel}"
+            args = ["validate", "-json"] if rel == "." else [f"-chdir={rel}", "validate", "-json"]
+            tools[name] = ExternalToolAdapter(
+                name,
+                "iac",
+                args,
+                parse_terraform,
+                executable="terraform",
+                executes_project_code=True,
+            )
+            names.append(name)
+        names.extend(["tflint", "checkov", "trivy"])
+    if "cloudformation" in facts.iac:
+        tools["trivy"].blueprint = "iac"
+        tools["trivy"].args[4] = "misconfig"
+        cloudformation = []
+        for path in iter_project_files(root)[0]:
+            if path.suffix not in {".yaml", ".yml"}:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")[:100_000]
+            if "AWSTemplateFormatVersion" in text or "AWS::Serverless-2016-10-31" in text:
+                cloudformation.append(path.relative_to(root).as_posix())
+        tools["cfn-lint"].args.extend(cloudformation)
+        names.extend(["cfn-lint", "checkov", "trivy"])
+    return names
+
+
 def _ecosystem_route(
     facts: ProjectFacts,
     blueprint: str,
@@ -408,22 +509,7 @@ def _ecosystem_route(
         if (root / ".grype.yaml").is_file():
             names.append("grype")
     elif blueprint == "iac":
-        if "terraform" in facts.iac:
-            tools["trivy"].blueprint = "iac"
-            tools["trivy"].args[4] = "misconfig"
-            names.extend(["terraform-fmt", "terraform", "tflint", "checkov", "trivy"])
-        if "cloudformation" in facts.iac:
-            tools["trivy"].blueprint = "iac"
-            tools["trivy"].args[4] = "misconfig"
-            cloudformation = []
-            for path in iter_project_files(root)[0]:
-                if path.suffix not in {".yaml", ".yml"}:
-                    continue
-                text = path.read_text(encoding="utf-8", errors="ignore")[:100_000]
-                if "AWSTemplateFormatVersion" in text or "AWS::Serverless-2016-10-31" in text:
-                    cloudformation.append(path.relative_to(root).as_posix())
-            tools["cfn-lint"].args.extend(cloudformation)
-            names.extend(["cfn-lint", "checkov", "trivy"])
+        names.extend(_iac_route(facts, root, tools))
     elif blueprint == "containers":
         dockerfiles = [rel for rel in facts.containers if Path(rel).name.lower() == "dockerfile"]
         if dockerfiles:
@@ -529,7 +615,8 @@ def applicable_adapters(
         local = root / "node_modules" / ".bin" / Path(adapter.executable).name
         if allow_project_executables and local.is_file() and adapter.name not in {"npm-test"}:
             adapter.executable = str(local)
-        if allow_project_executables and overrides and adapter.name in overrides:
-            override = Path(overrides[adapter.name])
+        override_name = adapter.name.split(":", 1)[0]
+        if allow_project_executables and overrides and override_name in overrides:
+            override = Path(overrides[override_name])
             adapter.executable = str(override if override.is_absolute() else root / override)
     return selected

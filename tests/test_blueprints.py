@@ -70,3 +70,42 @@ def test_ai_context_detects_duplicate_and_oversized_instructions(tmp_path: Path)
         "duplicate-context",
         "oversized-context",
     }
+
+
+def test_terraform_config_is_not_treated_as_application_environment_config(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "stack.tfvars").write_text('region = "us-east-1"\n')
+    (tmp_path / "main.tf").write_text('terraform { required_version = ">= 1.0" }\n')
+    facts = discover_project(tmp_path)
+    assert BLUEPRINTS["api-data-config"].assess(facts).state == "not_applicable"
+    assert BLUEPRINTS["api-data-config"].check(tmp_path, facts) == []
+
+
+def test_iac_without_native_tests_has_contextual_medium_finding(tmp_path: Path) -> None:
+    (tmp_path / "main.tf").write_text('terraform { required_version = ">= 1.0" }\n')
+    facts = discover_project(tmp_path)
+    finding = BLUEPRINTS["testing"].check(tmp_path, facts)[0]
+    assert finding.severity == "medium"
+    assert "Terraform module behavior" in finding.message
+    assert "native Terraform tests" in finding.recommendation
+
+
+def test_iac_operations_use_existing_operational_guidance(tmp_path: Path) -> None:
+    (tmp_path / "main.tf").write_text('terraform { required_version = ">= 1.0" }\n')
+    (tmp_path / "README.md").write_text(
+        "# Infrastructure\n\nVerify health, destroy for rollback, protect state for recovery, "
+        "and monitor cost.\n"
+    )
+    facts = discover_project(tmp_path)
+    assert BLUEPRINTS["operations"].assess(facts).state == "applicable"
+    assert BLUEPRINTS["operations"].check(tmp_path, facts) == []
+    assert BLUEPRINTS["reliability"].assess(facts).state == "partial"
+
+
+def test_shell_only_code_design_is_partial_not_passable_by_empty_checks(tmp_path: Path) -> None:
+    (tmp_path / "script.sh").write_text("#!/bin/sh\nexit 0\n")
+    facts = discover_project(tmp_path)
+    assert BLUEPRINTS["code-design"].assess(facts).state == "partial"

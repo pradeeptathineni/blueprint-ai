@@ -369,8 +369,16 @@ def security_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
 
 def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     present = set(facts.test_capabilities)
-    required: list[tuple[str, Severity, str]] = [("unit", "high", "core behavior")]
     types = set(facts.project_types)
+    application_languages = set(facts.languages) - {"HCL", "Markdown", "Shell", "YAML"}
+    iac_focused = bool(facts.iac) and not application_languages
+    required: list[tuple[str, Severity, str]] = [
+        (
+            "unit",
+            "medium" if iac_focused else "high",
+            "Terraform module behavior" if iac_focused else "core behavior",
+        )
+    ]
     if types & {"api", "backend-service", "full-stack"}:
         required.append(("integration", "medium", "service boundaries"))
     if facts.api_specs:
@@ -414,13 +422,26 @@ def testing_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                 "testing",
                 f"missing-{capability}-tests",
                 f"No {capability} test capability was discovered for {scope}.",
-                f"Use the existing test stack to cover {scope}; mark generated-test provenance.",
+                (
+                    "Add focused native Terraform tests for important plan-time invariants."
+                    if iac_focused
+                    else (
+                        f"Use the existing test stack to cover {scope}; "
+                        "mark generated-test provenance."
+                    )
+                ),
                 severity=severity,
                 remediation=remediation,
                 verification="execute the generated or existing test suite",
             )
         )
     return findings
+
+
+def _application_config_files(facts: ProjectFacts) -> list[str]:
+    return [
+        rel for rel in facts.config_files if Path(rel).suffix.lower() not in {".tfvars", ".hcl"}
+    ]
 
 
 def api_data_config_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
@@ -459,10 +480,11 @@ def api_data_config_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
                         file=rel,
                     )
                 )
+    application_config = _application_config_files(facts)
     env_example = any(
-        Path(rel).name in {".env.example", ".env.template"} for rel in facts.config_files
+        Path(rel).name in {".env.example", ".env.template"} for rel in application_config
     )
-    if facts.config_files and not env_example:
+    if application_config and not env_example:
         findings.append(
             _finding(
                 "api-data-config",
@@ -817,15 +839,30 @@ def _dotted_name(node: ast.expr) -> str:
 
 
 def operations_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
-    docs = {Path(rel).name.lower() for rel in facts.docs}
-    if docs & {"runbook.md", "operations.md", "ops.md"}:
+    operational_text = "\n".join(
+        (root / rel).read_text(encoding="utf-8", errors="ignore")[:100_000].lower()
+        for rel in facts.docs
+        if rel.lower().endswith(".md") and (root / rel).is_file()
+    )
+    evidence = {
+        "health/verification": ("health", "verify", "verification"),
+        "rollback/teardown": ("rollback", "teardown", "destroy"),
+        "state/recovery": ("backup", "recovery", "state"),
+        "cost ownership": ("cost", "charges", "billing"),
+    }
+    missing = [
+        category
+        for category, markers in evidence.items()
+        if not any(marker in operational_text for marker in markers)
+    ]
+    if not missing:
         return []
     return [
         _finding(
             "operations",
             "missing-runbook",
-            "No operational runbook was discovered.",
-            "Document health, alerts, rollback, backup/recovery, and escalation assumptions.",
+            f"Operational guidance is missing: {', '.join(missing)}.",
+            "Document the project-appropriate health, recovery, state, and cost procedures.",
             severity="low",
         )
     ]
@@ -950,12 +987,23 @@ def completeness_checks(root: Path, facts: ProjectFacts) -> list[Finding]:
     for family in sorted(applicable):
         if families[family]:
             continue
+        if family == "security":
+            message = "No repository-managed security policy or check workflow was discovered."
+            recommendation = (
+                "Add a project-appropriate secret or infrastructure-security check in CI, "
+                "or document where that control is owned."
+            )
+        else:
+            message = f"Applicable '{family}' capability has no supporting project evidence."
+            recommendation = (
+                f"Enable the {family} blueprint and add the smallest project-appropriate baseline."
+            )
         findings.append(
             _finding(
                 "completeness",
                 "missing-family-evidence",
-                f"Applicable '{family}' capability has no supporting project evidence.",
-                f"Enable the {family} blueprint and add the smallest project-appropriate baseline.",
+                message,
+                recommendation,
                 severity="medium" if family in {"testing", "security"} else "low",
                 evidence=[f"profiles: {', '.join(facts.project_types) or 'default'}"],
                 rule_id=f"blueprint-ai/completeness/missing/{family}",
@@ -1002,6 +1050,8 @@ BLUEPRINTS: dict[str, Blueprint] = {
         code_design_checks,
         True,
         "no source-language files were discovered",
+        lambda f: "Python" not in f.languages,
+        "deterministic code-design checks currently cover Python source only",
     ),
     "architecture": Blueprint(
         "architecture",
@@ -1014,10 +1064,10 @@ BLUEPRINTS: dict[str, Blueprint] = {
     "testing": Blueprint(
         "testing",
         "Applicable test capabilities, execution, generation, and completeness",
-        _has_code,
+        lambda f: _has_code(f) or bool(f.iac),
         testing_checks,
         True,
-        "no testable source-language files were discovered",
+        "no testable source-language or infrastructure files were discovered",
     ),
     "api-data-config": Blueprint(
         "api-data-config",
@@ -1025,13 +1075,18 @@ BLUEPRINTS: dict[str, Blueprint] = {
         lambda f: bool(
             f.api_specs
             or f.migrations
-            or f.config_files
+            or _application_config_files(f)
             or set(f.project_types) & {"api", "data-pipeline"}
         ),
         api_data_config_checks,
         True,
         "no API, schema, migration, or application configuration evidence was discovered",
-        lambda f: not bool(f.api_specs),
+        lambda f: (
+            not bool(f.api_specs)
+            and bool(
+                _application_config_files(f) or set(f.project_types) & {"api", "data-pipeline"}
+            )
+        ),
         "API/config review is partial because no machine-readable API contract was discovered",
     ),
     "security": Blueprint(
@@ -1084,20 +1139,34 @@ BLUEPRINTS: dict[str, Blueprint] = {
     "reliability": Blueprint(
         "reliability",
         "Timeouts, retries, idempotency, shutdown, health, and scaling",
-        lambda f: bool(
-            set(f.project_types)
-            & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+        lambda f: (
+            bool(
+                set(f.project_types)
+                & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+            )
+            or bool(f.iac)
         ),
         reliability_checks,
         True,
         "no long-running or production-like runtime was discovered",
+        lambda f: (
+            bool(f.iac)
+            and not bool(
+                set(f.project_types)
+                & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+            )
+        ),
+        "IaC reliability review requires model judgment beyond current deterministic checks",
     ),
     "operations": Blueprint(
         "operations",
         "Observability, runbooks, alerts, backup/recovery, and cost evidence",
-        lambda f: bool(
-            set(f.project_types)
-            & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+        lambda f: (
+            bool(
+                set(f.project_types)
+                & {"api", "backend-service", "data-pipeline", "container", "kubernetes"}
+            )
+            or bool(f.iac)
         ),
         operations_checks,
         True,

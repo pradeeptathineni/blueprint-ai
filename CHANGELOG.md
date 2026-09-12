@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.2 — 2026-09-11
+
+- Validate every discovered Terraform root instead of accidentally passing an empty repository root,
+  and report missing initialization as incomplete analysis rather than a source defect.
+- Run TFLint recursively with its native JSON and exit-code contract, and discover and execute native
+  Terraform test files from their owning configuration roots.
+- Preserve and aggregate ShellCheck locations and native severity, and collapse repeated markdownlint
+  rules per file while retaining occurrence evidence.
+- Aggregate equivalent Checkov and Trivy AWS controls, discard Checkov's demonstrated security-group
+  reference false positive, and avoid promoting Checkov checks whose upstream severity is unknown.
+- Keep Terraform variable files out of application-environment recommendations, contextualize IaC
+  test guidance, and mark deterministic-empty model-only reviews as partial when models are disabled.
+- Route IaC repositories through operational-guidance review, and report IaC reliability and
+  non-Python design analysis as partial when deterministic coverage cannot justify a pass.
+
 ## 0.4.1 — 2026-09-11
 
 - Preserve a bounded diagnostic excerpt when a trusted project tool fails instead of reporting only

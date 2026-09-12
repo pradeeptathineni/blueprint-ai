@@ -10,6 +10,7 @@ from blueprint_ai.adapters.base import (
     CommandResult,
     ExternalToolAdapter,
     parse_actionlint,
+    parse_checkov,
     parse_json_list,
     parse_lychee,
     parse_osv,
@@ -64,6 +65,37 @@ def test_trivy_scanner_scope_follows_blueprint_applicability(tmp_path: Path) -> 
     )
     assert container_trivy.blueprint == "containers"
     assert container_trivy.args[4] == "misconfig"
+
+
+def test_terraform_tools_cover_real_roots_and_tflint_recurses(tmp_path: Path) -> None:
+    for directory in (tmp_path / "terraform", tmp_path / "bootstrap"):
+        directory.mkdir()
+        (directory / "main.tf").write_text('terraform { required_version = ">= 1.0" }\n')
+        (directory / ".terraform.lock.hcl").write_text("# lock\n")
+    facts = discover_project(tmp_path)
+    adapters = applicable_adapters(facts, "iac", allow_project_executables=True)
+    terraform = [
+        tool for tool in adapters if tool.executable == "terraform" and "validate" in tool.args
+    ]
+    assert [tool.args[0] for tool in terraform] == ["-chdir=terraform", "-chdir=bootstrap"]
+    tflint = next(tool for tool in adapters if tool.name == "tflint")
+    assert tflint.args[:3] == ["--recursive", "--format", "json"]
+    assert tflint.expected_codes == {0, 2}
+
+
+def test_terraform_tests_are_routed_to_the_configuration_root(tmp_path: Path) -> None:
+    terraform = tmp_path / "terraform"
+    tests = terraform / "tests"
+    tests.mkdir(parents=True)
+    (terraform / "main.tf").write_text('terraform { required_version = ">= 1.0" }\n')
+    (tests / "architecture.tftest.hcl").write_text('run "plan" { command = plan }\n')
+    facts = discover_project(tmp_path)
+    adapter = next(
+        tool
+        for tool in applicable_adapters(facts, "testing", allow_project_executables=True)
+        if tool.name == "terraform-test"
+    )
+    assert adapter.args == ["-chdir=terraform", "test", "-no-color"]
 
 
 def test_lockfile_only_project_is_supply_chain_applicable(tmp_path: Path) -> None:
@@ -171,6 +203,93 @@ def test_actionlint_and_zizmor_duplicate_preserves_both_sources(tmp_path: Path) 
     assert combined[0].sources == ["actionlint", "zizmor"]
     assert combined[0].priority == "P1"
     assert combined[0].file == ".github/workflows/unsafe.yml"
+
+
+def test_zizmor_basename_location_is_normalized_to_workflow_path(tmp_path: Path) -> None:
+    workflow = tmp_path / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text("name: CI\n")
+    payload = {
+        "runs": [
+            {
+                "results": [
+                    {
+                        "ruleId": "zizmor/unpinned-uses",
+                        "level": "error",
+                        "message": {"text": "unpinned action reference"},
+                        "locations": [
+                            {
+                                "physicalLocation": {
+                                    "artifactLocation": {"uri": "ci.yml"},
+                                    "region": {"startLine": 2},
+                                }
+                            }
+                        ],
+                    }
+                ]
+            }
+        ]
+    }
+    finding = _adapter("zizmor", parse_sarif).parse(
+        CommandResult([], 0, json.dumps(payload), ""), tmp_path
+    )[0]
+    assert finding.file == ".github/workflows/ci.yml"
+
+
+def test_equivalent_iac_scanner_rules_are_aggregated(tmp_path: Path) -> None:
+    checkov = ExternalToolAdapter("checkov", "iac", [], parse_checkov)
+    trivy = ExternalToolAdapter("trivy", "iac", [], parse_trivy)
+    checkov_finding = checkov.parse(
+        CommandResult(
+            [],
+            1,
+            json.dumps(
+                {
+                    "results": {
+                        "failed_checks": [
+                            {
+                                "check_id": "CKV_AWS_131",
+                                "check_name": "ALB should drop invalid headers",
+                                "file_path": "/main.tf",
+                                "file_line_range": [4, 10],
+                            }
+                        ]
+                    }
+                }
+            ),
+            "",
+        ),
+        tmp_path,
+    )[0]
+    trivy_finding = trivy.parse(
+        CommandResult(
+            [],
+            0,
+            json.dumps(
+                {
+                    "Results": [
+                        {
+                            "Target": "main.tf",
+                            "Misconfigurations": [
+                                {
+                                    "ID": "AWS-0052",
+                                    "Title": "Load balancers should drop invalid headers",
+                                    "Severity": "HIGH",
+                                    "CauseMetadata": {"StartLine": 9},
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            "",
+        ),
+        tmp_path,
+    )[0]
+    combined = deduplicate([checkov_finding, trivy_finding], ["iac"])
+    assert len(combined) == 1
+    assert combined[0].rule_id == "iac/aws/alb-drop-invalid-headers"
+    assert combined[0].sources == ["checkov", "trivy"]
 
 
 def test_lychee_json_error_map_preserves_location_and_url(tmp_path: Path) -> None:
@@ -328,6 +447,16 @@ def test_disabled_or_missing_tool_makes_result_partial(tmp_path: Path, monkeypat
     markdown = report_markdown(review(context))
     assert "No findings from completed checks; analysis is incomplete." in markdown
     assert "Incomplete tools" in markdown
+
+
+def test_model_only_blueprint_is_partial_when_model_is_disabled(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_text("value = 1\n")
+    context, _ = make_context(tmp_path, blueprints=["architecture"], model_mode="off")
+    result = review(context).results[0]
+    assert result.status == "partial"
+    assert result.notes == [
+        "model review disabled; no deterministic implementation covers this blueprint"
+    ]
 
 
 def test_generated_smoke_does_not_claim_unit_test_coverage(tmp_path: Path) -> None:

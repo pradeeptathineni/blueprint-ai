@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 import blueprint_ai.remediation as remediation_module
 from blueprint_ai import __version__
-from blueprint_ai.adapters.base import ExternalToolAdapter, parse_lines
+from blueprint_ai.adapters.base import ExternalToolAdapter, parse_lines, parse_terraform
 from blueprint_ai.adapters.registry import known_tools
 from blueprint_ai.benchmark import benchmark_repository
 from blueprint_ai.blueprints import BLUEPRINTS
@@ -206,6 +206,36 @@ def test_crashing_parser_degrades_to_tool_error(tmp_path: Path) -> None:
     assert status.outcome == "tool_error"
     assert findings == []
     assert error == "malformed tool output: RecursionError: hostile nesting"
+
+
+def test_missing_terraform_initialization_is_incomplete_not_a_finding(tmp_path: Path) -> None:
+    executable = tmp_path / "terraform"
+    payload = json.dumps(
+        {
+            "valid": False,
+            "diagnostics": [
+                {
+                    "severity": "error",
+                    "summary": "Module not installed",
+                    "detail": 'Run "terraform init" first.',
+                }
+            ],
+        }
+    )
+    executable.write_text(f"#!/bin/sh\nprintf '%s' '{payload}'\nexit 1\n")
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    adapter = ExternalToolAdapter(
+        "terraform",
+        "iac",
+        [],
+        parse_terraform,
+        executable=str(executable),
+        expected_codes={0, 1},
+    )
+    status, findings, error = adapter.run(tmp_path)
+    assert status.outcome == "tool_error"
+    assert findings == []
+    assert error and error.startswith("analysis prerequisite missing:")
 
 
 def test_offline_mode_skips_network_tools_and_model(tmp_path: Path) -> None:

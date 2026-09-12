@@ -488,6 +488,7 @@ def discover_project(
         for rel in rels
         if rel.startswith(("tests/", "test/", "spec/", "__tests__/"))
         or Path(rel).name.startswith("test_")
+        or rel.endswith(".tftest.hcl")
         or ".test." in rel
         or ".spec." in rel
     ]

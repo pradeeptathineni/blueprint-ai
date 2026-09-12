@@ -74,3 +74,12 @@ def test_javascript_cli_process_test_is_smoke_coverage(tmp_path: Path) -> None:
         "spawnSync(process.execPath, ['bin/demo.js', '--help'])\n"
     )
     assert "smoke" in discover_project(tmp_path).test_capabilities
+
+
+def test_discovers_native_terraform_tests_below_configuration_root(tmp_path: Path) -> None:
+    test = tmp_path / "terraform" / "tests" / "architecture.tftest.hcl"
+    test.parent.mkdir(parents=True)
+    test.write_text('run "architecture" { command = plan }\n')
+    facts = discover_project(tmp_path)
+    assert facts.tests == ["terraform/tests/architecture.tftest.hcl"]
+    assert facts.test_capabilities == ["unit"]

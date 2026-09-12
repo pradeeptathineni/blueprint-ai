@@ -347,6 +347,16 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
         tools, notes, missing, errors = _collect_tool_results(
             context, settings, facts, name, findings
         )
+        if (
+            definition.model_review
+            and context.model_mode == "off"
+            and not tools
+            and definition.check.__name__ == "no_builtin_checks"
+        ):
+            notes.append(
+                "model review disabled; no deterministic implementation covers this blueprint"
+            )
+            missing += 1
         model_metrics: dict[str, int | float | str | None] = {}
         if definition.model_review and context.model_mode != "off":
             model_metrics, model_missing, model_errors, model_calls = _run_model_review(
