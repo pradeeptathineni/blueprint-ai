@@ -28,7 +28,7 @@ scratch, dropped capabilities, no-new-privileges, private IPC, no inherited cred
 Docker socket or SSH agent. The only additional mounts are synthetic read-only account records
 for the container UID; host account databases are never mounted. Docker and Podman target bind submounts are excluded.
 
-Defaults: 120 seconds, 2 CPU quota, 1 GiB memory with no additional swap, 128 processes, 256 MiB
+Defaults: 120 seconds, 2 CPU quota, 1 GiB memory with no additional swap, 128 processes, 1 GiB
 scratch, 128 MiB maximum individual file, and 4 MB captured output per stdout/stderr stream. Evidence
 records the scratch and individual-file limits separately from workspace capacity. A read-only target
 has an enforced zero-byte writable-workspace limit. A trusted writable bind mount has no portable
@@ -45,8 +45,10 @@ in strict OCI generation. Trusted host generation retains the existing local ima
 Evolution also uses a writable disposable stage even when the operator selects trusted host
 execution. The native tool sees the staged tracked/unignored source, not the real worktree; only
 scope-checked verified results are published afterward. Existing ignored dependency directories are
-not copied. Migration caches are empty, external, and network-disabled, so dependency-bearing native
-verification must use vendored inputs or fail explicitly.
+not copied. A sealed dependency-acquisition stage may use explicitly authorized network access to
+fill private transaction paths; those paths persist through offline migration, verification, and
+replay, are never published, and are then removed. Pipelines without such a stage remain
+network-disabled and dependency-bearing verification fails explicitly when its graph is unavailable.
 
 ## Network
 

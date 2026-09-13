@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.9.0 — 2026-09-13
+
+- Add explicit, network-authorized dependency-acquisition stages whose outputs persist only inside
+  the disposable transaction; all following migration and verification stages run offline.
+- Complete the supported Rust lane with locked crates.io vendoring, a build-capable Rust 1.98.1
+  image, authoritative `cargo fmt`, compiler/test gates across features and targets, library-only
+  doctests, deterministic replay, and exact rollback.
+- Expand the supported .NET lane to one exact-package `Microsoft.NET.Sdk` or
+  `Microsoft.NET.Sdk.Web` project: acquire NuGet dependencies into private state, build offline in an
+  isolated writable copy, and reject floating, conditioned, central, or otherwise ambiguous graphs.
+- Make Go dependency-aware for root modules with an explicit language directive: acquire checksums,
+  vendor privately, then run `go fix` and tests offline; reject nested modules and implicit language
+  upgrades.
+- Run Next.js jscodeshift recipes serially, accept one existing or newly created root lockfile at the
+  manual boundary, and fail closed on unresolved unsafe-unwrapped request API markers.
+- Treat timeout, truncated output, and sandbox OOM evidence as execution failure even when a process
+  reports success; fingerprint leaf symlinks during read-only planning while retaining fail-closed
+  mutation checkpoints.
+
 ## 0.8.0 — 2026-09-12
 
 - Add one reusable ordered migration pipeline over sealed evolution steps, staged transactions,

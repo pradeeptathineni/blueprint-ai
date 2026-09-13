@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -65,6 +66,7 @@ class RuntimePipelineStage:
     operation: str = "command"
     operation_target: str | None = None
     tool: str | None = None
+    execution_network: Literal["none", "required"] = "none"
     preview_command: list[str] = field(default_factory=list)
     apply_command: list[str] = field(default_factory=list)
     verification: list[VerificationRequirement] = field(default_factory=list)
@@ -456,6 +458,138 @@ def _authoritative_tool(**values) -> AuthoritativeToolContract:
     return AuthoritativeToolContract.model_validate(values)
 
 
+def _go_owned_paths(root: Path, facts: ProjectFacts) -> list[str]:
+    manifests = _owned_manifests(facts, lambda path: Path(path).name == "go.mod")
+    if "go.mod" not in manifests or not _go_declares_language_version(root):
+        return []
+    nested_roots = {Path(path).parent.as_posix() for path in manifests if path != "go.mod"}
+    return sorted(
+        {
+            "go.mod",
+            "go.sum",
+            *(
+                path
+                for path, scope in facts.graph.file_scopes.items()
+                if path.endswith(".go")
+                and not any(path == item or path.startswith(item + "/") for item in nested_roots)
+                and scope not in {"fixture", "vendor", "remote-module", "generated"}
+            ),
+        }
+    )
+
+
+def _go_has_requirements(root: Path) -> bool:
+    try:
+        text = read_text_bounded(root / "go.mod", MAX_MANIFEST_BYTES, root=root)
+    except (OSError, ValueError):
+        return False
+    code = "\n".join(line.split("//", 1)[0] for line in text.splitlines())
+    return bool(re.search(r"(?m)^\s*require(?:\s|\()", code))
+
+
+def _go_declares_language_version(root: Path) -> bool:
+    try:
+        text = read_text_bounded(root / "go.mod", MAX_MANIFEST_BYTES, root=root)
+    except (OSError, ValueError):
+        return False
+    return bool(re.search(r"(?m)^\s*go\s+1\.\d+(?:\.\d+)?\s*(?://.*)?$", text))
+
+
+GO_TOOL = _authoritative_tool(
+    tool_id="go",
+    provider="Go toolchain",
+    host_executable="go",
+    container_executable="go",
+    tool_version=">=1.26,<2",
+    recipe="go fix with vendored module verification",
+    recipe_version="2",
+    authoritative_source="https://go.dev/blog/gofix",
+    tool_license="BSD-3-Clause",
+    recipe_license="BSD-3-Clause",
+    image="golang:1.26-bookworm",
+    network="acquisition-only",
+    allowed_destinations=["proxy.golang.org", "sum.golang.org"],
+    mounts=["ca"],
+    preview_supported=True,
+    expected_write_scopes=["go.sum", "**/*.go"],
+    timeout_seconds=600,
+    memory_mb=2048,
+)
+
+
+def _go_pipeline(
+    root: Path, facts: ProjectFacts, paths: list[str], _target: str
+) -> list[RuntimePipelineStage]:
+    packages = _go_packages([path for path in paths if path.endswith(".go")])
+    has_requirements = _go_has_requirements(root)
+    has_vendor = any(path.startswith("vendor/") for path in facts.graph.file_scopes)
+    stages: list[RuntimePipelineStage] = []
+    previous: str | None = None
+    if has_requirements and not has_vendor:
+        stages.append(
+            RuntimePipelineStage(
+                id="dependency-checksums",
+                kind="dependency-acquisition",
+                operation="go-module-checksums",
+                files=["go.sum"],
+                tool="go",
+                execution_network="required",
+                apply_command=["go", "mod", "download", "all"],
+                mutates=False,
+            )
+        )
+        previous = "dependency-checksums"
+    if has_requirements and not has_vendor:
+        stages.append(
+            RuntimePipelineStage(
+                id="dependency-vendor",
+                kind="dependency-acquisition",
+                operation="go-module-vendor",
+                files=[],
+                tool="go",
+                execution_network="required",
+                apply_command=["go", "mod", "vendor"],
+                depends_on=[previous] if previous else [],
+                ephemeral_paths=["vendor"],
+                mutates=False,
+            )
+        )
+        previous = "dependency-vendor"
+    module_arguments = ["-mod=vendor"] if has_requirements else []
+    stages.append(
+        RuntimePipelineStage(
+            id="go-fix",
+            kind="native-command",
+            operation="go-fix",
+            files=[path for path in paths if path.endswith(".go")],
+            tool="go",
+            apply_command=["go", "fix", *module_arguments, *packages],
+            depends_on=[previous] if previous else [],
+        )
+    )
+    stages.append(
+        RuntimePipelineStage(
+            id="go-test",
+            kind="postcondition",
+            operation="go-test",
+            files=paths,
+            tool="go",
+            mutates=False,
+            depends_on=["go-fix"],
+            verification=[
+                _verification(
+                    "go/native-fix",
+                    "unit",
+                    "The vendored Go package test suite passes offline",
+                    command=["go", "test", *module_arguments, "./..."],
+                    trust=True,
+                )
+            ],
+        )
+    )
+    return stages
+
+
 def _rust_owned_paths(root: Path, facts: ProjectFacts) -> list[str]:
     manifests = _owned_manifests(facts, lambda path: Path(path).name == "Cargo.toml")
     # A root Cargo invocation cannot verify an unrelated nested package. A workspace-aware
@@ -477,7 +611,12 @@ def _rust_owned_paths(root: Path, facts: ProjectFacts) -> list[str]:
             explicit_editions.add(edition)
     except (OSError, ValueError):
         return []
-    if len(explicit_editions) != 1 or not manifests or not (root / "Cargo.lock").is_file():
+    if (
+        len(explicit_editions) != 1
+        or not manifests
+        or not (root / "Cargo.lock").is_file()
+        or not _rust_dependencies_supported(root)
+    ):
         return []
     return sorted(
         relative
@@ -540,6 +679,84 @@ def _replace_rust_edition(root: Path, paths: list[str], target: str | None) -> d
     return changed
 
 
+def _rust_package_document(root: Path) -> dict:
+    document = tomllib.loads(read_text_bounded(root / "Cargo.toml", MAX_MANIFEST_BYTES, root=root))
+    return document if isinstance(document, dict) else {}
+
+
+def _rust_has_external_dependencies(root: Path) -> bool:
+    """Require acquisition for crates.io dependencies, never local path dependencies."""
+    try:
+        document = _rust_package_document(root)
+    except (OSError, ValueError):
+        return False
+    tables = [document]
+    targets = document.get("target", {})
+    if isinstance(targets, dict):
+        tables.extend(value for value in targets.values() if isinstance(value, dict))
+    for table in tables:
+        for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+            dependencies = table.get(name, {})
+            if not isinstance(dependencies, dict):
+                continue
+            for value in dependencies.values():
+                if isinstance(value, str) or (
+                    isinstance(value, dict) and not isinstance(value.get("path"), str)
+                ):
+                    return True
+    return False
+
+
+def _rust_dependencies_supported(root: Path) -> bool:
+    """Keep the supported acquisition lane within its declared crates.io boundary."""
+    try:
+        document = _rust_package_document(root)
+    except (OSError, ValueError):
+        return False
+    if "patch" in document or "replace" in document:
+        return False
+    tables = [document]
+    targets = document.get("target", {})
+    if isinstance(targets, dict):
+        tables.extend(value for value in targets.values() if isinstance(value, dict))
+    for table in tables:
+        for name in ("dependencies", "dev-dependencies", "build-dependencies"):
+            dependencies = table.get(name, {})
+            if not isinstance(dependencies, dict):
+                return False
+            for value in dependencies.values():
+                if not isinstance(value, (str, dict)):
+                    return False
+                if isinstance(value, dict) and any(
+                    key in value for key in ("git", "registry", "workspace")
+                ):
+                    return False
+    return True
+
+
+def _rust_has_library_target(root: Path) -> bool:
+    try:
+        document = _rust_package_document(root)
+    except (OSError, ValueError):
+        return False
+    if isinstance(document.get("lib"), dict):
+        return True
+    package = document.get("package", {})
+    return (
+        isinstance(package, dict)
+        and package.get("autolib", True) is not False
+        and (root / "src/lib.rs").is_file()
+    )
+
+
+_CARGO_VENDOR_ARGS = [
+    "--config",
+    'source.crates-io.replace-with="blueprint-vendored"',
+    "--config",
+    'source.blueprint-vendored.directory=".blueprint-state/dependencies/cargo"',
+]
+
+
 RUST_TOOL = _authoritative_tool(
     tool_id="cargo",
     provider="Rust toolchain",
@@ -547,19 +764,22 @@ RUST_TOOL = _authoritative_tool(
     container_executable="cargo",
     tool_version=">=1.85,<2",
     recipe="cargo fix --edition",
-    recipe_version="1",
+    recipe_version="2",
     authoritative_source=(
         "https://doc.rust-lang.org/stable/edition-guide/editions/"
         "transitioning-an-existing-project-to-a-new-edition.html"
     ),
     tool_license="MIT OR Apache-2.0",
     recipe_license="MIT OR Apache-2.0",
-    image="blueprint-tools/rust:1.98.1",
-    network="none",
+    image="blueprint-tools/rust:1.98.1-r2",
+    network="acquisition-only",
+    allowed_destinations=["index.crates.io", "static.crates.io"],
+    mounts=["ca"],
     preview_supported=False,
-    expected_write_scopes=["Cargo.toml", "Cargo.lock", "**/*.rs"],
+    expected_write_scopes=["Cargo.toml", "**/*.rs"],
     timeout_seconds=600,
     memory_mb=2048,
+    scratch_mb=1024,
 )
 
 
@@ -580,6 +800,28 @@ def _rust_pipeline(
     manifests = [path for path in paths if Path(path).name == "Cargo.toml"]
     stages: list[RuntimePipelineStage] = []
     previous: str | None = None
+    uses_vendor = _rust_has_external_dependencies(root)
+    if uses_vendor:
+        stages.append(
+            RuntimePipelineStage(
+                id="dependency-acquisition",
+                kind="dependency-acquisition",
+                operation="cargo-vendor",
+                files=[],
+                tool="cargo",
+                execution_network="required",
+                apply_command=[
+                    "cargo",
+                    "vendor",
+                    "--locked",
+                    "--versioned-dirs",
+                    ".blueprint-state/dependencies/cargo",
+                ],
+                ephemeral_paths=[".blueprint-state"],
+                mutates=False,
+            )
+        )
+        previous = "dependency-acquisition"
     for edition in current_values:
         fix_id = f"cargo-fix-{edition}"
         stages.append(
@@ -588,10 +830,11 @@ def _rust_pipeline(
                 kind="native-command",
                 operation=fix_id,
                 operation_target=edition,
-                files=paths,
+                files=[path for path in paths if path.endswith(".rs")],
                 tool="cargo",
                 apply_command=[
                     "cargo",
+                    *(_CARGO_VENDOR_ARGS if uses_vendor else []),
                     "fix",
                     "--edition",
                     "--locked",
@@ -614,7 +857,6 @@ def _rust_pipeline(
                 operation_target=edition,
                 files=manifests,
                 depends_on=[fix_id],
-                rediscover=True,
                 postconditions=[
                     _postcondition(
                         f"rust/edition-{edition}",
@@ -627,7 +869,90 @@ def _rust_pipeline(
                 ],
             )
         )
+        format_id = f"cargo-fmt-{edition}"
+        stages.append(
+            RuntimePipelineStage(
+                id=format_id,
+                kind="native-command",
+                operation=format_id,
+                operation_target=edition,
+                files=[path for path in paths if path.endswith(".rs")],
+                tool="cargo",
+                apply_command=[
+                    "cargo",
+                    *(_CARGO_VENDOR_ARGS if uses_vendor else []),
+                    "fmt",
+                    "--all",
+                ],
+                depends_on=[manifest_id],
+                rediscover=True,
+            )
+        )
         verify_id = f"verify-{edition}"
+        verification = [
+            _verification(
+                f"rust/edition-{edition}",
+                "format",
+                "rustfmt accepts all workspace targets",
+                command=[
+                    "cargo",
+                    *(_CARGO_VENDOR_ARGS if uses_vendor else []),
+                    "fmt",
+                    "--all",
+                    "--",
+                    "--check",
+                ],
+                trust=True,
+            ),
+            _verification(
+                f"rust/edition-{edition}",
+                "compiler",
+                "Cargo checks all features and targets offline",
+                command=[
+                    "cargo",
+                    *(_CARGO_VENDOR_ARGS if uses_vendor else []),
+                    "check",
+                    "--locked",
+                    "--offline",
+                    "--all-features",
+                    "--all-targets",
+                ],
+                trust=True,
+            ),
+            _verification(
+                f"rust/edition-{edition}",
+                "test",
+                "Cargo tests all features and targets offline",
+                command=[
+                    "cargo",
+                    *(_CARGO_VENDOR_ARGS if uses_vendor else []),
+                    "test",
+                    "--locked",
+                    "--offline",
+                    "--all-features",
+                    "--all-targets",
+                ],
+                trust=True,
+            ),
+        ]
+        if _rust_has_library_target(root):
+            verification.append(
+                _verification(
+                    f"rust/edition-{edition}",
+                    "doctest",
+                    "Cargo doctests pass for all library features offline",
+                    command=[
+                        "cargo",
+                        *(_CARGO_VENDOR_ARGS if uses_vendor else []),
+                        "test",
+                        "--doc",
+                        "--locked",
+                        "--offline",
+                        "--all-features",
+                    ],
+                    trust=True,
+                )
+            )
         stages.append(
             RuntimePipelineStage(
                 id=verify_id,
@@ -636,58 +961,8 @@ def _rust_pipeline(
                 files=paths,
                 tool="cargo",
                 mutates=False,
-                depends_on=[manifest_id],
-                verification=[
-                    _verification(
-                        f"rust/edition-{edition}",
-                        "format",
-                        "rustfmt accepts all workspace targets",
-                        command=["cargo", "fmt", "--all", "--", "--check"],
-                        trust=True,
-                    ),
-                    _verification(
-                        f"rust/edition-{edition}",
-                        "compiler",
-                        "Cargo checks all features and targets offline",
-                        command=[
-                            "cargo",
-                            "check",
-                            "--locked",
-                            "--offline",
-                            "--all-features",
-                            "--all-targets",
-                        ],
-                        trust=True,
-                    ),
-                    _verification(
-                        f"rust/edition-{edition}",
-                        "test",
-                        "Cargo tests all features and targets offline",
-                        command=[
-                            "cargo",
-                            "test",
-                            "--locked",
-                            "--offline",
-                            "--all-features",
-                            "--all-targets",
-                        ],
-                        trust=True,
-                    ),
-                    _verification(
-                        f"rust/edition-{edition}",
-                        "doctest",
-                        "Cargo doctests pass for all features offline",
-                        command=[
-                            "cargo",
-                            "test",
-                            "--doc",
-                            "--locked",
-                            "--offline",
-                            "--all-features",
-                        ],
-                        trust=True,
-                    ),
-                ],
+                depends_on=[format_id],
+                verification=verification,
                 postconditions=[],
             )
         )
@@ -695,7 +970,7 @@ def _rust_pipeline(
     return stages
 
 
-def _simple_dotnet_project(root: Path, facts: ProjectFacts) -> tuple[str, str] | None:
+def _simple_dotnet_project(root: Path, facts: ProjectFacts) -> tuple[str, str, bool] | None:
     projects = _owned_manifests(facts, lambda path: path.endswith(".csproj"))
     if len(projects) != 1:
         return None
@@ -704,7 +979,7 @@ def _simple_dotnet_project(root: Path, facts: ProjectFacts) -> tuple[str, str] |
         document = ET.fromstring(read_text_bounded(root / relative, MAX_MANIFEST_BYTES, root=root))
     except (ET.ParseError, OSError, ValueError):
         return None
-    if document.attrib.get("Sdk") != "Microsoft.NET.Sdk":
+    if document.attrib.get("Sdk") not in {"Microsoft.NET.Sdk", "Microsoft.NET.Sdk.Web"}:
         return None
     tfms = [
         element
@@ -723,11 +998,46 @@ def _simple_dotnet_project(root: Path, facts: ProjectFacts) -> tuple[str, str] |
             for element in document.iter()
             if element.tag.rsplit("}", 1)[-1] == "PropertyGroup"
         )
-        or any(element.tag.rsplit("}", 1)[-1] == "PackageReference" for element in document.iter())
     ):
         return None
+    package_references = [
+        element
+        for element in document.iter()
+        if element.tag.rsplit("}", 1)[-1] == "PackageReference"
+    ]
+    if package_references and any("Condition" in element.attrib for element in document.iter()):
+        return None
+    exact_package = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?")
+    for reference in package_references:
+        if not isinstance(reference.attrib.get("Include"), str) or any(
+            name not in {"Include", "Version"} for name in reference.attrib
+        ):
+            return None
+        attribute_version = reference.attrib.get("Version")
+        child_versions = [child for child in reference if child.tag.rsplit("}", 1)[-1] == "Version"]
+        if attribute_version is not None and child_versions:
+            return None
+        version = attribute_version
+        if child_versions:
+            if len(child_versions) != 1 or child_versions[0].attrib:
+                return None
+            version = child_versions[0].text
+        if not isinstance(version, str) or not exact_package.fullmatch(version.strip()):
+            return None
+    if package_references:
+        project_parent = (root / relative).parent
+        while True:
+            if (project_parent / "Directory.Packages.props").exists():
+                return None
+            if project_parent == root:
+                break
+            project_parent = project_parent.parent
     current = tfms[0].text.strip().lower()
-    return (relative, current) if re.fullmatch(r"net\d+\.0", current) else None
+    return (
+        (relative, current, bool(package_references))
+        if re.fullmatch(r"net\d+\.0", current)
+        else None
+    )
 
 
 def _simple_dotnet_paths(root: Path, facts: ProjectFacts) -> list[str]:
@@ -765,7 +1075,7 @@ DOTNET_TOOL = _authoritative_tool(
     container_executable="dotnet",
     tool_version=">=10,<11",
     recipe="SDK target framework verification",
-    recipe_version="1",
+    recipe_version="2",
     authoritative_source="https://learn.microsoft.com/en-us/dotnet/core/porting/",
     tool_license="MIT",
     recipe_license="MIT",
@@ -774,7 +1084,9 @@ DOTNET_TOOL = _authoritative_tool(
         "sha256:2fa828c68761b1b8c23d7662dc134421b9d3b59fe1425fdbc80804e390cdb24d"
     ),
     image_digest="sha256:2fa828c68761b1b8c23d7662dc134421b9d3b59fe1425fdbc80804e390cdb24d",
-    network="none",
+    network="acquisition-only",
+    allowed_destinations=["api.nuget.org"],
+    mounts=["ca"],
     preview_supported=True,
     expected_write_scopes=["*.csproj"],
     timeout_seconds=600,
@@ -783,10 +1095,19 @@ DOTNET_TOOL = _authoritative_tool(
 
 
 def _dotnet_pipeline(
-    _root: Path, _facts: ProjectFacts, paths: list[str], target: str
+    root: Path, facts: ProjectFacts, paths: list[str], target: str
 ) -> list[RuntimePipelineStage]:
     project = paths[0]
-    return [
+    selected = _simple_dotnet_project(root, facts)
+    if selected is None:
+        return []
+    has_packages = selected[2]
+    project_ephemeral = (Path(project).parent / ".blueprint-state").as_posix()
+    if project_ephemeral.startswith("./"):
+        project_ephemeral = project_ephemeral[2:]
+    ephemeral = sorted({".blueprint-state", project_ephemeral})
+    intermediate = ".blueprint-state/dependencies/dotnet"
+    stages = [
         RuntimePipelineStage(
             id="target-framework",
             kind="builtin-edit",
@@ -804,33 +1125,79 @@ def _dotnet_pipeline(
                 )
             ],
         ),
+    ]
+    if has_packages:
+        stages.append(
+            RuntimePipelineStage(
+                id="dependency-restore",
+                kind="dependency-acquisition",
+                operation="dotnet-restore",
+                files=[],
+                tool="dotnet",
+                execution_network="required",
+                apply_command=[
+                    "dotnet",
+                    "restore",
+                    project,
+                    "--packages",
+                    f"{intermediate}/nuget",
+                    "--source",
+                    "https://api.nuget.org/v3/index.json",
+                    f"-p:BaseIntermediateOutputPath={intermediate}/obj/",
+                    "-p:NuGetAudit=false",
+                ],
+                depends_on=["target-framework"],
+                ephemeral_paths=ephemeral,
+                mutates=False,
+            )
+        )
+    stages.append(
         RuntimePipelineStage(
             id="restore-build",
             kind="postcondition",
             files=paths,
             tool="dotnet",
             mutates=False,
-            depends_on=["target-framework"],
+            depends_on=["dependency-restore" if has_packages else "target-framework"],
             verification=[
                 _verification(
                     "dotnet/sdk-target",
                     "restore-build",
-                    "The selected SDK restores offline and builds the requested target",
-                    command=[
-                        "dotnet",
-                        "build",
-                        project,
-                        "-p:RestoreSources=/tmp/blueprint-empty-nuget",
-                        "-p:RestoreIgnoreFailedSources=true",
-                        "-p:BaseIntermediateOutputPath=/tmp/blueprint-dotnet/obj/",
-                        "-p:OutputPath=/tmp/blueprint-dotnet/bin/",
-                        "-p:NuGetAudit=false",
-                    ],
+                    (
+                        "The selected SDK builds the acquired exact package graph offline"
+                        if has_packages
+                        else "The selected SDK restores offline and builds the requested target"
+                    ),
+                    command=(
+                        [
+                            "dotnet",
+                            "build",
+                            project,
+                            "--no-restore",
+                            f"-p:RestorePackagesPath={intermediate}/nuget",
+                            f"-p:BaseIntermediateOutputPath={intermediate}/obj/",
+                            f"-p:OutputPath={intermediate}/bin/",
+                            "-p:NuGetAudit=false",
+                        ]
+                        if has_packages
+                        else [
+                            "dotnet",
+                            "build",
+                            project,
+                            "-p:RestoreSources=/tmp/blueprint-empty-nuget",
+                            "-p:RestoreIgnoreFailedSources=true",
+                            "-p:BaseIntermediateOutputPath=/tmp/blueprint-dotnet/obj/",
+                            "-p:OutputPath=/tmp/blueprint-dotnet/bin/",
+                            "-p:NuGetAudit=false",
+                        ]
+                    ),
                     trust=True,
+                    isolated=has_packages,
                 ),
             ],
         ),
-    ]
+    )
+    return stages
 
 
 def _python_legacy_build_paths(root: Path, facts: ProjectFacts) -> list[str]:
@@ -1374,6 +1741,16 @@ def _next_font_residual(text: str) -> bool:
     return False
 
 
+def _next_unsafe_unwrapped_residual(text: str) -> bool:
+    """Detect official async-request escape-hatch types outside comments and strings."""
+    return bool(
+        re.search(
+            r"\bUnsafeUnwrapped(?:Cookies|Headers|DraftMode)\b",
+            _javascript_code_mask(text),
+        )
+    )
+
+
 def _next_known_residuals(root: Path, facts: ProjectFacts, target: str) -> bool:
     package = _root_package_json(root, facts)
     scripts = package[1].get("scripts", {}) if package is not None else None
@@ -1401,6 +1778,8 @@ def _next_known_residuals(root: Path, facts: ProjectFacts, target: str) -> bool:
         except (OSError, ValueError):
             return True
         if re.search(r"@next-codemod-error\b", text):
+            return True
+        if _next_unsafe_unwrapped_residual(text):
             return True
         if _next_font_residual(text):
             return True
@@ -1527,6 +1906,18 @@ def _next_migration_paths(root: Path, facts: ProjectFacts) -> list[str]:
     package = _root_package_json(root, facts)
     dependencies = package[1].get("dependencies", {}) if package is not None else {}
     development = package[1].get("devDependencies", {}) if package is not None else {}
+    lockfiles = [
+        name
+        for name in (
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            "bun.lock",
+            "bun.lockb",
+        )
+        if (root / name).is_file()
+    ]
     if (
         not current
         or not react
@@ -1551,23 +1942,13 @@ def _next_migration_paths(root: Path, facts: ProjectFacts) -> list[str]:
         or _owned_manifests(facts, lambda path: Path(path).name == "package.json")
         != ["package.json"]
         or not ((root / "app").is_dir() or (root / "src/app").is_dir())
-        or any(
-            (root / name).is_file()
-            for name in (
-                "package-lock.json",
-                "npm-shrinkwrap.json",
-                "yarn.lock",
-                "pnpm-lock.yaml",
-                "bun.lock",
-                "bun.lockb",
-            )
-        )
+        or len(lockfiles) > 1
     ):
         return []
     return sorted(
         {
             "package.json",
-            "package-lock.json",
+            *(lockfiles or ["package-lock.json"]),
             "eslint.config.mjs",
             "eslint.config.mts",
             "eslint.config.cts",
@@ -1686,7 +2067,7 @@ NEXT_CODEMOD_TOOL = _authoritative_tool(
         "aiWrNifEuvDfHukDZ/UgKyw=="
     ),
     recipe="reviewed major-boundary transforms",
-    recipe_version="16.3.5",
+    recipe_version="2",
     authoritative_source="https://nextjs.org/docs/app/guides/upgrading/codemods",
     tool_license="MIT",
     recipe_license="MIT",
@@ -1694,11 +2075,10 @@ NEXT_CODEMOD_TOOL = _authoritative_tool(
     network="acquisition-only",
     allowed_destinations=["registry.npmjs.org"],
     mounts=["cache", "config", "ca"],
-    noninteractive_flags=["CI=1", "--force"],
+    noninteractive_flags=["CI=1", "--run-in-band"],
     preview_supported=True,
     expected_write_scopes=[
         "package.json",
-        "package-lock.json",
         "eslint.config.mjs",
         "eslint.config.mts",
         "eslint.config.cts",
@@ -1916,7 +2296,21 @@ def _next_pipeline(
         )
         for transform_name in transforms:
             identifier = f"{transform_name}-{boundary.replace('.', '-')}"
-            command = ["codemod", transform_name, ".", "--force"]
+            command = [
+                "node",
+                (
+                    "/usr/local/lib/node_modules/@next/codemod/node_modules/"
+                    "jscodeshift/bin/jscodeshift.js"
+                ),
+                "--run-in-band",
+                "--parser=tsx",
+                "--ignore-pattern=**/node_modules/**",
+                "--ignore-pattern=**/.next/**",
+                "--extensions=tsx,ts,jsx,js",
+                "--transform",
+                f"/usr/local/lib/node_modules/@next/codemod/transforms/{transform_name}.js",
+                ".",
+            ]
             if transform_name == "built-in-next-font":
                 command = [
                     "node",
@@ -1928,6 +2322,7 @@ def _next_pipeline(
                     "--ignore-pattern=**/node_modules/**",
                     "--ignore-pattern=**/.next/**",
                     "--extensions=tsx,ts,jsx,js",
+                    "--run-in-band",
                     "--transform",
                     ("/usr/local/lib/node_modules/@next/codemod/transforms/built-in-next-font.js"),
                     ".",
@@ -1995,6 +2390,14 @@ def _next_pipeline(
                 "The authoritative codemod emitted no unresolved manual-error markers",
                 paths=source_paths,
                 pattern=r"@next-codemod-error\b",
+            ),
+            _postcondition(
+                f"next/no-unsafe-unwrapped-{boundary}",
+                "no-manual-markers",
+                "The authoritative codemod emitted no async-request escape-hatch types",
+                paths=source_paths,
+                pattern=r"\bUnsafeUnwrapped(?:Cookies|Headers|DraftMode)\b",
+                selector="javascript-code",
             ),
         ]
         if Version(boundary).major >= 16 and (
@@ -2158,7 +2561,6 @@ def _spec(**values) -> TransformationSpec:
 
 def _runtime_catalog() -> list[RuntimeTransformation]:
     python_scopes = {"runtime", "development", "test"}
-    go_scopes = {"runtime", "development", "test"}
     return [
         RuntimeTransformation(
             spec=_spec(
@@ -2242,16 +2644,18 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 provider="Go toolchain",
                 tool="go",
                 tool_version=">=1.26,<2",
-                recipe_version="1",
+                tool_contract=GO_TOOL,
+                recipe_version="2",
                 authoritative_source="https://go.dev/blog/gofix",
                 license="BSD-3-Clause",
                 sandbox_requirements=(
-                    "explicit trusted writable sandbox or trusted host; no network by default"
+                    "explicit trusted writable sandbox or trusted host; dependency acquisition "
+                    "requires explicit network authorization and later execution is offline"
                 ),
                 preconditions=[
                     "Git repository is clean or dirty state is explicitly accepted",
                     "Go 1.26 or newer is available",
-                    "module is dependency-free or dependencies are vendored for the empty cache",
+                    "root module has an explicit Go language version and source ownership",
                 ],
                 conflicts=["unexpected writes outside owned Go source abort the transaction"],
                 expected_paths=["**/*.go"],
@@ -2278,19 +2682,12 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 implementation="command",
                 decision="wrap",
                 limitations=[
-                    "Build-tagged configurations need separate runs; the isolated module cache "
-                    "starts empty"
+                    "Build-tagged configurations need separate runs; nested modules are excluded"
                 ],
                 reviewed="2026-09-12",
             ),
-            detect=lambda root, facts: (
-                _source_files(".go", scopes=go_scopes)(root, facts)
-                if (root / "go.mod").is_file()
-                else []
-            ),
-            preview_command=lambda _root, paths: ["go", "fix", "-diff", *_go_packages(paths)],
-            apply_command=lambda _root, paths: ["go", "fix", *_go_packages(paths)],
-            verify_command=lambda _root, paths: ["go", "fix", "-diff", *_go_packages(paths)],
+            detect=_go_owned_paths,
+            pipeline=_go_pipeline,
         ),
         RuntimeTransformation(
             spec=_spec(
@@ -2456,16 +2853,17 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 authoritative_source=RUST_TOOL.authoritative_source,
                 license="MIT OR Apache-2.0",
                 sandbox_requirements=(
-                    "trusted writable host or pinned Rust OCI image; network denied"
+                    "trusted writable host or pinned Rust OCI image; dependency acquisition "
+                    "requires explicit network authorization and all later stages are offline"
                 ),
                 preconditions=[
                     "exact current edition and explicit later target",
                     "Cargo.lock is present for locked offline execution",
-                    "dependencies are cached, vendored, or absent",
+                    "crates.io dependencies are acquired privately or dependencies are absent",
                 ],
                 conflicts=[
-                    "nested packages, workspaces, mixed editions, inherited editions, and "
-                    "inactive cfg states are rejected"
+                    "nested packages, workspaces, mixed or inherited editions, Git/custom-registry "
+                    "dependencies, and inactive cfg states are rejected"
                 ],
                 expected_paths=["Cargo.toml", "Cargo.lock", "**/*.rs"],
                 dry_run=True,
@@ -2482,7 +2880,7 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                     "Inactive cfg combinations outside all features/targets may need separate "
                     "checks",
                 ],
-                reviewed="2026-09-12",
+                reviewed="2026-09-13",
             ),
             detect=_rust_owned_paths,
             pipeline=_rust_pipeline,
@@ -2493,11 +2891,14 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
             spec=_spec(
                 id="dotnet/sdk-target",
                 category="runtime-modernization",
-                current_state="one dependency-free Microsoft.NET.Sdk project below net10.0",
+                current_state=(
+                    "one exact-package Microsoft.NET.Sdk or Microsoft.NET.Sdk.Web project below "
+                    "net10.0"
+                ),
                 desired_state="explicit net10.0 target restored and built with .NET SDK 10",
                 applicability=[
-                    "one exact owned Microsoft.NET.Sdk .csproj",
-                    "one literal TargetFramework and no PackageReference",
+                    "one exact owned Microsoft.NET.Sdk or Microsoft.NET.Sdk.Web .csproj",
+                    "one literal TargetFramework and exact PackageReference versions",
                 ],
                 lifecycle=["active-application", "library-framework", "unknown"],
                 provider="Blueprint AI XML scalar edit plus Microsoft .NET SDK",
@@ -2506,16 +2907,17 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 allowed_targets=["net10.0"],
                 target_required=True,
                 tool_contract=DOTNET_TOOL,
-                recipe_version="1",
+                recipe_version="2",
                 authoritative_source="https://learn.microsoft.com/en-us/dotnet/core/porting/",
                 license="MIT",
                 sandbox_requirements=(
-                    "trusted writable host or pinned SDK OCI image; network denied"
+                    "trusted writable host or pinned SDK OCI image; exact package acquisition "
+                    "requires explicit network authorization and the build is offline"
                 ),
                 preconditions=["explicit net10.0 target", "simple SDK-style project evidence"],
                 conflicts=[
-                    "multi-target, inherited, conditional, package-dependent, Web SDK, "
-                    "and .NET Framework projects"
+                    "multi-target, inherited, floating, conditional, centrally managed, and .NET "
+                    "Framework projects"
                 ],
                 expected_paths=["*.csproj"],
                 dry_run=True,
@@ -2526,10 +2928,10 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 implementation="command",
                 decision="adapt",
                 limitations=[
-                    "Dependency/API modernization and complex application models remain "
-                    "explicit residuals"
+                    "Package/API modernization and complex application models remain explicit "
+                    "residuals"
                 ],
-                reviewed="2026-09-12",
+                reviewed="2026-09-13",
             ),
             detect=_simple_dotnet_paths,
             pipeline=_dotnet_pipeline,
@@ -2651,11 +3053,12 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
             spec=_spec(
                 id="next/official-upgrade-codemod",
                 category="framework-modernization",
-                current_state="exact Next.js 14 or 15 App Router project without a lockfile",
+                current_state="exact Next.js 14 or 15 root App Router project",
                 desired_state="explicit supported Next.js target reached major by major",
                 applicability=[
                     "root package.json with an exact Next.js version",
-                    "one package component with owned App Router source and no lockfile",
+                    "one package component with owned App Router source and at most one root "
+                    "lockfile",
                 ],
                 lifecycle=["active-application", "unknown"],
                 provider="Vercel @next/codemod",
@@ -2664,7 +3067,7 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 allowed_targets=["15.5.25", "16.3.5"],
                 target_required=True,
                 tool_contract=NEXT_CODEMOD_TOOL,
-                recipe_version="16.3.5",
+                recipe_version="2",
                 authoritative_source=NEXT_CODEMOD_TOOL.authoritative_source,
                 license="MIT",
                 network_required=False,
@@ -2681,6 +3084,11 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                 expected_paths=[
                     "package.json",
                     "package-lock.json",
+                    "npm-shrinkwrap.json",
+                    "pnpm-lock.yaml",
+                    "yarn.lock",
+                    "bun.lock",
+                    "bun.lockb",
                     "eslint.config.mjs",
                     "eslint.config.mts",
                     "eslint.config.cts",
@@ -2700,8 +3108,10 @@ def _runtime_catalog() -> list[RuntimeTransformation]:
                     "Nested and workspace package components are rejected because the pinned "
                     "codemod command targets the repository root",
                     "Only reviewed 14→15 and 15→16 boundaries are represented",
+                    "Exactly one existing or newly generated root lockfile is accepted only with "
+                    "operator-supplied install and project verification evidence",
                 ],
-                reviewed="2026-09-12",
+                reviewed="2026-09-13",
             ),
             detect=_next_migration_paths,
             pipeline=_next_pipeline,

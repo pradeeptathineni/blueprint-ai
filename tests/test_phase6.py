@@ -195,7 +195,7 @@ def test_rejected_container_does_not_claim_isolation(tmp_path: Path, monkeypatch
 
 
 def test_tool_registry_covers_all_registered_adapters() -> None:
-    assert len(TOOLS) == 56
+    assert len(TOOLS) == 57
     assert {tool.name for tool in known_tools()} <= TOOLS.keys()
     for spec in TOOLS.values():
         assert (

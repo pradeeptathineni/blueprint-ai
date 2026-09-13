@@ -125,7 +125,14 @@ def _git_paths(root: Path) -> list[str]:
         value = raw.decode("utf-8", errors="strict")
         if value.startswith((".blueprint-ai/", ".blueprint-state/")):
             continue
-        _safe_path(root, value)
+        path = Path(value)
+        if not value or path.is_absolute() or ".." in path.parts:
+            raise ValueError(f"unsafe evolution path: {value!r}")
+        current = root.resolve()
+        for part in path.parts[:-1]:
+            current /= part
+            if current.is_symlink():
+                raise ValueError(f"evolution path crosses a symbolic link: {value}")
         values.append(value)
     if len(values) > 250_000:
         raise ValueError("project exceeds the 250000-file evolution limit")
@@ -145,10 +152,19 @@ def _hash_file(path: Path) -> tuple[str, int]:
 def _inventory(root: Path) -> dict[str, FileRecord]:
     records = {}
     for relative in _git_paths(root):
-        target = _safe_path(root, relative)
+        target = root / relative
         try:
             info = target.lstat()
         except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            link = os.readlink(target).encode("utf-8", errors="surrogateescape")
+            records[relative] = FileRecord(
+                "symlink",
+                hashlib.sha256(link).hexdigest(),
+                len(link),
+                stat.S_IMODE(info.st_mode),
+            )
             continue
         if not stat.S_ISREG(info.st_mode):
             raise ValueError(f"evolution inventory rejects non-regular project path: {relative}")
@@ -708,8 +724,12 @@ def plan_evolution(
             desired.append(spec.desired_state)
             risks.extend(f"{recipe_id}: {item}" for item in spec.conflicts)
             continue
-        if runtime.pipeline is not None and desired_target is not None and paths:
-            stages = runtime.pipeline(root, facts, paths, desired_target)
+        if (
+            runtime.pipeline is not None
+            and (desired_target is not None or not spec.target_required)
+            and paths
+        ):
+            stages = runtime.pipeline(root, facts, paths, desired_target or "")
             if not stages:
                 stage_id = f"step-{len(steps) + 1:02d}"
                 steps.append(
@@ -776,6 +796,7 @@ def plan_evolution(
                             verification=stage.verification,
                             postconditions=stage.postconditions,
                             tool_contract=spec.tool_contract,
+                            execution_network=stage.execution_network,
                             image_identities=sealed_images(stage.tool),
                             ephemeral_paths=stage.ephemeral_paths,
                             manual_completion_paths=stage.manual_completion_paths,
@@ -788,7 +809,11 @@ def plan_evolution(
                     )
                     if status in {"manual", "deferred", "blocked", "failed-precondition"}:
                         manual.extend(f"{recipe_id}: {item}" for item in stage.limitations)
-            desired.append(f"{spec.desired_state}: {desired_target}")
+            desired.append(
+                f"{spec.desired_state}: {desired_target}"
+                if desired_target is not None
+                else spec.desired_state
+            )
             risks.extend(f"{recipe_id}: {item}" for item in spec.conflicts)
             continue
         if spec.implementation == "manual":
@@ -1029,8 +1054,9 @@ def _execution_env(directory: Path) -> dict[str, str]:
             "HOME": str(directory),
             "XDG_CACHE_HOME": str(caches),
             "RUFF_CACHE_DIR": str(caches / "ruff"),
+            "GOPATH": str(caches / "go"),
             "GOCACHE": str(caches / "go-build"),
-            "GOMODCACHE": str(caches / "go-mod"),
+            "GOMODCACHE": str(caches / "go" / "pkg" / "mod"),
             "GOPROXY": "off",
             "GOSUMDB": "off",
             "GOTOOLCHAIN": "local",
@@ -1066,9 +1092,16 @@ def _run(
     execution_command[0] = _tool_command(
         tool_root or root, tool, policy, requested=execution_command[0]
     )
+    run_environment = dict(environment)
+    if policy.network == "unrestricted":
+        if tool == "cargo":
+            run_environment["CARGO_NET_OFFLINE"] = "false"
+        elif tool == "go":
+            run_environment["GOPROXY"] = "https://proxy.golang.org"
+            run_environment["GOSUMDB"] = "sum.golang.org"
     started = time.monotonic()
     try:
-        execution = execute(execution_command, root, policy, tool=tool, host_env=environment)
+        execution = execute(execution_command, root, policy, tool=tool, host_env=run_environment)
     except (OSError, ValueError, SandboxUnavailable) as exc:
         return (
             EvolutionVerification(
@@ -1091,6 +1124,7 @@ def _run(
         "HOME",
         "XDG_CACHE_HOME",
         "RUFF_CACHE_DIR",
+        "GOPATH",
         "GOCACHE",
         "GOMODCACHE",
         "CARGO_HOME",
@@ -1102,13 +1136,23 @@ def _run(
         if value := environment.get(key):
             output = output.replace(value, "<isolated-cache>")
     accepted = success_exit_codes or {0}
-    okay = result.returncode in accepted and not result.timed_out and not result.output_truncated
+    anomalies = []
+    if execution.evidence.oom_killed:
+        anomalies.append("sandbox was OOM-killed")
+    if result.timed_out:
+        anomalies.append("execution timed out")
+    if result.output_truncated:
+        anomalies.append("bounded output was truncated")
+    okay = result.returncode in accepted and not anomalies
+    detail = output[-1000:] or f"exit {result.returncode}"
+    if anomalies:
+        detail = "; ".join(anomalies) + "; " + detail
     return (
         EvolutionVerification(
             id=f"{tool}/execution",
             status="passed" if okay else "failed",
             command=execution_command,
-            detail=(output[-1000:] or f"exit {result.returncode}"),
+            detail=detail,
             duration_ms=round((time.monotonic() - started) * 1000),
             sandbox=execution.evidence.model_dump(mode="json"),
         ),
@@ -1151,6 +1195,11 @@ def _verify_version(
 def _step_policy(step: EvolutionStep, policy: SandboxPolicy, *, writable: bool) -> SandboxPolicy:
     """Apply the stricter operator/contract resource limit to one stage."""
     updates: dict[str, object] = {"writable": writable}
+    if step.execution_network == "required" and (
+        step.tool_contract is None
+        or step.tool_contract.network not in {"acquisition-only", "required"}
+    ):
+        raise ValueError("stage requests network outside its authoritative tool contract")
     if step.tool_contract is not None:
         updates.update(
             {
@@ -1164,7 +1213,10 @@ def _step_policy(step: EvolutionStep, policy: SandboxPolicy, *, writable: bool) 
             }
         )
         updates["timeout"] = min(policy.timeout, step.tool_contract.timeout_seconds)
-        if step.tool_contract.network in {"none", "acquisition-only"}:
+        if step.execution_network != "required" and step.tool_contract.network in {
+            "none",
+            "acquisition-only",
+        }:
             updates["network"] = "none"
             updates["authorize_network"] = False
         if policy.backend != "host" and step.tool_contract.image:
@@ -1753,7 +1805,13 @@ def apply_evolution(
         contracts = [
             step.tool_contract for step in ready if step.tool and step.tool_contract is not None
         ]
-        if any(contract.network == "required" for contract in contracts):
+        if any(
+            step.execution_network == "required"
+            or step.tool_contract is not None
+            and step.tool_contract.network == "required"
+            for step in ready
+            if step.tool
+        ):
             if execution_policy.network != "unrestricted" or not execution_policy.authorize_network:
                 raise ValueError("this migration tool requires explicit network authorization")
         images = {contract.image for contract in contracts if contract.image}
@@ -1782,6 +1840,9 @@ def apply_evolution(
             workspace.mkdir()
             _checkpoint(root, before, workspace)
             environment = _execution_env(temporary_path)
+            transaction_ephemeral = sorted(
+                {path for step in ready for path in step.ephemeral_paths}
+            )
             published: set[str] = set()
             published_after: dict[str, FileRecord] = {}
             try:
@@ -1811,11 +1872,20 @@ def apply_evolution(
                     if step.tool and step.kind != "builtin-edit":
                         tool_key = (step.tool, step.tool_version or "")
                         if tool_key not in checked_tools:
+                            version_policy = _step_policy(step, execution_policy, writable=False)
+                            if (
+                                step.execution_network == "required"
+                                and step.tool_contract is not None
+                                and step.tool_contract.network == "acquisition-only"
+                            ):
+                                version_policy = version_policy.model_copy(
+                                    update={"network": "none", "authorize_network": False}
+                                )
                             version_check = _verify_version(
                                 workspace,
                                 step.tool,
                                 step.tool_version or "",
-                                _step_policy(step, execution_policy, writable=False),
+                                version_policy,
                                 environment,
                                 tool_root=root,
                                 executable=(
@@ -1877,7 +1947,11 @@ def apply_evolution(
                                 if relative in before:
                                     os.chmod(workspace / relative, before[relative].mode)
                                 recipe_by_path[relative] = step.recipe_id
-                    elif step.kind in {"native-command", "established-codemod"}:
+                    elif step.kind in {
+                        "dependency-acquisition",
+                        "native-command",
+                        "established-codemod",
+                    }:
                         if not step.tool:
                             raise ValueError(f"{step.recipe_id}: command stage has no tool")
                         if runtime.pipeline is not None:
@@ -1984,6 +2058,7 @@ def apply_evolution(
                                 in {"ruff": {1}, "go": {1}, "terraform": {3}}.get(step.tool, set())
                                 and not evidence.get("timed_out", False)
                                 and not evidence.get("output_truncated", False)
+                                and not evidence.get("oom_killed", False)
                             ):
                                 preview.status = "passed"
                             reports.append(preview)
@@ -2008,14 +2083,15 @@ def apply_evolution(
                                     recipe_by_path[relative] = step.recipe_id
                     elif step.kind != "postcondition":
                         raise ValueError(f"unsupported ready pipeline step kind: {step.kind}")
-                    for ephemeral in step.ephemeral_paths:
-                        target = _safe_path(workspace, ephemeral)
-                        if target.is_dir() and not target.is_symlink():
-                            shutil.rmtree(target)
-                        elif target.is_file():
-                            target.unlink()
                     current = _stage_inventory(workspace)
-                    unexpected = set(_changed(stage_before, current)) - set(step.files)
+                    unexpected = {
+                        path
+                        for path in set(_changed(stage_before, current)) - set(step.files)
+                        if not any(
+                            path == ephemeral or path.startswith(ephemeral.rstrip("/") + "/")
+                            for ephemeral in transaction_ephemeral
+                        )
+                    }
                     if unexpected:
                         raise RuntimeError(
                             "transformation crossed its planned scope: "
@@ -2123,6 +2199,12 @@ def apply_evolution(
                     environment,
                     reports,
                 )
+                for ephemeral in transaction_ephemeral:
+                    target = _safe_path(workspace, ephemeral)
+                    if target.is_dir() and not target.is_symlink():
+                        shutil.rmtree(target)
+                    elif target.is_file():
+                        target.unlink()
                 if dry_run:
                     staged_after = _stage_inventory(workspace)
                     for relative in _changed(before, staged_after):
@@ -2235,7 +2317,14 @@ def apply_evolution(
                     raise ValueError("new evolution operation state unexpectedly already exists")
                 state = operation_state / "before"
                 state.mkdir(parents=True, mode=0o700)
-                for relative, (old, _new) in actual.items():
+                manual_completion_paths = sorted(
+                    {path for step in unresolved for path in step.manual_completion_paths}
+                )
+                checkpoint_paths = set(actual) | {
+                    path for path in manual_completion_paths if path in before
+                }
+                for relative in sorted(checkpoint_paths):
+                    old = before.get(relative)
                     if old is not None:
                         source = checkpoint / relative
                         target = state / relative
@@ -2279,9 +2368,7 @@ def apply_evolution(
                     "plan_sha256": plan.plan_sha256,
                     "requested_targets": plan.requested_targets,
                     "target_versions": plan.target_versions,
-                    "manual_completion_paths": sorted(
-                        {path for step in unresolved for path in step.manual_completion_paths}
-                    ),
+                    "manual_completion_paths": manual_completion_paths,
                     "before_fingerprint": _fingerprint(before),
                     "after_fingerprint": _fingerprint(after),
                     "git_branch": plan.current_state.git_branch,
@@ -2463,34 +2550,40 @@ def accept_evolution(root: Path, operation_id: str, evidence: list[str]) -> Evol
             _safe_path(root, path)
         records = _inventory_with_paths(root, allowed)
         manual_changes = _changed(sealed_after, records)
+        target_versions = data.get("target_versions")
+        is_next = (
+            isinstance(target_versions, dict) and "next/official-upgrade-codemod" in target_versions
+        )
+        next_lockfiles = {
+            "package-lock.json",
+            "npm-shrinkwrap.json",
+            "pnpm-lock.yaml",
+            "yarn.lock",
+            "bun.lock",
+            "bun.lockb",
+        }
         unsafe = [
             path
             for path, (old, _new) in manual_changes.items()
-            if old is not None or path not in allowed
+            if path not in allowed or old is not None and not (is_next and path in next_lockfiles)
         ]
         if unsafe:
             raise ValueError(
                 "manual acceptance crossed its sealed completion paths; changed: "
                 + ", ".join(sorted(unsafe)[:20])
             )
-        target_versions = data.get("target_versions")
-        if isinstance(target_versions, dict) and "next/official-upgrade-codemod" in target_versions:
-            next_lockfiles = {
-                "package-lock.json",
-                "npm-shrinkwrap.json",
-                "pnpm-lock.yaml",
-                "yarn.lock",
-                "bun.lock",
-                "bun.lockb",
-            }
-            completed = {
-                path
-                for path, (old, new) in manual_changes.items()
-                if old is None and new is not None
-            }
-            if len(completed) != 1 or not completed <= next_lockfiles:
+        if is_next:
+            completed = {path for path in next_lockfiles if path in records}
+            if len(completed) != 1:
+                raise ValueError("Next.js manual acceptance requires exactly one root lockfile")
+            package_changed = any(
+                isinstance(change, dict) and change.get("target") == "package.json"
+                for change in data.get("changes", [])
+            )
+            lockfile = next(iter(completed))
+            if package_changed and lockfile not in manual_changes:
                 raise ValueError(
-                    "Next.js manual acceptance requires exactly one newly generated root lockfile"
+                    "Next.js dependency changes require the selected root lockfile to be updated"
                 )
         facts = discover_project(root)
         if (
@@ -2504,17 +2597,21 @@ def accept_evolution(root: Path, operation_id: str, evidence: list[str]) -> Evol
         existing_changes = data.get("changes", [])
         if not isinstance(existing_changes, list):
             raise ValueError("manual acceptance operation changes are malformed")
-        for relative, (_old, new) in manual_changes.items():
+        for relative, (old, new) in manual_changes.items():
             if new is None:
                 continue
             existing_changes.append(
                 EvolutionChange(
                     target=relative,
                     recipe_id="manual-acceptance",
-                    status="created",
-                    before_sha256=None,
+                    status="created" if old is None else "changed",
+                    before_sha256=old.sha256 if old is not None else None,
                     after_sha256=new.sha256,
-                    detail="lockfile generated during manual acceptance",
+                    detail=(
+                        "lockfile generated during manual acceptance"
+                        if old is None
+                        else "lockfile updated during manual acceptance"
+                    ),
                 ).model_dump(mode="json")
             )
         data["changes"] = existing_changes

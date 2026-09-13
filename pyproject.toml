@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "blueprint-ai-cli"
-version = "0.8.0"
+version = "0.9.0"
 description = "Deterministic-first software project genesis, analysis, remediation, and evolution"
 readme = "README.md"
 requires-python = ">=3.12"

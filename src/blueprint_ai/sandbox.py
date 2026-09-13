@@ -63,7 +63,7 @@ class SandboxPolicy(BaseModel):
     memory_mb: int = Field(default=1024, ge=64, le=16384)
     cpus: float = Field(default=2, gt=0, le=16)
     pids: int = Field(default=128, ge=16, le=1024)
-    scratch_mb: int = Field(default=256, ge=16, le=8192)
+    scratch_mb: int = Field(default=1024, ge=16, le=8192)
     file_size_mb: int = Field(default=128, ge=1, le=1024)
     output_bytes: int = Field(default=4_000_000, ge=1024, le=16_000_000)
 
@@ -370,8 +370,9 @@ def container_command(
         "npm_config_ignore_scripts": "true",
         "npm_config_audit": "false",
         "npm_config_fund": "false",
+        "GOPATH": "/tmp/go",
         "GOCACHE": "/tmp/go-build",
-        "GOMODCACHE": "/tmp/go-mod",
+        "GOMODCACHE": "/tmp/go/pkg/mod",
         "GOTOOLCHAIN": "local",
         "CARGO_HOME": "/tmp/cargo-home",
         "CARGO_TARGET_DIR": "/tmp/cargo-target",

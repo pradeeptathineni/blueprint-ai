@@ -24,6 +24,7 @@ from blueprint_ai.evolution.catalog import (
     _javascript_migration_syntax_mask,
     _next_experimental_ppr_residual,
     _next_font_residual,
+    _next_unsafe_unwrapped_residual,
     _next_unstable_cache_residual,
     _repair_react_this_refs,
     _replace_dotnet_tfm,
@@ -105,9 +106,11 @@ def test_rust_2018_to_2024_is_two_ordered_boundaries(tmp_path: Path) -> None:
     assert [step.operation for step in plan.steps] == [
         "cargo-fix-2021",
         "rust-edition",
+        "cargo-fmt-2021",
         "verify-2021",
         "cargo-fix-2024",
         "rust-edition",
+        "cargo-fmt-2024",
         "verify-2024",
     ]
     assert [step.operation_target for step in plan.steps if step.kind == "builtin-edit"] == [
@@ -119,6 +122,42 @@ def test_rust_2018_to_2024_is_two_ordered_boundaries(tmp_path: Path) -> None:
         for index, step in enumerate(plan.steps)
     )
     assert sum(step.rediscover for step in plan.steps) == 4
+
+
+def test_rust_dependency_acquisition_and_binary_target_verification(tmp_path: Path) -> None:
+    root = _repository(
+        tmp_path / "rust-dependency",
+        {
+            "Cargo.toml": (
+                '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n'
+                '[dependencies]\nanyhow = "1.0.100"\n'
+            ),
+            "Cargo.lock": "version = 4\n",
+            "src/main.rs": 'fn main() { println!("ok"); }\n',
+        },
+    )
+    plan = plan_evolution(root, ["rust/edition=2024"])
+    assert plan.steps[0].kind == "dependency-acquisition"
+    assert plan.steps[0].files == []
+    assert plan.steps[0].execution_network == "required"
+    assert plan.steps[0].apply_command[:3] == ["cargo", "vendor", "--locked"]
+    assert any(step.operation == "cargo-fmt-2024" for step in plan.steps)
+    assert all(
+        requirement.kind != "doctest" for step in plan.steps for requirement in step.verification
+    )
+
+    unsupported = _repository(
+        tmp_path / "rust-git-dependency",
+        {
+            "Cargo.toml": (
+                '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"\n'
+                '[dependencies]\nexample = { git = "https://example.invalid/repo" }\n'
+            ),
+            "Cargo.lock": "version = 4\n",
+            "src/lib.rs": "pub fn demo() {}\n",
+        },
+    )
+    assert "rust/edition" not in plan_evolution(unsupported).candidates
 
 
 def test_rust_lane_rejects_inherited_workspace_and_edits_only_package_table(
@@ -232,6 +271,87 @@ def test_simple_dotnet_lane_preserves_unrelated_xml_and_rejects_ambiguity(
         },
     )
     assert "dotnet/sdk-target" not in plan_evolution(conditional).candidates
+
+
+@pytest.mark.parametrize("sdk", ["Microsoft.NET.Sdk", "Microsoft.NET.Sdk.Web"])
+def test_dotnet_exact_packages_use_an_explicit_acquisition_stage(tmp_path: Path, sdk: str) -> None:
+    root = _repository(
+        tmp_path / sdk.rsplit(".", 1)[-1],
+        {
+            "Demo.csproj": (
+                f'<Project Sdk="{sdk}"><PropertyGroup>'
+                "<TargetFramework>net7.0</TargetFramework></PropertyGroup>"
+                '<ItemGroup><PackageReference Include="Example.Package" Version="1.2.3" />'
+                "</ItemGroup></Project>"
+            ),
+            "Program.cs": 'Console.WriteLine("hello");\n',
+        },
+    )
+    plan = plan_evolution(root, ["dotnet/sdk-target=net10.0"])
+    assert [step.operation for step in plan.steps] == [
+        "dotnet-tfm",
+        "dotnet-restore",
+        "command",
+    ]
+    acquisition = plan.steps[1]
+    assert acquisition.kind == "dependency-acquisition"
+    assert acquisition.files == []
+    assert acquisition.execution_network == "required"
+    assert acquisition.apply_command[:3] == ["dotnet", "restore", "Demo.csproj"]
+    assert acquisition.apply_command[acquisition.apply_command.index("--source") + 1] == (
+        "https://api.nuget.org/v3/index.json"
+    )
+    assert acquisition.ephemeral_paths == [".blueprint-state"]
+    assert plan.steps[2].verification[0].isolated_copy
+
+
+def test_dotnet_nested_project_seals_both_intermediate_path_bases(tmp_path: Path) -> None:
+    root = _repository(
+        tmp_path / "nested-dotnet",
+        {
+            "src/Demo.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                "<TargetFramework>net8.0</TargetFramework></PropertyGroup>"
+                '<ItemGroup><PackageReference Include="Example" Version="1.2.3" />'
+                "</ItemGroup></Project>"
+            ),
+            "src/Program.cs": 'Console.WriteLine("hello");\n',
+        },
+    )
+    plan = plan_evolution(root, ["dotnet/sdk-target=net10.0"])
+    assert plan.steps[1].ephemeral_paths == [".blueprint-state", "src/.blueprint-state"]
+
+
+def test_dotnet_rejects_floating_or_conditioned_package_references(tmp_path: Path) -> None:
+    for name, reference in {
+        "floating": '<PackageReference Include="Example" Version="1.*" />',
+        "conditioned": ('<PackageReference Include="Example" Version="1.2.3" Condition="true" />'),
+    }.items():
+        root = _repository(
+            tmp_path / name,
+            {
+                "Demo.csproj": (
+                    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                    "<TargetFramework>net7.0</TargetFramework></PropertyGroup>"
+                    f"<ItemGroup>{reference}</ItemGroup></Project>"
+                )
+            },
+        )
+        assert "dotnet/sdk-target" not in plan_evolution(root).candidates
+
+    parent_condition = _repository(
+        tmp_path / "conditioned-item-group",
+        {
+            "Demo.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                "<TargetFramework>net7.0</TargetFramework></PropertyGroup>"
+                '<ItemGroup Condition="true">'
+                '<PackageReference Include="Example" Version="1.2.3" />'
+                "</ItemGroup></Project>"
+            )
+        },
+    )
+    assert "dotnet/sdk-target" not in plan_evolution(parent_condition).candidates
 
 
 def test_python_build_system_is_minimal_preserving_and_conflict_aware(tmp_path: Path) -> None:
@@ -375,6 +495,35 @@ def test_next_14_to_16_uses_ordered_official_boundary_transforms(tmp_path: Path)
         for index, step in enumerate(plan.steps)
     )
     assert all(step.rediscover for step in plan.steps if step.mutates)
+
+
+def test_next_existing_yarn_lock_and_serial_codemods_remain_partial(tmp_path: Path) -> None:
+    root = _repository(
+        tmp_path / "next-yarn",
+        {
+            "package.json": json.dumps(
+                {
+                    "dependencies": {
+                        "next": "14.2.35",
+                        "react": "18.3.1",
+                        "react-dom": "18.3.1",
+                    }
+                }
+            ),
+            "yarn.lock": "# yarn lockfile v1\n",
+            "app/page.tsx": "export default function Page() { return null; }\n",
+        },
+    )
+    plan = plan_evolution(root, ["next/official-upgrade-codemod=15.5.25"])
+    assert plan.status == "ready"
+    assert all(
+        "yarn.lock" in step.files for step in plan.steps if step.kind == "established-codemod"
+    )
+    commands = [step.apply_command for step in plan.steps if step.kind == "established-codemod"]
+    assert commands and all("--run-in-band" in command for command in commands)
+    dependency = next(step for step in plan.steps if step.operation == "next-dependencies")
+    assert any("no-unsafe-unwrapped" in item.id for item in dependency.postconditions)
+    assert plan.steps[-1].status == "manual"
 
 
 def test_next_exact_target_minor_and_unsafe_transform_states(tmp_path: Path) -> None:
@@ -577,6 +726,15 @@ def test_next_experimental_ppr_residual_covers_computed_config_keys(source: str)
 def test_next_font_residual_covers_dynamic_imports(source: str) -> None:
     assert _next_font_residual(source)
     assert not _next_font_residual("const note = '@next/font/google';\n")
+
+
+def test_next_unsafe_unwrapped_residual_is_code_aware() -> None:
+    assert _next_unsafe_unwrapped_residual(
+        "const value = cookies() as unknown as UnsafeUnwrappedCookies;\n"
+    )
+    assert not _next_unsafe_unwrapped_residual(
+        "// UnsafeUnwrappedCookies\nconst note = 'UnsafeUnwrappedDraftMode';\n"
+    )
 
 
 def test_exact_target_and_missing_version_evidence_are_not_fabricated(tmp_path: Path) -> None:
@@ -974,13 +1132,47 @@ def test_gitignored_next_lock_is_sealed_and_removed_by_rollback(tmp_path: Path) 
     assert result.status == "partial" and result.operation_id
     (root / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
     (root / "yarn.lock").write_text("# generated lock\n")
-    with pytest.raises(ValueError, match="exactly one newly generated root lockfile"):
+    with pytest.raises(ValueError, match="exactly one root lockfile"):
         accept_evolution(root, result.operation_id, ["next build and project tests passed"])
     (root / "yarn.lock").unlink()
     accept_evolution(root, result.operation_id, ["next build and project tests passed"])
     assert plan_evolution(root, ["next/official-upgrade-codemod=16.3.5"]).status == "noop"
     rollback_evolution(root, result.operation_id)
     assert not (root / "package-lock.json").exists()
+    assert project_fingerprint(root) == baseline
+
+
+def test_existing_next_lock_can_be_updated_accepted_and_rolled_back(tmp_path: Path) -> None:
+    original_lock = "# yarn lockfile v1\nnext@16.3.5:\n"
+    root = _repository(
+        tmp_path / "existing-next-lock",
+        {
+            "package.json": json.dumps(
+                {
+                    "dependencies": {
+                        "next": "16.3.5",
+                        "react": "19.3.0",
+                        "react-dom": "19.3.0",
+                    }
+                }
+            ),
+            "yarn.lock": original_lock,
+            "app/page.tsx": "export default function Page() { return null; }\n",
+        },
+    )
+    baseline = project_fingerprint(root)
+    plan = plan_evolution(root, ["next/official-upgrade-codemod=16.3.5"])
+    result = apply_evolution(root, plan, run_blueprint_review=False)
+    assert result.status == "partial" and result.operation_id
+    (root / "yarn.lock").write_text(original_lock + "react@19.3.0:\n")
+    accepted = accept_evolution(
+        root,
+        result.operation_id,
+        ["yarn install completed", "Next build and tests passed"],
+    )
+    assert accepted.status == "accepted"
+    rollback_evolution(root, result.operation_id)
+    assert (root / "yarn.lock").read_text() == original_lock
     assert project_fingerprint(root) == baseline
 
 
@@ -1130,7 +1322,7 @@ def test_mixed_authoritative_tool_plan_uses_each_sealed_image(
     )
     assert result.status == "verified"
     assert "blueprint-tools/python-build:3.12-setuptools84" in seen_images
-    assert "blueprint-tools/rust:1.98.1" in seen_images
+    assert "blueprint-tools/rust:1.98.1-r2" in seen_images
 
 
 def test_authoritative_contract_cannot_broaden_operator_resource_limits(tmp_path: Path) -> None:
@@ -1173,6 +1365,99 @@ def test_authoritative_contract_cannot_broaden_operator_resource_limits(tmp_path
     )
     narrowed = _step_policy(codemod, unrestricted, writable=True)
     assert narrowed.network == "none" and not narrowed.authorize_network
+
+
+def test_oom_evidence_overrides_nominal_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai.evolution import engine
+    from blueprint_ai.safety import ProcessResult
+    from blueprint_ai.sandbox import Execution, SandboxEvidence
+
+    policy = SandboxPolicy(backend="host", trusted=True)
+
+    def fake_execute(command, _root, actual_policy, **_kwargs):
+        return Execution(
+            ProcessResult(0, "tool said success\n", "", False, False),
+            SandboxEvidence(
+                backend="docker",
+                tool="cargo",
+                policy=actual_policy,
+                oom_killed=True,
+                teardown=True,
+                exit_code=0,
+            ),
+        )
+
+    monkeypatch.setattr(engine, "execute", fake_execute)
+    monkeypatch.setattr(
+        engine,
+        "_tool_command",
+        lambda _root, _tool, _policy, requested=None: requested or _tool,
+    )
+    verification, _output = engine._run(tmp_path, ["cargo", "--version"], policy, {}, tool="cargo")
+    assert verification.status == "failed"
+    assert "OOM-killed" in verification.detail
+
+
+def test_read_only_planning_fingerprints_leaf_symlinks(tmp_path: Path) -> None:
+    root = _repository(tmp_path / "symlink-plan", {"README.md": "project\n"})
+    link = root / ".claude/rules"
+    link.parent.mkdir()
+    link.symlink_to("../shared-rules")
+    _git(root, "add", ".claude/rules")
+    _git(root, "commit", "-m", "add bounded link")
+    before = project_fingerprint(root)
+    plan = plan_evolution(root)
+    assert plan.status == "inspection" and plan.metrics["files_in_inventory"] == 2
+    link.unlink()
+    link.symlink_to("../different-rules")
+    assert project_fingerprint(root) != before
+
+
+def test_go_dependency_pipeline_seals_checksums_vendor_and_offline_test(tmp_path: Path) -> None:
+    root = _repository(
+        tmp_path / "go-dependency",
+        {
+            "go.mod": "module example.invalid/demo\n\ngo 1.26\n\nrequire example.com/dep v1.2.3\n",
+            "main.go": "package demo\n",
+        },
+    )
+    plan = plan_evolution(root, ["go/native-fix"])
+    assert [step.operation for step in plan.steps] == [
+        "go-module-checksums",
+        "go-module-vendor",
+        "go-fix",
+        "go-test",
+    ]
+    assert [step.execution_network for step in plan.steps] == [
+        "required",
+        "required",
+        "none",
+        "none",
+    ]
+    assert "-mod=vendor" in plan.steps[2].apply_command
+    assert plan.steps[0].files == ["go.sum"]
+    assert plan.steps[1].files == [] and plan.steps[1].ephemeral_paths == ["vendor"]
+    with pytest.raises(ValueError, match="network authorization"):
+        apply_evolution(
+            root,
+            plan,
+            dry_run=True,
+            policy=SandboxPolicy(backend="host", trusted=True),
+            run_blueprint_review=False,
+        )
+
+
+def test_go_lane_rejects_modules_without_an_explicit_language_version(tmp_path: Path) -> None:
+    root = _repository(
+        tmp_path / "go-no-version",
+        {
+            "go.mod": "module example.invalid/demo\n\nrequire example.com/dep v1.2.3\n",
+            "main.go": "package demo\n",
+        },
+    )
+    assert "go/native-fix" not in plan_evolution(root).candidates
 
 
 def test_pipeline_stops_on_concurrent_git_index_change(

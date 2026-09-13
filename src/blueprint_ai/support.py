@@ -517,15 +517,30 @@ TOOLS["ast-grep"].base_image = "python:3.12-slim-bookworm"
 TOOLS["ast-grep"].image_recipe = [
     "RUN pip install --no-cache-dir --only-binary=:all: ast-grep-cli==0.45.3"
 ]
+TOOLS["go"] = ToolSpec(
+    id="go",
+    source=PROVIDERS["go"].source,
+    license=PROVIDERS["go"].license,
+    versions=">=1.26,<2",
+    image="golang:1.26-bookworm",
+    container_executable="go",
+    integration="toolchain",
+)
 TOOLS["buf"].image = "bufbuild/buf:1.73.0"
 TOOLS["buf"].container_executable = "buf"
 TOOLS["cargo"] = ToolSpec(
     id="cargo",
     source=PROVIDERS["cargo"].source,
     license=PROVIDERS["cargo"].license,
-    image="blueprint-tools/rust:1.98.1",
+    image="blueprint-tools/rust:1.98.1-r2",
     base_image="rust:1.98.1-slim-bookworm",
-    image_recipe=["RUN rustup component add rustfmt clippy"],
+    image_recipe=[
+        (
+            "RUN apt-get update && apt-get install -y --no-install-recommends "
+            "build-essential ca-certificates pkg-config && rm -rf /var/lib/apt/lists/*"
+        ),
+        "RUN rustup component add rustfmt clippy",
+    ],
 )
 PROVIDERS["cargo"].image = TOOLS["cargo"].image
 PROVIDER_IMAGES["cargo"] = TOOLS["cargo"].image or ""

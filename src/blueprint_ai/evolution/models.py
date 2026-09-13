@@ -24,6 +24,7 @@ EvolutionStatus = Literal[
     "dry_run", "verified", "rolled_back", "partial", "accepted", "failed", "noop"
 ]
 PipelineStepKind = Literal[
+    "dependency-acquisition",
     "native-command",
     "established-codemod",
     "builtin-edit",
@@ -266,6 +267,7 @@ class EvolutionStep(BaseModel):
     verification: list[VerificationRequirement]
     postconditions: list[TypedPostcondition] = Field(default_factory=list)
     tool_contract: AuthoritativeToolContract | None = None
+    execution_network: Literal["none", "required"] = "none"
     image_identities: dict[str, str] = Field(default_factory=dict)
     ephemeral_paths: list[str] = Field(default_factory=list)
     manual_completion_paths: list[str] = Field(default_factory=list)

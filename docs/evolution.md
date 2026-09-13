@@ -1,6 +1,6 @@
 # Project evolution
 
-Blueprint AI 0.8.0 plans and transactionally runs deterministic, version-aware migrations. A plan
+Blueprint AI 0.9.0 plans and transactionally runs deterministic, version-aware migrations. A plan
 seals the current Git inventory, explicit target, ordered stages, authoritative tool contract,
 expected writes, typed postconditions, and verification. Planning never selects “latest.”
 
@@ -33,10 +33,12 @@ manual predecessor remains blocked.
 ## Pipeline and tool contracts
 
 A migration pipeline reuses evolution steps and transactions. Its small step vocabulary is native
-command, established codemod, built-in edit, postcondition, manual boundary, and future residual
-boundary. Dependencies preserve ordering; state-changing stages can trigger rediscovery before the
-next stage. Dry-run executes the full pipeline only in a disposable copy and returns its exact final
-diff.
+dependency acquisition, native command, established codemod, built-in edit, postcondition, manual
+boundary, and future residual boundary. Dependencies preserve ordering; state-changing stages can
+trigger rediscovery before the next stage. Dry-run executes the full pipeline only in a disposable
+copy and returns its exact final diff. Acquisition requires explicit trusted network authorization,
+is scoped to declared destinations, and persists only private transaction data for later offline
+stages.
 
 Authoritative command contracts seal provider, host/container executable, version range, independently
 pinned runner and recipe, registry integrity, source and licenses, invoke-versus-redistribute status,
@@ -83,26 +85,34 @@ blueprint-ai evolve accept OPERATION_ID ./project \
 ## Supported migrations
 
 - `rust/edition=2021|2024`: requires one root package with an exact owned 2018/2021 edition and
-  `Cargo.lock`; workspaces and independent nested packages are rejected. It runs
-  `cargo fix --edition` one boundary at a time, edits only explicit edition fields, rediscovers,
-  then offline locked fmt/check/test/doctest across available features and targets. Inactive cfg
-  combinations remain a stated limitation.
-- `dotnet/sdk-target=net10.0`: one dependency-free `Microsoft.NET.Sdk` project with one literal TFM;
-  preserves unrelated XML and performs an offline .NET 10 restore/build. Multi-target, inherited,
-  package/API, Web SDK, and complex application modernization are rejected.
+  `Cargo.lock`; workspaces, independent nested packages, Git dependencies, and custom registries are
+  rejected. It acquires the locked crates.io graph into private transaction state, runs
+  `cargo fix --edition` one boundary at a time, edits only explicit edition fields, applies
+  authoritative `cargo fmt`, and then runs locked offline fmt/check/test gates across all features
+  and targets. Doctests run for library targets. Inactive cfg combinations remain a stated
+  limitation.
+- `dotnet/sdk-target=net10.0`: one `Microsoft.NET.Sdk` or `Microsoft.NET.Sdk.Web` project with one
+  literal TFM and either no packages or exact package versions. Package graphs are restored into
+  private transaction state and compiled offline in an isolated writable copy. Multi-target,
+  inherited, floating, conditioned, centrally managed, and complex application/API modernization
+  remain rejected or residual.
 - `python/pep517-build-system=setuptools.build_meta`: adds only the current PyPA build-system table,
   preserves `setup.py`/`setup.cfg`, and builds a wheel in an isolated writable copy. It does not infer
   PEP 621 metadata or uv workflow semantics.
-- Ruff pyupgrade, Go native fix, Terraform native format, Docker `MAINTAINER` conversion, and known
-  official GitHub Action same-major SHA pinning retain their 0.7.x supported behavior. The action map
-  now includes reviewed `actions/setup-java` v2–v6 SHAs without upgrading majors.
+- `go/native-fix`: one root module with an explicit Go language directive. When dependencies exist,
+  it acquires missing checksums, vendors the graph into private transaction state, and then runs
+  `go fix` and `go test` offline. Nested modules and implicit `go.mod` language upgrades are rejected.
+- Ruff pyupgrade, Terraform native format, Docker `MAINTAINER` conversion, and known official GitHub
+  Action same-major SHA pinning retain their supported behavior.
 
 Next.js 14→15→16 has an executable but `partial` authoritative prefix. It runs integrity-pinned
 `@next/codemod` 16.3.5 major-by-major with execution networking disabled, normalizes exact
 Next/React/type/config dependencies, and rejects nested/workspace packages, ambiguous convention
 files, Edge Proxy runtime, dynamic removed-font references, removed cache APIs, `experimental_ppr`,
 and official `@next-codemod-error` markers. Exactly one newly generated root lockfile and operator-supplied
-project build/type/lint/test evidence form the sealed acceptance boundary.
+project build/type/lint/test evidence form the sealed acceptance boundary. Jscodeshift stages run
+serially, unsafe-unwrapped request API markers fail the typed residual gate, and acceptance supports
+exactly one existing or newly generated root lockfile.
 
 React 19 is truthfully `partial` but not automatically executable. Codemod CLI 1.18.3 is
 integrity-pinned, while `react/19/migration-recipe@0.1.5` is resolved separately by the registry
@@ -119,6 +129,10 @@ generic ast-grep remain manual or deferred.
 `ResidualContract` seals desired state, completed deterministic work, failures, permitted paths,
 prohibited scope, acceptance commands, postconditions, network/credential/command authority,
 budgets, and rollback checkpoint.
-No production `AgentBackend` consumes it in 0.8.0: the corpus demonstrated no residual that justified
+No production `AgentBackend` consumes it in 0.9.0: the corpus demonstrated no residual that justified
 broader mutation authority. `ModelProvider` remains optional bounded decision/review support and is
 never used by deterministic migration execution.
+
+Read-only planning fingerprints bounded leaf symlinks without dereferencing them. Mutation still
+refuses symlink checkpoints, so a tracked link cannot redirect reads or writes outside the selected
+repository.
