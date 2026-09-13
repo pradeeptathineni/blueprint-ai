@@ -20,8 +20,10 @@ from blueprint_ai.discovery import discover_project
 from blueprint_ai.engine import make_context, review
 from blueprint_ai.model.context import ContextBuilder
 
+FASTAPI_CORPUS_COMMIT = "cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7"  # gitleaks:allow
+
 CORPUS = {
-    "fastapi/full-stack-fastapi-template": "cb740b656d7a0a6c5e12c7bf8e50343ec94ee9c7",
+    "fastapi/full-stack-fastapi-template": FASTAPI_CORPUS_COMMIT,
     "open-telemetry/opentelemetry-demo": "9bfe486ff48ee8a6ea942be74171342cb71a9327",
     "terraform-aws-modules/terraform-aws-vpc": "cf0e3ca46fd51f47bf095957f2a6ac6127c89045",
     "isovalent/terraform-aws-vpc": "2bb6b130d0d884808fce9590a5a6c47dd931596d",

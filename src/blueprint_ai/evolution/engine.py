@@ -914,6 +914,20 @@ def _changed(
     }
 
 
+def _without_ephemeral(
+    records: dict[str, FileRecord], ephemeral_paths: list[str]
+) -> dict[str, FileRecord]:
+    """Remove transaction-private paths from an exact staged inventory."""
+    return {
+        path: record
+        for path, record in records.items()
+        if not any(
+            path == ephemeral or path.startswith(ephemeral.rstrip("/") + "/")
+            for ephemeral in ephemeral_paths
+        )
+    }
+
+
 def _checkpoint(root: Path, records: dict[str, FileRecord], destination: Path) -> None:
     total = sum(record.size for record in records.values())
     if total > MAX_CHECKPOINT_BYTES or any(
@@ -1710,7 +1724,7 @@ def _verify_pipeline_idempotency(
         elif step.kind in {"native-command", "established-codemod"}:
             if not step.tool or not step.apply_command:
                 raise RuntimeError(f"{step.recipe_id}: idempotency command is incomplete")
-            before_replay = _stage_inventory(replay)
+            before_replay = _without_ephemeral(_stage_inventory(replay), step.ephemeral_paths)
             verification, _output = _run(
                 replay,
                 step.apply_command,
@@ -1730,7 +1744,10 @@ def _verify_pipeline_idempotency(
                         shutil.rmtree(target)
                     elif target.is_file():
                         target.unlink()
-                changed = _changed(before_replay, _stage_inventory(replay))
+                changed = _changed(
+                    before_replay,
+                    _without_ephemeral(_stage_inventory(replay), step.ephemeral_paths),
+                )
                 if changed:
                     verification.status = "failed"
                     verification.detail = (
@@ -2364,6 +2381,7 @@ def apply_evolution(
                 manifest = {
                     "version": 3,
                     "kind": "evolution",
+                    "blueprint_ai_version": __version__,
                     "operation_id": operation_id,
                     "plan_sha256": plan.plan_sha256,
                     "requested_targets": plan.requested_targets,
@@ -2511,6 +2529,11 @@ def accept_evolution(root: Path, operation_id: str, evidence: list[str]) -> Evol
             or not re.fullmatch(r"[a-f0-9]{64}", str(data.get("after_fingerprint", "")))
         ):
             raise ValueError("only an unchanged partial evolution operation can be accepted")
+        producer_version = data.get("blueprint_ai_version")
+        if producer_version is not None and producer_version != __version__:
+            raise ValueError(
+                f"evolution receipt requires Blueprint AI {producer_version}; running {__version__}"
+            )
         if not _receipt_is_authoritative(
             root, operation_id, manifest_content, require_after_inventory=True
         ):
@@ -2677,6 +2700,11 @@ def _rollback_evolution_locked(root: Path, operation_id: str) -> EvolutionReport
         or (data.get("git_branch") is not None and not isinstance(data.get("git_branch"), str))
     ):
         raise ValueError("operation is not a valid evolution transaction")
+    producer_version = data.get("blueprint_ai_version")
+    if producer_version is not None and producer_version != __version__:
+        raise ValueError(
+            f"evolution receipt requires Blueprint AI {producer_version}; running {__version__}"
+        )
     if not _receipt_is_authoritative(root, operation_id, manifest_content):
         raise ValueError("evolution operation receipt is not sealed by Git-private state")
     changes = [EvolutionChange.model_validate(item) for item in data["changes"]]

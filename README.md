@@ -16,17 +16,16 @@ blueprint-ai doctor
 blueprint-ai review . --no-model
 ```
 
-After PyPI publication, use `pipx install blueprint-ai-cli` or
-`uv tool install blueprint-ai-cli`. A GitHub Release wheel can be installed directly with either
-tool before registry publication:
+Install the published package with `pipx install blueprint-ai-cli` or
+`uv tool install blueprint-ai-cli`. A GitHub Release wheel can also be installed directly:
 
 ```bash
-pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.9.0/blueprint_ai_cli-0.9.0-py3-none-any.whl
+pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.9.1/blueprint_ai_cli-0.9.1-py3-none-any.whl
 ```
 
 For development, run `uv sync --extra dev --locked`.
 
-Optional model support is installed with `uv tool install 'blueprint-ai-cli[model]'` (or `'.[model]'`
+Optional preview model support is installed with `uv tool install 'blueprint-ai-cli[model]'` (or `'.[model]'`
 from a checkout) and reads `OPENAI_API_KEY` from the operator's environment. Provider, model,
 reasoning effort, timeout, call count, and context-token budgets remain operator controlled. Model
 access is optional; `--no-model` makes no remote calls. See
@@ -79,9 +78,10 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Tools and sandbox policy](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/sandbox.md): acquisition and execution boundaries.
 - [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
 - [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
+- [1.x compatibility contract](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/compatibility.md): stable surfaces, deprecation, and exceptions.
 - [Testing, threat model, and release gate](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/releasing.md): verification and release operations.
-- [0.9.0 release validation](docs/release-validation-0.9.0.md): dependency-aware migration corpus,
-  adversarial coverage, distribution, and release evidence.
+- [0.9.1 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/0.9.1/docs/release-validation-0.9.1.md):
+  1.0-readiness stabilization, compatibility fixtures, distribution, and publication evidence.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or

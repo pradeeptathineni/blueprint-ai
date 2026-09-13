@@ -49,6 +49,8 @@ not copied. A sealed dependency-acquisition stage may use explicitly authorized 
 fill private transaction paths; those paths persist through offline migration, verification, and
 replay, are never published, and are then removed. Pipelines without such a stage remain
 network-disabled and dependency-bearing verification fails explicitly when its graph is unavailable.
+The authoritative contract records expected destinations as reviewable provenance; it does not turn
+the `unrestricted` backend mode into an enforceable allowlist.
 
 ## Network
 

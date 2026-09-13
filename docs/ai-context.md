@@ -13,7 +13,8 @@ baseline adapter consumes it. URLs in repository content do not grant authorizat
 
 ## Provider and structured output
 
-The provider protocol is replaceable. The optional OpenAI provider uses the Responses API with strict
+The provider protocol is replaceable. The optional OpenAI provider is preview/live-unverified in
+0.9.1 because no valid release-audit credential was available. It uses the Responses API with strict
 structured output, bounded output tokens, zero SDK retries, and `store=False`. Operator environment
 variables select `BLUEPRINT_AI_PROVIDER` (`openai`), `BLUEPRINT_AI_MODEL` (default
 `gpt-5-mini`), optional `BLUEPRINT_AI_REASONING_EFFORT` (`none`, `low`, `medium`, `high`, or
@@ -76,7 +77,9 @@ credential-bearing non-HTTP URLs. Key tokenization avoids quadratic regex behavi
 identifiers. It remains a likely-secret filter, not a complete data-loss-prevention guarantee.
 Reports expose current `calls` and latency; cached token/cost fields describe the original response.
 An allocation below 64 estimated context tokens is skipped with partial status instead of multiplying
-a minimum allocation beyond the configured budget. No live API credential was present in the audit.
+a minimum allocation beyond the configured budget. No live API credential was present in the 0.9.1
+audit. Controlled wire-contract tests do not replace a bounded live service smoke test, so no live
+latency, token, quality, or availability claim is made.
 
 ## Coding-agent boundary
 
@@ -84,4 +87,4 @@ a minimum allocation beyond the configured budget. No live API credential was pr
 accepts schema-validated judgment. A future `AgentBackend` would be an implementation path: Blueprint
 AI supplies a plan to an explicitly selected coding-agent harness, then verifies returned repository
 changes. Coding-agent CLIs, App Server, SDK agents, and autonomous patch loops are therefore not
-registered as model providers and are not implemented in 0.6.2.
+registered as model providers and are not implemented in 0.9.1.

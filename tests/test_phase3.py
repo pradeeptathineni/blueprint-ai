@@ -339,7 +339,7 @@ def test_run_metadata_junit_and_cli_exit_policy(tmp_path: Path) -> None:
             "json",
         ],
     )
-    assert result.exit_code == 2
+    assert result.exit_code == 1
     assert json.loads(result.stdout)["schema_version"] == "1.0.0"
     verified = CliRunner().invoke(
         app,

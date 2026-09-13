@@ -47,7 +47,7 @@ CASES = (
         "rust-2018-to-2024",
         "generated/rust-2018",
         "rust/edition=2024",
-        "blueprint-tools/rust:1.98.1",
+        "blueprint-tools/rust:1.98.1-r2",
     ),
     Case("dotnet6-to-net10", "generated/dotnet6", "dotnet/sdk-target=net10.0", DOTNET_IMAGE),
     Case(

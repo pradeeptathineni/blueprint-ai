@@ -2,8 +2,15 @@
 
 ## Supported versions
 
-Security fixes are made on the current minor release. This project is pre-1.0; upgrade to the latest
-release before reporting an issue that may already be resolved.
+The latest published 0.9.x release receives best-effort security fixes until 1.0.0. Starting with
+1.0.0, only the latest 1.x patch is security-supported; fixes are not routinely backported to
+superseded minors or patches. The 1.x line will remain security-supported until at least 90 days
+after 2.0.0, with the end date announced here.
+
+Security fixes normally preserve the [1.x compatibility contract](docs/compatibility.md). A patch
+may disable or remove unsafe behavior when preserving it would expose users, credentials, hosts, or
+targets. Such an exception is documented prominently in the advisory and changelog, and Blueprint AI
+continues to fail closed where a safe compatible behavior is unavailable.
 
 ## Reporting a vulnerability
 

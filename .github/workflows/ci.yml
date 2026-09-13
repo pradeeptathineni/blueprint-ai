@@ -4,8 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ["[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -25,17 +25,27 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           python-version: "3.12"
-      - run: uv sync --extra dev --locked
+      - run: uv sync --extra dev --extra model --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy .
       - run: uv run pip-audit
-      - run: uv build
+      - run: uv build --out-dir ci-dist
       - name: Verify release tag matches package version
         if: github.ref_type == 'tag'
         shell: bash
         run: test "$GITHUB_REF_NAME" = "$(uv run python -c 'import blueprint_ai; print(blueprint_ai.__version__)')"
-      - run: uv run blueprint-ai schema report > blueprint-ai-report.schema.json
+      - name: Verify stable CLI, schema, report, configuration, and Python contracts
+        run: uv run python benchmarks/compatibility_snapshot.py
+      - name: Verify every published schema parses
+        run: |
+          for schema in settings report custom-blueprint intent genesis-plan project-graph \
+            sandbox-policy evolution-plan evolution-report transformation authoritative-tool \
+            migration-postcondition residual-contract; do
+            uv run blueprint-ai schema "$schema" > "blueprint-ai-$schema.schema.json"
+            uv run python -m json.tool "blueprint-ai-$schema.schema.json" > /dev/null
+          done
+      - run: uv run blueprint-ai doctor --json > blueprint-ai-doctor.json
       - run: uv run blueprint-ai review . --profile production --no-model --fail-on P1 --format sarif > blueprint-ai.sarif
       - run: uv run blueprint-ai review . --profile production --no-model --format junit > blueprint-ai.junit.xml
       - run: uv run blueprint-ai support --markdown > blueprint-support.md && cmp docs/support.md blueprint-support.md
@@ -47,11 +57,21 @@ jobs:
           --only container/maintainer-to-oci-label
           --only github-actions/pin-official-actions
           --require python/ruff-pyupgrade
-      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+
+  workflow-audit:
+    name: Workflow syntax and security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: .
-          format: spdx-json
-          output-file: sbom.spdx.json
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Run pinned Actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint"
+      - name: Run pinned Zizmor without network analysis
+        run: uvx --from zizmor==1.30.1 zizmor --pedantic --offline .github/workflows
 
   compatibility:
     name: Python ${{ matrix.python }} compatibility

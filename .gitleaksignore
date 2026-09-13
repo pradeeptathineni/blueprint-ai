@@ -1,3 +1,1 @@
-# Public Git commit ID for the pinned FastAPI corpus, verified against the source clone.
-# Only this historical occurrence is excluded; future revisions remain scanned.
-fd30f8004678ad0e9b50b646bd50dcf1f4f49a09:benchmarks/corpus.py:generic-api-key:23
+# Deliberate public corpus commit identifiers are marked at their source line.

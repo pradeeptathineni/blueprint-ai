@@ -12,8 +12,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  release-gate:
+    name: Complete release quality gate
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+
   build:
-    name: Build and attest distributions
+    name: Build, verify, and attest distributions
+    needs: release-gate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -48,25 +55,49 @@ jobs:
           uv pip install --python /tmp/blueprint-sdist/bin/python dist/*.tar.gz
           env -u PYTHONPATH /tmp/blueprint-sdist/bin/python benchmarks/release_smoke.py \
             --output /tmp/blueprint-sdist.json
-      - name: Generate SHA-256 checksums
-        working-directory: dist
-        run: sha256sum -- ./*.whl ./*.tar.gz > SHA256SUMS
-      - uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+      - name: Install the wheel into a clean runtime-only environment
+        run: |
+          uv venv /tmp/blueprint-runtime
+          uv pip install --python /tmp/blueprint-runtime/bin/python dist/*.whl
+          uv pip list --python /tmp/blueprint-runtime/bin/python --format json \
+            > /tmp/blueprint-runtime-packages.json
+      - name: Generate runtime-environment SPDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
-          path: .
+          path: /tmp/blueprint-runtime
           format: spdx-json
-          output-file: sbom.spdx.json
+          output-file: dist/blueprint_ai_cli-${{ github.ref_name }}-runtime.spdx.json
           upload-artifact: false
           upload-release-assets: false
-      - name: Attest build provenance
+      - name: Verify runtime SBOM membership and scope
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run python benchmarks/verify_sbom.py \
+            --sbom "dist/blueprint_ai_cli-$RELEASE_TAG-runtime.spdx.json" \
+            --inventory /tmp/blueprint-runtime-packages.json \
+            --package blueprint-ai-cli \
+            --version "$RELEASE_TAG" \
+            --forbid-path "$GITHUB_WORKSPACE"
+      - name: Generate SHA-256 manifests
+        working-directory: dist
+        run: |
+          sha256sum -- ./*.whl ./*.tar.gz > DISTRIBUTION-SHA256SUMS
+          sha256sum -- ./*-runtime.spdx.json > SBOM-SHA256SUMS
+          sha256sum -- ./*.whl ./*.tar.gz ./*-runtime.spdx.json > SHA256SUMS
+      - name: Attest distribution build provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-checksums: dist/SHA256SUMS
-      - name: Attest SBOM
+          subject-checksums: dist/DISTRIBUTION-SHA256SUMS
+      - name: Attest distribution runtime SBOM
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-checksums: dist/SHA256SUMS
-          sbom-path: sbom.spdx.json
+          subject-checksums: dist/DISTRIBUTION-SHA256SUMS
+          sbom-path: dist/blueprint_ai_cli-${{ github.ref_name }}-runtime.spdx.json
+      - name: Attest SBOM artifact provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SBOM-SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-package-distributions
@@ -81,13 +112,13 @@ jobs:
           name: release-metadata
           path: |
             dist/SHA256SUMS
-            sbom.spdx.json
+            dist/*-runtime.spdx.json
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
 
   github-release:
-    name: Publish GitHub Release
+    name: Publish immutable GitHub Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -101,12 +132,12 @@ jobs:
         with:
           name: python-package-distributions
           path: release-assets
-      - name: Download checksums and SBOM
+      - name: Download checksums and runtime SBOM
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-metadata
           path: release-assets
-      - name: Publish immutable GitHub Release assets
+      - name: Publish exact immutable GitHub Release membership
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -114,17 +145,64 @@ jobs:
           gh release create "$RELEASE_TAG" \
             release-assets/*.whl \
             release-assets/*.tar.gz \
-            release-assets/dist/SHA256SUMS \
-            release-assets/sbom.spdx.json \
+            release-assets/SHA256SUMS \
+            release-assets/*-runtime.spdx.json \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "Blueprint AI $RELEASE_TAG" \
             --notes-file "docs/release-notes-$RELEASE_TAG.md"
 
-  publish-pypi:
-    name: Publish to PyPI
-    if: vars.BLUEPRINT_PUBLISH_PYPI == 'true'
+  verify-github-release:
+    name: Verify GitHub Release membership, bytes, and attestations
     needs: [build, github-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      attestations: read # Verify the release's stored provenance bundles.
+    steps:
+      - name: Download the published release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets
+      - name: Verify immutable release and exact asset membership
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          expected=$(printf '%s\n' \
+            SHA256SUMS \
+            "blueprint_ai_cli-$RELEASE_TAG-py3-none-any.whl" \
+            "blueprint_ai_cli-$RELEASE_TAG-runtime.spdx.json" \
+            "blueprint_ai_cli-$RELEASE_TAG.tar.gz" | sort)
+          actual=$(find release-assets -maxdepth 1 -type f -exec basename {} \; | sort)
+          test "$actual" = "$expected"
+          gh release verify "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"
+          for asset in release-assets/*; do
+            gh release verify-asset "$RELEASE_TAG" "$asset" --repo "$GITHUB_REPOSITORY"
+          done
+          (cd release-assets && sha256sum -c SHA256SUMS)
+      - name: Verify build, SBOM, and SBOM-artifact provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          for package in \
+            "release-assets/blueprint_ai_cli-$RELEASE_TAG-py3-none-any.whl" \
+            "release-assets/blueprint_ai_cli-$RELEASE_TAG.tar.gz"; do
+            gh attestation verify "$package" --repo "$GITHUB_REPOSITORY"
+            gh attestation verify "$package" --repo "$GITHUB_REPOSITORY" \
+              --predicate-type https://spdx.dev/Document/v2.3
+          done
+          gh attestation verify \
+            "release-assets/blueprint_ai_cli-$RELEASE_TAG-runtime.spdx.json" \
+            --repo "$GITHUB_REPOSITORY"
+
+  publish-pypi:
+    name: Publish to PyPI with Trusted Publishing
+    if: vars.BLUEPRINT_PUBLISH_PYPI == 'true'
+    needs: [build, verify-github-release]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -136,5 +214,52 @@ jobs:
         with:
           name: python-package-distributions
           path: dist
-      - name: Publish distribution to PyPI with Trusted Publishing
+      - name: Publish the verified distributions
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  verify-pypi:
+    name: Verify PyPI metadata, hashes, pipx, and uv installs
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata
+          path: release-metadata
+      - name: Verify registry metadata and downloaded bytes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run --no-project python benchmarks/verify_pypi.py \
+            --version "$RELEASE_TAG" \
+            --checksums release-metadata/SHA256SUMS \
+            --retries 12 \
+            --delay 10
+      - name: Verify fresh pipx installation from PyPI
+        env:
+          PIP_INDEX_URL: https://pypi.org/simple
+          PIPX_BIN_DIR: /tmp/blueprint-pipx-bin
+          PIPX_HOME: /tmp/blueprint-pipx-home
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          pipx install "blueprint-ai-cli==$RELEASE_TAG"
+          test "$(/tmp/blueprint-pipx-bin/blueprint-ai --version)" = "$RELEASE_TAG"
+          /tmp/blueprint-pipx-bin/blueprint-ai doctor --json > /tmp/blueprint-pipx-doctor.json
+      - name: Verify fresh uv installation from PyPI
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          UV_DEFAULT_INDEX: https://pypi.org/simple
+          UV_TOOL_BIN_DIR: /tmp/blueprint-uv-bin
+          UV_TOOL_DIR: /tmp/blueprint-uv-tools
+        run: |
+          uv tool install "blueprint-ai-cli==$RELEASE_TAG"
+          test "$(/tmp/blueprint-uv-bin/blueprint-ai --version)" = "$RELEASE_TAG"
+          /tmp/blueprint-uv-bin/blueprint-ai doctor --json > /tmp/blueprint-uv-doctor.json

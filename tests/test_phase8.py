@@ -517,8 +517,9 @@ def test_next_existing_yarn_lock_and_serial_codemods_remain_partial(tmp_path: Pa
     plan = plan_evolution(root, ["next/official-upgrade-codemod=15.5.25"])
     assert plan.status == "ready"
     assert all(
-        "yarn.lock" in step.files for step in plan.steps if step.kind == "established-codemod"
+        "yarn.lock" not in step.files for step in plan.steps if step.kind == "established-codemod"
     )
+    assert "yarn.lock" in plan.steps[-1].files
     commands = [step.apply_command for step in plan.steps if step.kind == "established-codemod"]
     assert commands and all("--run-in-band" in command for command in commands)
     dependency = next(step for step in plan.steps if step.operation == "next-dependencies")
@@ -1005,7 +1006,12 @@ def test_failed_publication_removes_created_gitignored_path(
     )
 
 
-def test_partial_migration_can_record_explicit_manual_completion(tmp_path: Path) -> None:
+def test_partial_migration_can_record_explicit_manual_completion(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai import __version__
+    from blueprint_ai.evolution import engine
+
     root = _repository(
         tmp_path / "accept",
         {
@@ -1020,6 +1026,12 @@ def test_partial_migration_can_record_explicit_manual_completion(tmp_path: Path)
     )
     applied = apply_evolution(root, plan, run_blueprint_review=False)
     assert applied.status == "partial" and applied.operation_id
+    receipt_path = root / f".blueprint-ai/operations/{applied.operation_id}.json"
+    assert json.loads(receipt_path.read_text())["blueprint_ai_version"] == __version__
+    monkeypatch.setattr(engine, "__version__", "1.0.0")
+    with pytest.raises(ValueError, match="receipt requires Blueprint AI"):
+        accept_evolution(root, applied.operation_id, ["bounded evidence"])
+    monkeypatch.setattr(engine, "__version__", __version__)
     (root / "package-lock.json").write_text('{"lockfileVersion": 3}\n')
     with pytest.raises(ValueError, match="sealed completion paths"):
         accept_evolution(
@@ -1520,6 +1532,15 @@ def test_each_pipeline_stage_is_confined_to_its_own_scope(
     with pytest.raises(RuntimeError, match="crossed its planned scope: Dockerfile"):
         apply_evolution(root, plan, run_blueprint_review=False)
     assert project_fingerprint(root) == before
+
+
+def test_idempotency_inventory_excludes_transaction_private_paths() -> None:
+    from blueprint_ai.evolution.engine import FileRecord, _without_ephemeral
+
+    record = FileRecord(kind="file", sha256="a" * 64, size=1, mode=0o644)
+    public = {"package.json": record, "node_modules/.cache/tool.json": record}
+
+    assert _without_ephemeral(public, ["node_modules"]) == {"package.json": record}
 
 
 def test_generated_fixture_and_vendor_surfaces_do_not_establish_applicability(

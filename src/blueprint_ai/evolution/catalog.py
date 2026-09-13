@@ -2281,6 +2281,19 @@ def _next_pipeline(
         previous = type_identifier
     for boundary in boundaries:
         boundary_paths = _next_proxy_scope(paths) if Version(boundary).major == 16 else paths
+        codemod_paths = [
+            path
+            for path in boundary_paths
+            if path
+            not in {
+                "package-lock.json",
+                "npm-shrinkwrap.json",
+                "pnpm-lock.yaml",
+                "yarn.lock",
+                "bun.lock",
+                "bun.lockb",
+            }
+        ]
         transforms = (
             ["built-in-next-font", "next-async-request-api"]
             if Version(boundary).major == 15 and current_version.major == 14
@@ -2344,7 +2357,7 @@ def _next_pipeline(
                     kind="established-codemod",
                     operation=identifier,
                     operation_target=boundary,
-                    files=boundary_paths,
+                    files=codemod_paths,
                     tool="next-codemod",
                     apply_command=command,
                     depends_on=[previous] if previous else [],

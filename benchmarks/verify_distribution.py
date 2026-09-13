@@ -42,7 +42,13 @@ def expected_metadata(project_name: str, version: str) -> dict[str, object]:
         "Version": version,
         "Requires-Python": ">=3.12",
         "License-Expression": "MIT",
-        "Project-URL": PROJECT_URLS,
+        "Project-URL": {
+            *PROJECT_URLS,
+            (
+                "Release validation, https://github.com/pradeeptathineni/blueprint-ai/"
+                f"blob/{version}/docs/release-validation-{version}.md"
+            ),
+        },
     }
 
 

@@ -125,6 +125,18 @@ def test_malformed_receipt_is_rejected_before_any_rollback(tmp_path: Path) -> No
         rollback_operation(tmp_path, result.operation_id)
 
 
+def test_new_receipt_requires_its_exact_blueprint_ai_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result = apply_kit(tmp_path, discover_project(tmp_path), "security-policy")
+    assert result.operation_id and result.manifest_path
+    data = json.loads((tmp_path / result.manifest_path).read_text())
+    assert data["blueprint_ai_version"] == remediation.__version__
+    monkeypatch.setattr(remediation, "__version__", "1.0.0")
+    with pytest.raises(ValueError, match="receipt requires Blueprint AI"):
+        rollback_operation(tmp_path, result.operation_id)
+
+
 @pytest.mark.parametrize("timed_out,truncated", [(True, False), (False, True)])
 def test_kit_incomplete_evidence_cannot_pass(tmp_path: Path, monkeypatch, timed_out, truncated):
     (tmp_path / "package.json").write_text('{"name":"example"}')

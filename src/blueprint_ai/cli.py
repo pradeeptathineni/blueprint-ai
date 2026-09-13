@@ -167,7 +167,7 @@ def _enforce_exit_policy(report: RunReport, context) -> None:
         return
     order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
     if any(order[item.priority or "P3"] <= order[threshold] for item in report.active_findings):
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
 
 @app.command()
@@ -712,7 +712,7 @@ def init_command(
         )
         _dump(result.model_dump(mode="json"))
         if result.status in {"failed", "partial"}:
-            raise typer.Exit(2 if result.status == "failed" else 3)
+            raise typer.Exit(3)
     except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc

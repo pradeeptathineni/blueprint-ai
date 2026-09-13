@@ -18,6 +18,7 @@ uv run ruff format --check src tests
 uv run mypy src
 uv run pytest --cov=blueprint_ai --cov-report=term-missing
 uv run pip-audit
+uv run python benchmarks/compatibility_snapshot.py
 uv build
 uv run blueprint-ai review . --profile production --model off --fail-on P1
 ```

@@ -1,6 +1,6 @@
 # Project evolution
 
-Blueprint AI 0.9.0 plans and transactionally runs deterministic, version-aware migrations. A plan
+Blueprint AI 0.9.1 plans and transactionally runs deterministic, version-aware migrations. A plan
 seals the current Git inventory, explicit target, ordered stages, authoritative tool contract,
 expected writes, typed postconditions, and verification. Planning never selects “latest.”
 
@@ -36,9 +36,10 @@ A migration pipeline reuses evolution steps and transactions. Its small step voc
 dependency acquisition, native command, established codemod, built-in edit, postcondition, manual
 boundary, and future residual boundary. Dependencies preserve ordering; state-changing stages can
 trigger rediscovery before the next stage. Dry-run executes the full pipeline only in a disposable
-copy and returns its exact final diff. Acquisition requires explicit trusted network authorization,
-is scoped to declared destinations, and persists only private transaction data for later offline
-stages.
+copy and returns its exact final diff. Acquisition requires explicit trusted network authorization
+and records the contract's expected destinations, but the local OCI adapters cannot enforce
+destination filtering. The operator must supply network-level egress controls when unrestricted
+access is too broad. Acquired data persists only in private transaction paths for later offline stages.
 
 Authoritative command contracts seal provider, host/container executable, version range, independently
 pinned runner and recipe, registry integrity, source and licenses, invoke-versus-redistribute status,
@@ -129,7 +130,7 @@ generic ast-grep remain manual or deferred.
 `ResidualContract` seals desired state, completed deterministic work, failures, permitted paths,
 prohibited scope, acceptance commands, postconditions, network/credential/command authority,
 budgets, and rollback checkpoint.
-No production `AgentBackend` consumes it in 0.9.0: the corpus demonstrated no residual that justified
+No production `AgentBackend` consumes it in 0.9.1: the corpus demonstrated no residual that justified
 broader mutation authority. `ModelProvider` remains optional bounded decision/review support and is
 never used by deterministic migration execution.
 

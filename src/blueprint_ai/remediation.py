@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from blueprint_ai import __version__
 from blueprint_ai.core import Finding, ProjectFacts
 from blueprint_ai.safety import (
     MAX_MANIFEST_BYTES,
@@ -415,6 +416,7 @@ def _record_manifest(root: Path, result: ApplyResult) -> None:
     _remember_directories(root, target, result)
     payload = {
         "version": 2,
+        "blueprint_ai_version": __version__,
         "created_directories": result.created_directories,
         "operation_id": result.operation_id,
         "created_at": datetime.now(UTC).isoformat(),
@@ -751,6 +753,11 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult | Evolution
         or data.get("operation_id") != operation_id
     ):
         raise ValueError("operation manifest identity or version does not match")
+    producer_version = data.get("blueprint_ai_version")
+    if producer_version is not None and producer_version != __version__:
+        raise ValueError(
+            f"operation receipt requires Blueprint AI {producer_version}; running {__version__}"
+        )
     changes = data.get("changes")
     directories = data.get("created_directories", [])
     # Receipts are mutable project files. Validate every row before deleting any file.

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.9.1 — 2026-09-13
+
+- Close the release gate by reusing the complete CI workflow before a single artifact build, then
+  require immutable GitHub Release membership, asset-digest verification, provenance verification,
+  Trusted Publishing, exact PyPI metadata/hash checks, and fresh `pipx` and `uv` installs.
+- Replace the checkout-scoped SBOM with a verified SPDX 2.3 inventory of a clean installed runtime;
+  attest both that runtime SBOM for the distributions and the published SBOM file's provenance.
+- Establish the intended 1.x compatibility and security-support contract, plus a deterministic golden
+  snapshot for CLI options and exits, configuration defaults, public schemas/APIs, and report formats.
+- Bind new remediation receipts and evolution manifests to the exact Blueprint AI producer version,
+  preserving bounded legacy reads while rejecting cross-version accept or rollback operations.
+- Keep Next.js lockfiles exclusively in the sealed manual-acceptance scope, and exclude only declared
+  transaction-private caches from authoritative final-state replay comparisons.
+- Correct exit-code inconsistencies, document that declared network destinations are provenance rather
+  than an enforceable allowlist, repair PyPI-facing links, and classify the optional OpenAI provider as
+  preview/live-unverified when no release credential is available.
+
 ## 0.9.0 — 2026-09-13
 
 - Add explicit, network-authorized dependency-acquisition stages whose outputs persist only inside
