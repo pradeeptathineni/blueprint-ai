@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -194,7 +195,7 @@ def test_rejected_container_does_not_claim_isolation(tmp_path: Path, monkeypatch
 
 
 def test_tool_registry_covers_all_registered_adapters() -> None:
-    assert len(TOOLS) == 52
+    assert len(TOOLS) == 56
     assert {tool.name for tool in known_tools()} <= TOOLS.keys()
     for spec in TOOLS.values():
         assert (
@@ -235,6 +236,27 @@ def test_tool_receipt_identity_and_symlink_safety(tmp_path: Path) -> None:
     path.unlink()
     path.symlink_to(tmp_path / "missing")
     assert cached_image("ruff", "docker", cache=tmp_path) is None
+
+
+def test_built_tool_receipt_is_bound_to_the_current_integrity_checked_recipe(
+    tmp_path: Path,
+) -> None:
+    plan = tool_plan("react-codemod")
+    base_digest = TOOLS["react-codemod"].base_image
+    assert base_digest and "integrity mismatch" in " ".join(plan["image_recipe"])
+    recipe = "FROM " + base_digest + "\n" + "\n".join(plan["image_recipe"]) + "\n"
+    receipt = {
+        **plan,
+        "base_digest": base_digest,
+        "recipe_sha256": hashlib.sha256(recipe.encode()).hexdigest(),
+        "image_id": "sha256:" + "b" * 64,
+    }
+    path = tmp_path / "react-codemod-docker.json"
+    path.write_text(json.dumps(receipt))
+    assert cached_image("react-codemod", "docker", cache=tmp_path) == receipt["image_id"]
+    receipt["image_recipe"] = ["RUN npm install attacker@latest"]
+    path.write_text(json.dumps(receipt))
+    assert cached_image("react-codemod", "docker", cache=tmp_path) is None
 
 
 @pytest.mark.parametrize("kind", [f.id for f in FAMILIES.values() if f.initialize])

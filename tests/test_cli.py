@@ -108,5 +108,8 @@ def test_schema_help_lists_every_supported_schema() -> None:
         "evolution-plan",
         "evolution-report",
         "transformation",
+        "authoritative-tool",
+        "migration-postcondition",
+        "residual-contract",
     ):
         assert name in result.stdout

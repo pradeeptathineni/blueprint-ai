@@ -27,14 +27,22 @@ PYTHONPATH=src uv run python benchmarks/phase7_migrations.py \
   --output /tmp/blueprint-phase7-migrations.json \
   --require python/ruff-pyupgrade --require go/native-fix \
   --require terraform/native-format
+PYTHONPATH=src uv run python benchmarks/phase8_migrations.py \
+  --audit-root ../blueprint-ai-tmp/phase8-audit \
+  --output /tmp/blueprint-phase8-migrations.json
 ```
 
 Run Actionlint and Zizmor against every workflow. For the live OCI boundary, explicitly acquire the
-Python and Node images and run the sandbox suites; a skipped boundary is not a passing live test:
+Python, Node, Rust, .NET, Python-build, and Next-codemod images and run the sandbox and migration
+corpora; a skipped boundary is not a passing live test:
 
 ```bash
 docker pull python:3.12-slim-bookworm
 docker pull node:24-bookworm-slim
+uv run blueprint-ai tools install cargo
+uv run blueprint-ai tools install dotnet
+uv run blueprint-ai tools install python-build
+uv run blueprint-ai tools install next-codemod
 BLUEPRINT_SANDBOX_TEST_IMAGE=python:3.12-slim-bookworm \
 BLUEPRINT_SANDBOX_NODE_IMAGE=node:24-bookworm-slim \
   uv run pytest tests/test_phase6.py tests/test_redteam_sandbox.py -W error::DeprecationWarning
@@ -49,17 +57,17 @@ The Python distribution is `blueprint-ai-cli`; it installs the `blueprint-ai` ex
 `blueprint_ai` import. Build in an unused directory so stale files cannot enter verification:
 
 ```bash
-uv build --out-dir /tmp/blueprint-0.7.1-dist
+uv build --out-dir /tmp/blueprint-0.8.0-dist
 uv run python benchmarks/verify_distribution.py \
-  --dist /tmp/blueprint-0.7.1-dist --tag 0.7.1
+  --dist /tmp/blueprint-0.8.0-dist --tag 0.8.0
 uv venv /tmp/blueprint-wheel
 uv pip install --python /tmp/blueprint-wheel/bin/python \
-  /tmp/blueprint-0.7.1-dist/blueprint_ai_cli-0.7.1-py3-none-any.whl
+  /tmp/blueprint-0.8.0-dist/blueprint_ai_cli-0.8.0-py3-none-any.whl
 env -u PYTHONPATH /tmp/blueprint-wheel/bin/python benchmarks/release_smoke.py \
   --output /tmp/blueprint-wheel.json
 uv venv /tmp/blueprint-sdist
 uv pip install --python /tmp/blueprint-sdist/bin/python \
-  /tmp/blueprint-0.7.1-dist/blueprint_ai_cli-0.7.1.tar.gz
+  /tmp/blueprint-0.8.0-dist/blueprint_ai_cli-0.8.0.tar.gz
 env -u PYTHONPATH /tmp/blueprint-sdist/bin/python benchmarks/release_smoke.py \
   --output /tmp/blueprint-sdist.json
 ```
@@ -78,10 +86,10 @@ creating and pushing an annotated tag on that commit:
 ```bash
 git status --porcelain
 git push origin main
-git tag -a 0.7.1 -m 'Blueprint AI 0.7.1'
-git cat-file -t 0.7.1
-git rev-parse '0.7.1^{commit}'
-git push origin 0.7.1
+git tag -a 0.8.0 -m 'Blueprint AI 0.8.0'
+git cat-file -t 0.8.0
+git rev-parse '0.8.0^{commit}'
+git push origin 0.8.0
 ```
 
 CI and Release both run on the tag. Release builds the wheel and source archive once, verifies fresh
@@ -95,11 +103,11 @@ Verify each hosted artifact after downloading it:
 
 ```bash
 sha256sum -c SHA256SUMS
-gh attestation verify blueprint_ai_cli-0.7.1-py3-none-any.whl \
+gh attestation verify blueprint_ai_cli-0.8.0-py3-none-any.whl \
   -R pradeeptathineni/blueprint-ai
-gh attestation verify blueprint_ai_cli-0.7.1.tar.gz \
+gh attestation verify blueprint_ai_cli-0.8.0.tar.gz \
   -R pradeeptathineni/blueprint-ai
-gh attestation verify blueprint_ai_cli-0.7.1-py3-none-any.whl \
+gh attestation verify blueprint_ai_cli-0.8.0-py3-none-any.whl \
   -R pradeeptathineni/blueprint-ai --predicate-type https://spdx.dev/Document/v2.3
 ```
 

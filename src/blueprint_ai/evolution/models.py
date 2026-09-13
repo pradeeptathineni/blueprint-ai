@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Mechanism = Literal[
     "official-native",
@@ -19,7 +20,30 @@ Mechanism = Literal[
 ]
 Maturity = Literal["supported", "experimental", "partial", "deferred"]
 PlanStatus = Literal["inspection", "ready", "blocked", "noop"]
-EvolutionStatus = Literal["dry_run", "verified", "rolled_back", "partial", "failed", "noop"]
+EvolutionStatus = Literal[
+    "dry_run", "verified", "rolled_back", "partial", "accepted", "failed", "noop"
+]
+PipelineStepKind = Literal[
+    "native-command",
+    "established-codemod",
+    "builtin-edit",
+    "postcondition",
+    "manual-boundary",
+    "residual-boundary",
+]
+PipelineStepStatus = Literal[
+    "ready", "blocked", "deferred", "noop", "manual", "failed-precondition"
+]
+PostconditionKind = Literal[
+    "forbidden-pattern",
+    "required-pattern",
+    "exact-value",
+    "command",
+    "no-manual-markers",
+    "no-new-findings",
+    "path-present",
+    "path-absent",
+]
 
 
 class VerificationRequirement(BaseModel):
@@ -31,7 +55,116 @@ class VerificationRequirement(BaseModel):
     component: str = "."
     required: bool = True
     requires_project_trust: bool = False
+    isolated_copy: bool = False
     detail: str
+
+
+class TypedPostcondition(BaseModel):
+    """Small deterministic vocabulary for migration-specific acceptance checks."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9./_-]{2,119}$")
+    kind: PostconditionKind
+    paths: list[str] = Field(default_factory=list)
+    pattern: str | None = None
+    selector: str | None = None
+    expected: str | None = None
+    command: list[str] = Field(default_factory=list)
+    component: str = "."
+    required: bool = True
+    detail: str
+
+    @model_validator(mode="after")
+    def kind_contract(self) -> TypedPostcondition:
+        if self.kind in {"forbidden-pattern", "required-pattern"}:
+            if not self.paths or not self.pattern:
+                raise ValueError(f"{self.kind} requires paths and a pattern")
+        elif self.kind == "exact-value":
+            if not self.paths or not self.selector or self.expected is None:
+                raise ValueError("exact-value requires paths, a selector, and an expected value")
+        elif self.kind in {"command", "no-new-findings"} and not self.command:
+            raise ValueError(f"{self.kind} requires a deterministic command")
+        elif self.kind in {"path-present", "path-absent"} and not self.paths:
+            raise ValueError(f"{self.kind} requires paths")
+        return self
+
+
+class AuthoritativeToolContract(BaseModel):
+    """Bounded supply-chain and execution contract for an authoritative migration tool."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tool_id: str
+    provider: str
+    host_executable: str
+    container_executable: str
+    tool_version: str
+    runner_package: str | None = None
+    runner_version: str | None = None
+    runner_integrity: str | None = None
+    recipe: str
+    recipe_version: str
+    authoritative_source: str
+    tool_license: str
+    recipe_license: str
+    distribution: Literal["invoke", "redistribute"] = "invoke"
+    redistribution_permitted: bool = False
+    image: str | None = None
+    image_digest: str | None = None
+    network: Literal["none", "acquisition-only", "required"] = "none"
+    allowed_destinations: list[str] = Field(default_factory=list)
+    credentials: list[str] = Field(default_factory=list)
+    mounts: list[Literal["cache", "config", "ca"]] = Field(default_factory=list)
+    noninteractive_flags: list[str] = Field(default_factory=list)
+    preview_supported: bool
+    success_exit_codes: list[int] = Field(default_factory=lambda: [0])
+    expected_write_scopes: list[str]
+    timeout_seconds: int = Field(default=300, ge=1, le=3600)
+    memory_mb: int = Field(default=1024, ge=64, le=16384)
+    cpus: float = Field(default=2, gt=0, le=16)
+    pids: int = Field(default=128, ge=16, le=1024)
+    scratch_mb: int = Field(default=256, ge=16, le=8192)
+    file_size_mb: int = Field(default=128, ge=1, le=1024)
+    output_bytes: int = Field(default=4_000_000, ge=1024, le=16_000_000)
+    postconditions: list[TypedPostcondition] = Field(default_factory=list)
+    verification: list[VerificationRequirement] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def bounded_contract(self) -> AuthoritativeToolContract:
+        if not self.expected_write_scopes:
+            raise ValueError("authoritative tools require a non-empty expected write scope")
+        if self.image_digest and not re.fullmatch(r"sha256:[a-f0-9]{64}", self.image_digest):
+            raise ValueError("tool image digest must be a SHA-256 identity")
+        if self.network == "none" and self.allowed_destinations:
+            raise ValueError("network-disabled tools cannot declare network destinations")
+        if self.network == "required" and not self.allowed_destinations:
+            raise ValueError("network-required tools must document expected destinations")
+        if self.distribution == "redistribute" and not self.redistribution_permitted:
+            raise ValueError("redistribution must be explicitly permitted")
+        return self
+
+
+class ResidualContract(BaseModel):
+    """Sealed schema boundary for a future agent; no production backend consumes it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    desired_state: list[str] = Field(min_length=1)
+    completed_steps: list[str]
+    failures: list[str]
+    permitted_paths: list[str] = Field(min_length=1)
+    constraints: list[str]
+    prohibited_scope: list[str]
+    acceptance_commands: list[list[str]]
+    postconditions: list[TypedPostcondition]
+    network_destinations: list[str] = Field(default_factory=list)
+    credential_requirements: list[str] = Field(default_factory=list)
+    command_allowlist: list[str] = Field(default_factory=list)
+    timeout_seconds: int = Field(ge=1, le=3600)
+    step_limit: int = Field(ge=1, le=100)
+    token_limit: int = Field(ge=1, le=1_000_000)
+    rollback_checkpoint: str = Field(pattern=r"^sha256:[a-f0-9]{64}$")
 
 
 class TransformationSpec(BaseModel):
@@ -48,6 +181,10 @@ class TransformationSpec(BaseModel):
     provider: str
     tool: str | None = None
     tool_version: str | None = None
+    allowed_targets: list[str] = Field(default_factory=list)
+    target_required: bool = False
+    tool_contract: AuthoritativeToolContract | None = None
+    postconditions: list[TypedPostcondition] = Field(default_factory=list)
     recipe_version: str
     authoritative_source: str
     license: str
@@ -110,32 +247,46 @@ class EvolutionStep(BaseModel):
 
     id: str
     recipe_id: str
+    operation: str = "transform"
+    operation_target: str | None = None
+    kind: PipelineStepKind = "builtin-edit"
+    desired_target: str | None = None
     sequence: int = Field(ge=1)
     depends_on: list[str] = Field(default_factory=list)
     mechanism: Mechanism
     provider: str
     tool: str | None = None
     tool_version: str | None = None
+    preview_command: list[str] = Field(default_factory=list)
+    apply_command: list[str] = Field(default_factory=list)
     recipe_version: str
     authoritative_source: str
     files: list[str]
     preconditions: list[Precondition]
     verification: list[VerificationRequirement]
+    postconditions: list[TypedPostcondition] = Field(default_factory=list)
+    tool_contract: AuthoritativeToolContract | None = None
+    image_identities: dict[str, str] = Field(default_factory=dict)
+    ephemeral_paths: list[str] = Field(default_factory=list)
+    manual_completion_paths: list[str] = Field(default_factory=list)
+    rediscover: bool = False
+    mutates: bool = True
     reversible: bool
     limitations: list[str] = Field(default_factory=list)
     model_responsibility: str = "none"
     agent_responsibility: str = "none"
-    status: Literal["ready", "blocked", "noop", "manual"]
+    status: PipelineStepStatus
 
 
 class EvolutionPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "1.0.0"
+    schema_version: str = "2.0.0"
     blueprint_ai_version: str
     project_root: str = "."
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     requested_targets: list[str]
+    target_versions: dict[str, str] = Field(default_factory=dict)
     current_state: ProjectState
     desired_state: list[str]
     candidates: list[str]

@@ -551,14 +551,22 @@ def schema_command(
         typer.Argument(
             help=(
                 "settings, report, custom-blueprint, intent, genesis-plan, project-graph, "
-                "sandbox-policy, evolution-plan, evolution-report, or transformation"
+                "sandbox-policy, evolution-plan, evolution-report, transformation, "
+                "authoritative-tool, migration-postcondition, or residual-contract"
             )
         ),
     ] = "report",
 ) -> None:
     """Print stable machine-readable JSON schemas for integrations and extensions."""
     from blueprint_ai.core.project import ProjectGraph
-    from blueprint_ai.evolution.models import EvolutionPlan, EvolutionReport, TransformationSpec
+    from blueprint_ai.evolution.models import (
+        AuthoritativeToolContract,
+        EvolutionPlan,
+        EvolutionReport,
+        ResidualContract,
+        TransformationSpec,
+        TypedPostcondition,
+    )
     from blueprint_ai.genesis.models import GenesisPlanPreview, IntentSpec
     from blueprint_ai.sandbox import SandboxPolicy
 
@@ -573,6 +581,9 @@ def schema_command(
         "evolution-plan": EvolutionPlan.model_json_schema(),
         "evolution-report": EvolutionReport.model_json_schema(),
         "transformation": TransformationSpec.model_json_schema(),
+        "authoritative-tool": AuthoritativeToolContract.model_json_schema(),
+        "migration-postcondition": TypedPostcondition.model_json_schema(),
+        "residual-contract": ResidualContract.model_json_schema(),
     }
     if name not in schemas:
         raise typer.BadParameter("schema must be one of " + ", ".join(schemas))
@@ -770,7 +781,11 @@ def evolution_plan_command(
     path: PathArg = Path("."),
     target: Annotated[
         list[str] | None,
-        typer.Option("--target", "-t", help="Canonical transformation ID; repeat to select."),
+        typer.Option(
+            "--target",
+            "-t",
+            help="Transformation ID, optionally ID=explicit-version; repeat to select.",
+        ),
     ] = None,
     output: Annotated[
         Path | None,
@@ -815,25 +830,40 @@ def evolution_apply_command(
         str, typer.Option(help="auto, docker, podman, gvisor, or trusted host")
     ] = "auto",
     sandbox_image: Annotated[str | None, typer.Option()] = None,
+    allow_network: Annotated[
+        bool,
+        typer.Option(
+            help="Explicitly authorize unrestricted egress for a contract that requires it."
+        ),
+    ] = False,
 ) -> None:
     """Apply a sealed plan with scope enforcement, verification, and exact rollback."""
-    from blueprint_ai.evolution import TRANSFORMATIONS, apply_evolution, load_plan
+    from blueprint_ai.evolution import apply_evolution, load_plan
     from blueprint_ai.sandbox import SandboxPolicy
 
     try:
         plan = load_plan(plan_file)
-        needs_tool = any(
-            TRANSFORMATIONS[step.recipe_id].spec.tool
+        needs_tool = any(step.tool for step in plan.steps if step.status == "ready")
+        required_images = {
+            step.tool_contract.image
             for step in plan.steps
             if step.status == "ready"
-        )
+            and step.tool
+            and step.tool_contract is not None
+            and step.tool_contract.image
+        }
+        selected_image = sandbox_image
+        if selected_image is None and len(required_images) == 1:
+            selected_image = next(iter(required_images))
         policy = (
             SandboxPolicy.model_validate(
                 {
                     "backend": sandbox,
-                    "image": sandbox_image,
+                    "image": selected_image,
                     "trusted": trust_project_executables,
                     "writable": trust_project_executables and not dry_run,
+                    "network": "unrestricted" if allow_network else "none",
+                    "authorize_network": allow_network,
                     "timeout": 300,
                 }
             )
@@ -847,9 +877,35 @@ def evolution_apply_command(
             allow_dirty=allow_dirty,
             allow_main=allow_main,
             policy=policy,
+            report_failures=True,
         )
         _dump(result)
+        if result.status == "failed":
+            raise typer.Exit(3)
     except (ValueError, OSError, RuntimeError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+
+@evolve_app.command("accept")
+def evolution_accept_command(
+    operation_id: Annotated[str, typer.Argument()],
+    path: PathArg = Path("."),
+    evidence: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--evidence",
+            "-e",
+            help="Completed build/type/test evidence statement; repeat as needed.",
+        ),
+    ] = None,
+) -> None:
+    """Explicitly record completion evidence for a partial migration."""
+    from blueprint_ai.evolution import accept_evolution
+
+    try:
+        _dump(accept_evolution(path, operation_id, evidence or []))
+    except (ValueError, OSError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
 

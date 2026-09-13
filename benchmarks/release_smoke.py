@@ -65,6 +65,9 @@ def main() -> None:
             "evolution-plan",
             "evolution-report",
             "transformation",
+            "authoritative-tool",
+            "migration-postcondition",
+            "residual-contract",
         ):
             assert json.loads(cli("schema", schema))["schema"]
         assert json.loads(cli("support"))["families"]

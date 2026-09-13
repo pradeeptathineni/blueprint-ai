@@ -140,6 +140,18 @@ def cached_image(name: str, backend: str, *, cache: Path | None = None) -> str |
             or not re.fullmatch(r"sha256:[a-f0-9]{64}", digest)
         ):
             return None
+        if spec.image_recipe:
+            base_digest = receipt.get("base_digest")
+            if (
+                receipt.get("base_image") != spec.base_image
+                or receipt.get("image_recipe") != spec.image_recipe
+                or not isinstance(base_digest, str)
+                or not re.fullmatch(r"[^\s@]+@sha256:[a-f0-9]{64}", base_digest)
+            ):
+                return None
+            recipe = "FROM " + base_digest + "\n" + "\n".join(spec.image_recipe) + "\n"
+            if receipt.get("recipe_sha256") != hashlib.sha256(recipe.encode()).hexdigest():
+                return None
         return digest
     except (OSError, ValueError, TypeError):
         return None

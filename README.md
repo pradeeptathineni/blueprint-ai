@@ -21,7 +21,7 @@ After PyPI publication, use `pipx install blueprint-ai-cli` or
 tool before registry publication:
 
 ```bash
-pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.7.1/blueprint_ai_cli-0.7.1-py3-none-any.whl
+pipx install https://github.com/pradeeptathineni/blueprint-ai/releases/download/0.8.0/blueprint_ai_cli-0.8.0-py3-none-any.whl
 ```
 
 For development, run `uv sync --extra dev --locked`.
@@ -40,9 +40,10 @@ blueprint-ai review ./project --no-model --format json
 blueprint-ai support
 blueprint-ai init ./new-service --kind python-api --dry-run --no-model
 blueprint-ai add security-policy ./project
-blueprint-ai evolve plan ./project --target python/ruff-pyupgrade > evolution-plan.json
+blueprint-ai tools install cargo
+blueprint-ai evolve plan ./project --target rust/edition=2024 --output evolution-plan.json
 blueprint-ai evolve apply evolution-plan.json ./project --dry-run \
-  --sandbox host --trust-project-executables
+  --sandbox docker --trust-project-executables
 ```
 
 Inspection and planning do not execute project code. Review defaults to a read-only OCI sandbox
@@ -79,7 +80,7 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
 - [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
 - [Testing, threat model, and release gate](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/releasing.md): verification and release operations.
-- [0.7.1 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.7.1.md): correctness-patch, corpus, distribution, and release evidence.
+- [0.8.0 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/release-validation-0.8.0.md): authoritative migration corpus, adversarial coverage, distribution, and release evidence.
 
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or

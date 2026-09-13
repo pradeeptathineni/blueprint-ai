@@ -529,6 +529,80 @@ TOOLS["cargo"] = ToolSpec(
 )
 PROVIDERS["cargo"].image = TOOLS["cargo"].image
 PROVIDER_IMAGES["cargo"] = TOOLS["cargo"].image or ""
+TOOLS["dotnet"] = ToolSpec(
+    id="dotnet",
+    source=PROVIDERS["dotnet"].source,
+    license=PROVIDERS["dotnet"].license,
+    versions=">=10,<11",
+    image=(
+        "mcr.microsoft.com/dotnet/sdk@"
+        "sha256:2fa828c68761b1b8c23d7662dc134421b9d3b59fe1425fdbc80804e390cdb24d"
+    ),
+    container_executable="dotnet",
+    integration="toolchain",
+)
+TOOLS["python-build"] = ToolSpec(
+    id="python-build",
+    source="https://www.python.org/",
+    license="PSF-2.0",
+    versions=">=3.12,<4",
+    image="blueprint-tools/python-build:3.12-setuptools84",
+    base_image="python:3.12-slim-bookworm",
+    image_recipe=["RUN pip install --no-cache-dir setuptools==84.0.0 wheel==0.48.0"],
+    container_executable="python",
+    integration="toolchain",
+)
+TOOLS["react-codemod"] = ToolSpec(
+    id="react-codemod",
+    source="https://github.com/codemod/react-codemod",
+    license="Apache-2.0 runner; MIT React recipe",
+    versions="codemod 1.18.3; react-19-migration-recipe 0.1.5",
+    image="blueprint-tools/react-codemod:1.18.3",
+    base_image=("node@sha256:2fe369e969550cde8e867afc3fe370b260140cab4a23d467074295b42163d553"),
+    image_recipe=[
+        (
+            "RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates "
+            "&& rm -rf /var/lib/apt/lists/*"
+        ),
+        (
+            "RUN npm pack --ignore-scripts codemod@1.18.3 >/dev/null "
+            "&& node -e \"const fs=require('fs'),c=require('crypto');"
+            "const a='sha512-'+c.createHash('sha512').update("
+            "fs.readFileSync('codemod-1.18.3.tgz')).digest('base64');"
+            "if(a!=='sha512-cG3RcyPSWF0/mByubQ9/TdO21X1uiVV/V7kBpqCJjlb48hm0RdDTCZSj/"
+            "lvw5xKk5wVddGb3uhEetBVPeYNkRw==')throw new Error('integrity mismatch')\" "
+            "&& npm install --global --ignore-scripts --no-audit --no-fund "
+            "./codemod-1.18.3.tgz && rm codemod-1.18.3.tgz"
+        ),
+    ],
+    container_executable="codemod",
+    maturity="partial",
+    integration="toolchain",
+    acquisition="invoke pinned npm runner and registry recipe; do not redistribute",
+)
+TOOLS["next-codemod"] = ToolSpec(
+    id="next-codemod",
+    source="https://nextjs.org/docs/app/guides/upgrading/codemods",
+    license="MIT",
+    versions="@next/codemod 16.3.5",
+    image="blueprint-tools/next-codemod:16.3.5",
+    base_image="node:24-bookworm-slim",
+    image_recipe=[
+        (
+            "RUN npm pack --ignore-scripts @next/codemod@16.3.5 >/dev/null "
+            "&& node -e \"const fs=require('fs'),c=require('crypto');"
+            "const a='sha512-'+c.createHash('sha512').update("
+            "fs.readFileSync('next-codemod-16.3.5.tgz')).digest('base64');"
+            "if(a!=='sha512-uUzPcoYjSPv2YXX1k3BOh9rzDZ+AOGrqIzzZPyVVruUal9a6kRZoPFuYGaNKmvO"
+            "aiWrNifEuvDfHukDZ/UgKyw==')throw new Error('integrity mismatch')\" "
+            "&& npm install --global --ignore-scripts --no-audit --no-fund "
+            "./next-codemod-16.3.5.tgz && rm next-codemod-16.3.5.tgz"
+        )
+    ],
+    maturity="partial",
+    integration="toolchain",
+    acquisition="invoke pinned npm package; do not redistribute",
+)
 
 PROVIDERS["next"] = Provider(
     id="next",

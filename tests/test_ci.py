@@ -77,7 +77,7 @@ def test_release_actions_are_pinned_and_publishing_is_secretless_opt_in() -> Non
 def test_distribution_name_preserves_executable_and_import() -> None:
     metadata = tomllib.loads((ROOT / "pyproject.toml").read_text())
     assert metadata["project"]["name"] == "blueprint-ai-cli"
-    assert metadata["project"]["version"] == "0.7.1"
+    assert metadata["project"]["version"] == "0.8.0"
     assert metadata["project"]["scripts"] == {"blueprint-ai": "blueprint_ai.cli:app"}
     assert metadata["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
         "src/blueprint_ai"

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0 — 2026-09-12
+
+- Add one reusable ordered migration pipeline over sealed evolution steps, staged transactions,
+  rediscovery, typed postconditions, exact diffs, failure-stop publication, and exact rollback.
+- Add bounded authoritative-tool contracts with independently pinned runner/recipe provenance,
+  licensing and distribution metadata, immutable OCI identity, explicit networking, expected writes,
+  success semantics, and resource limits.
+- Support explicit Rust 2018→2021→2024 edition pipelines, conservative .NET SDK-style projects to
+  net10.0, and minimal setuptools PEP 517 build-system declarations with native build verification.
+- Add a truthful partial Next.js 14→15→16 official-codemod prefix with typed residual gates,
+  final-state replay, and explicit acceptance; reject automatic React 19 execution because its
+  separately resolved recipe cannot be verified before mutation, while retaining its `this.refs`
+  regression and narrow repair as tests.
+- Expand reviewed same-major `actions/setup-java` SHA pinning, formalize a sealed residual-agent
+  schema without adding an agent backend, and add real OCI corpus plus adversarial regressions.
+
 ## 0.7.1 — 2026-09-12
 
 - Honor canonical tool-registry container executables during managed evolution while preserving
