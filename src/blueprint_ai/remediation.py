@@ -747,6 +747,14 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult | Evolution
 
         return rollback_evolution(root, operation_id)
     if (
+        isinstance(data, dict)
+        and data.get("version") == 4
+        and data.get("kind") == "template-update"
+    ):
+        from blueprint_ai.evolution.template_update import rollback
+
+        return rollback(root, operation_id)
+    if (
         not isinstance(data, dict)
         or type(data.get("version")) is not int
         or data.get("version") not in {1, 2}
