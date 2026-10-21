@@ -157,6 +157,7 @@ def test_capability_kit_apply_idempotency_and_safe_rollback(tmp_path: Path) -> N
     second = apply_kit(tmp_path, facts, "observability")
     assert second.changed == []
     rolled_back = rollback_operation(tmp_path, first.operation_id)
+    assert not isinstance(rolled_back, dict)
     assert rolled_back.changes[0].status == "rolled_back"
     assert not (tmp_path / "docs" / "observability.md").exists()
 
@@ -167,6 +168,7 @@ def test_rollback_preserves_post_apply_user_edits(tmp_path: Path) -> None:
     target = tmp_path / ".dockerignore"
     target.write_text(target.read_text() + "custom\n")
     rolled_back = rollback_operation(tmp_path, result.operation_id)
+    assert not isinstance(rolled_back, dict)
     assert rolled_back.changes[0].status == "conflicted"
     assert target.is_file()
 

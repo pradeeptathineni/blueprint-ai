@@ -73,6 +73,7 @@ def test_rollback_preserves_leaf_symlink_and_its_referent(tmp_path: Path) -> Non
     target.symlink_to("user-owned.json")
     before = (tmp_path / "user-owned.json").read_bytes()
     rolled = rollback_operation(tmp_path, result.operation_id)
+    assert not isinstance(rolled, dict)
     assert rolled.changes[0].status == "conflicted"
     assert (tmp_path / "user-owned.json").read_bytes() == before
     assert target.is_symlink()
@@ -103,6 +104,7 @@ def test_rollback_bounds_changed_file_reads(tmp_path: Path) -> None:
     target = tmp_path / "renovate.json"
     target.write_bytes(b"x" * (MAX_MANIFEST_BYTES + 1))
     rolled = rollback_operation(tmp_path, result.operation_id)
+    assert not isinstance(rolled, dict)
     assert rolled.changes[0].status == "conflicted"
     assert target.stat().st_size == MAX_MANIFEST_BYTES + 1
 

@@ -302,6 +302,7 @@ def test_add_plan_conflict_apply_and_rollback(tmp_path: Path) -> None:
     assert result.changed and result.operation_id
     assert plan_add(tmp_path, "security-policy")["files"][0]["status"] == "already-present"
     rolled = rollback_operation(tmp_path, result.operation_id)
+    assert not isinstance(rolled, dict)
     assert rolled.changes[0].status == "rolled_back"
     assert {
         p: b for p, b in files(tmp_path).items() if not p.startswith(".blueprint-ai/")

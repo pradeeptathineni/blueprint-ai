@@ -58,6 +58,7 @@ def main() -> None:
         assert not second.changed and second.operation_id is None
         assert result.operation_id
         rolled = rollback_operation(root, result.operation_id)
+        assert not isinstance(rolled, dict)
         assert snapshot(root) == before, name
         conflict_path = root / next(iter(kit.files))
         conflict_path.parent.mkdir(parents=True, exist_ok=True)

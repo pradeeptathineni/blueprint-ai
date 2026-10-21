@@ -732,7 +732,9 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
     return result
 
 
-def rollback_operation(root: Path, operation_id: str) -> ApplyResult | EvolutionReport:
+def rollback_operation(
+    root: Path, operation_id: str
+) -> ApplyResult | EvolutionReport | dict[str, object]:
     if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
         raise ValueError("invalid operation id")
     manifest = root / ".blueprint-ai" / "operations" / f"{operation_id}.json"
