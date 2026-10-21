@@ -129,9 +129,10 @@ def _merge(ours: bytes, base: bytes, theirs: bytes) -> tuple[bytes, bool]:
             timeout=20,
             check=False,
         )
-    if result.returncode not in {0, 1}:
+    # Git reports the number of conflict regions (capped at 127), not a boolean.
+    if not 0 <= result.returncode <= 127:
         raise ValueError(f"Git merge-file failed: {result.stderr.decode(errors='replace')[:400]}")
-    return result.stdout, result.returncode == 1
+    return result.stdout, result.returncode > 0
 
 
 def _record(root: Path) -> dict:
@@ -200,23 +201,37 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
         theirs = new.get(path)
         ours = _read(root, path)
         proposed: tuple[bytes, int] | None
-        conflict = False
-        if base == theirs:
+        conflict_reasons: list[str] = []
+        if base is not None and ours is not None and theirs is not None:
+            if ours[0] == base[0]:
+                content = theirs[0]
+            elif theirs[0] == base[0] or ours[0] == theirs[0]:
+                content = ours[0]
+            else:
+                content, content_conflict = _merge(ours[0], base[0], theirs[0])
+                if content_conflict:
+                    conflict_reasons.append("content")
+            if ours[1] == base[1]:
+                mode = theirs[1]
+            elif theirs[1] == base[1] or ours[1] == theirs[1]:
+                mode = ours[1]
+            else:
+                mode = ours[1]
+                conflict_reasons.append("mode")
+            proposed = (content, mode)
+        elif base == theirs:
             proposed = ours
         elif ours == base:
             proposed = theirs
         elif theirs == ours:
             proposed = ours
-        elif base and theirs and ours:
-            merged, conflict = _merge(ours[0], base[0], theirs[0])
-            proposed = (merged, ours[1])
         else:
-            conflict = True
+            conflict_reasons.append("presence")
             proposed = ours
         resolution = resolutions.get(path)
-        if resolution and not conflict:
+        if resolution and not conflict_reasons:
             raise ValueError(f"resolution is unnecessary: {path}")
-        if conflict and resolution:
+        if conflict_reasons and resolution:
             if resolution == "project":
                 proposed = ours
             elif resolution == "template":
@@ -230,10 +245,10 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
                 ):
                     raise ValueError(f"invalid resolution file: {resolution}")
                 proposed = (resolved.read_bytes(), ours[1] if ours else 0o644)
-            conflict = False
+            conflict_reasons = []
         status = (
             "conflict"
-            if conflict
+            if conflict_reasons
             else "noop"
             if ours == proposed
             else "delete"
@@ -260,6 +275,8 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
                 "status": status,
                 "before": _sha(ours[0]) if ours else None,
                 "before_mode": ours[1] if ours else None,
+                "template_mode": theirs[1] if theirs else None,
+                "conflict_reasons": conflict_reasons,
                 "after": _sha(proposed[0]) if proposed else None,
                 "after_mode": proposed[1] if proposed else None,
                 "content": base64.b64encode(proposed[0]).decode() if proposed else None,
@@ -455,6 +472,7 @@ def rollback(root: Path, operation: str) -> dict:
                     not backup.is_file()
                     or backup.is_symlink()
                     or _sha(backup.read_bytes()) != row["before"]
+                    or stat.S_IMODE(backup.stat().st_mode) != row["before_mode"]
                 ):
                     raise ValueError(f"rollback backup is unavailable or changed: {row['path']}")
         for row in reversed(changes):

@@ -1,6 +1,7 @@
 """Owned template updates preserve authored work and exact rollback bytes."""
 
 import json
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -8,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from blueprint_ai.evolution import template_update
+from blueprint_ai.evolution.engine import _operations_root
 from blueprint_ai.evolution.template_update import apply, check, initialize, plan, rollback
 
 
@@ -164,3 +166,144 @@ def test_unnecessary_resolution_and_unsupported_placeholder(template_pair):
     git(source, "commit", "-qm", "bad placeholder")
     with pytest.raises(ValueError, match="unsupported template placeholder"):
         plan(project, git(source, "rev-parse", "HEAD"))
+
+
+def script_template(tmp_path: Path, initial_mode: int) -> tuple[Path, Path, str]:
+    source = tmp_path / "source"
+    source.mkdir()
+    git(source, "init", "-q")
+    git(source, "config", "user.name", "Fixture")
+    git(source, "config", "user.email", "fixture@example.invalid")
+    script = source / "app.sh"
+    script.write_text("#!/bin/sh\necho original\n")
+    script.chmod(initial_mode)
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "v1")
+    return source, tmp_path / "project", git(source, "rev-parse", "HEAD")
+
+
+def file_mode(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+@pytest.mark.parametrize("initial,target", [(0o644, 0o755), (0o755, 0o644)])
+def test_template_mode_change_keeps_authored_text(tmp_path: Path, initial: int, target: int):
+    source, project, first = script_template(tmp_path, initial)
+    (source / "app.sh").chmod(target)
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "mode update")
+    second = git(source, "rev-parse", "HEAD")
+    initialize(project, source, first, {})
+    (project / "app.sh").write_text("#!/bin/sh\necho authored\n")
+    preview = plan(project, second)
+    row = next(row for row in preview["rows"] if row["path"] == "app.sh")
+    assert (row["status"], row["before_mode"], row["after_mode"]) == ("change", initial, target)
+    result = apply(project, preview)
+    assert (project / "app.sh").read_text() == "#!/bin/sh\necho authored\n"
+    assert file_mode(project / "app.sh") == target
+    assert check(project, second)["status"] == "current"
+    rollback(project, result["operation_id"])
+    assert file_mode(project / "app.sh") == initial
+    assert (project / "app.sh").read_text() == "#!/bin/sh\necho authored\n"
+
+
+def test_project_only_mode_change_survives_template_text_update(tmp_path: Path):
+    source, project, first = script_template(tmp_path, 0o644)
+    (source / "app.sh").write_text("#!/bin/sh\necho improved\n")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "text update")
+    second = git(source, "rev-parse", "HEAD")
+    initialize(project, source, first, {})
+    (project / "app.sh").chmod(0o755)
+    preview = plan(project, second)
+    row = next(row for row in preview["rows"] if row["path"] == "app.sh")
+    assert row["after_mode"] == 0o755
+    result = apply(project, preview)
+    assert (project / "app.sh").read_text() == "#!/bin/sh\necho improved\n"
+    assert file_mode(project / "app.sh") == 0o755
+    rollback(project, result["operation_id"])
+    assert file_mode(project / "app.sh") == 0o755
+
+
+def test_divergent_mode_requires_explicit_choice(tmp_path: Path):
+    source, project, first = script_template(tmp_path, 0o644)
+    (source / "app.sh").chmod(0o755)
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "executable")
+    second = git(source, "rev-parse", "HEAD")
+    initialize(project, source, first, {})
+    (project / "app.sh").chmod(0o700)
+    preview = plan(project, second)
+    row = next(row for row in preview["rows"] if row["path"] == "app.sh")
+    assert (row["status"], row["conflict_reasons"], row["template_mode"]) == (
+        "conflict",
+        ["mode"],
+        0o755,
+    )
+    with pytest.raises(ValueError, match="unresolved"):
+        apply(project, preview)
+    retained = apply(project, plan(project, second, {"app.sh": "project"}))
+    assert file_mode(project / "app.sh") == 0o700
+    rollback(project, retained["operation_id"])
+    accepted = apply(project, plan(project, second, {"app.sh": "template"}))
+    assert file_mode(project / "app.sh") == 0o755
+    rollback(project, accepted["operation_id"])
+    assert file_mode(project / "app.sh") == 0o700
+
+
+def test_two_conflict_regions_support_merged_file_resolution(tmp_path: Path):
+    source, project, first = script_template(tmp_path, 0o644)
+    original = "".join(f"line {i}\n" for i in range(60))
+    (source / "notes.txt").write_text(original)
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "notes v1")
+    first = git(source, "rev-parse", "HEAD")
+    template_text = original.replace("line 10\n", "template ten\n").replace(
+        "line 50\n", "template fifty\n"
+    )
+    (source / "notes.txt").write_text(template_text)
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "notes v2")
+    second = git(source, "rev-parse", "HEAD")
+    initialize(project, source, first, {})
+    authored = original.replace("line 10\n", "authored ten\n").replace(
+        "line 50\n", "authored fifty\n"
+    )
+    (project / "notes.txt").write_text(authored)
+    preview = plan(project, second)
+    row = next(row for row in preview["rows"] if row["path"] == "notes.txt")
+    assert row["status"] == "conflict"
+    assert row["conflict_reasons"] == ["content"]
+    assert row["diff"].count("<<<<<<< project") == 2
+    merged = tmp_path / "merged.txt"
+    merged.write_text(
+        original.replace("line 10\n", "resolved ten\n").replace("line 50\n", "resolved fifty\n")
+    )
+    ready = plan(project, second, {"notes.txt": str(merged)})
+    result = apply(project, ready)
+    assert (project / "notes.txt").read_text() == merged.read_text()
+    assert plan(project, second)["status"] == "noop"
+    rollback(project, result["operation_id"])
+    assert (project / "notes.txt").read_text() == authored
+
+
+def test_backup_mode_tamper_refuses_before_any_rollback_write(tmp_path: Path):
+    source, project, first = script_template(tmp_path, 0o644)
+    (source / "app.sh").write_text("#!/bin/sh\necho updated\n")
+    (source / "z-added.txt").write_text("new\n")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "v2")
+    second = git(source, "rev-parse", "HEAD")
+    initialize(project, source, first, {})
+    result = apply(project, plan(project, second))
+    paths = ("app.sh", "z-added.txt", ".blueprint-ai/template.json")
+    published = {path: ((project / path).read_bytes(), file_mode(project / path)) for path in paths}
+    backup = _operations_root(project) / result["operation_id"] / "before/app.sh"
+    backup.chmod(0o755)
+    with pytest.raises(ValueError, match="rollback backup is unavailable or changed"):
+        rollback(project, result["operation_id"])
+    assert published == {
+        path: ((project / path).read_bytes(), file_mode(project / path)) for path in paths
+    }
+    backup.chmod(0o644)
+    assert rollback(project, result["operation_id"])["status"] == "rolled_back"
