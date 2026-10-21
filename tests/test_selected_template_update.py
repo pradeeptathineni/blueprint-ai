@@ -152,3 +152,15 @@ def test_publication_failure_restores_exact_prior_bytes(template_pair, monkeypat
     assert all((project / path).read_bytes() == value for path, value in original.items())
     assert not (project / "test_health.py").exists()
     assert list((project / ".blueprint-ai/operations").glob("*.json")) == []
+
+
+def test_unnecessary_resolution_and_unsupported_placeholder(template_pair):
+    source, project, first, second = template_pair
+    initialize(project, source, first, {"project": "Sample API"})
+    with pytest.raises(ValueError, match="unnecessary"):
+        plan(project, second, {"test_health.py": "template"})
+    (source / "bad.txt").write_text("{{ unsupported-name }}\n")
+    git(source, "add", ".")
+    git(source, "commit", "-qm", "bad placeholder")
+    with pytest.raises(ValueError, match="unsupported template placeholder"):
+        plan(project, git(source, "rev-parse", "HEAD"))

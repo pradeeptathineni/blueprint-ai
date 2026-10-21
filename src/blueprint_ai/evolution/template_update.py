@@ -82,6 +82,10 @@ def _snapshot(source: Path, commit: str, answers: dict[str, str]) -> dict[str, t
             return answers[key].encode()
 
         content = _KEY.sub(replace, content)
+        if b"{{" in content and re.search(rb"\{\{[^{}]*\}\}", content):
+            raise ValueError(f"unsupported template placeholder: {path}")
+        if len(content) > MAX_FILE:
+            raise ValueError(f"rendered template file exceeds 4 MiB: {path}")
         total += len(content)
         if total > MAX_TOTAL:
             raise ValueError("rendered template exceeds 32 MiB")
@@ -210,6 +214,8 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
             conflict = True
             proposed = ours
         resolution = resolutions.get(path)
+        if resolution and not conflict:
+            raise ValueError(f"resolution is unnecessary: {path}")
         if conflict and resolution:
             if resolution == "project":
                 proposed = ours
@@ -225,8 +231,6 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
                     raise ValueError(f"invalid resolution file: {resolution}")
                 proposed = (resolved.read_bytes(), ours[1] if ours else 0o644)
             conflict = False
-        if resolution and not conflict and base == theirs:
-            raise ValueError(f"resolution is unnecessary: {path}")
         status = (
             "conflict"
             if conflict
