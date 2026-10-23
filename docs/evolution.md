@@ -1,5 +1,7 @@
 # Project evolution
 
+For projects created from a pinned local Git template, see [template updates](template-update.md).
+
 Blueprint AI 0.9.1 plans and transactionally runs deterministic, version-aware migrations. A plan
 seals the current Git inventory, explicit target, ordered stages, authoritative tool contract,
 expected writes, typed postconditions, and verification. Planning never selects “latest.”

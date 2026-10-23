@@ -454,7 +454,7 @@ def rollback(
     path: PathArg = Path("."),
     json_output: JsonOption = False,
 ) -> None:
-    """Reverse one unchanged remediation or evolution operation."""
+    """Reverse one unchanged remediation, evolution, or template operation."""
     try:
         result = rollback_operation(path.resolve(), operation_id)
     except ValueError as exc:
@@ -462,8 +462,94 @@ def rollback(
     if json_output:
         _dump(result)
     else:
-        for change in result.changes:
-            typer.echo(f"{change.status}: {change.target} ({change.detail})")
+        if isinstance(result, dict):
+            typer.echo(f"{result['status']}: {result['operation_id']}")
+        else:
+            for change in result.changes:
+                typer.echo(f"{change.status}: {change.target} ({change.detail})")
+
+
+template_app = typer.Typer(help="Create and update projects from pinned local Git templates.")
+app.add_typer(template_app, name="template")
+
+
+@template_app.command("init")
+def template_init(
+    source: Path,
+    path: Path,
+    ref: Annotated[str, typer.Option("--ref", help="Pinned commit, tag, or branch")],
+    answers_file: Annotated[
+        Path | None, typer.Option("--answers", help="JSON string answers")
+    ] = None,
+) -> None:
+    """Create a project from a local Git template; no hooks are run."""
+    from blueprint_ai.evolution.template_update import initialize
+
+    try:
+        answers = json.loads(answers_file.read_text()) if answers_file else {}
+        if not isinstance(answers, dict):
+            raise ValueError("answers must be a JSON object")
+        _dump(initialize(path, source, ref, answers))
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@template_app.command("check")
+def template_check(path: PathArg, ref: Annotated[str, typer.Option("--ref")]) -> None:
+    """Compare the recorded template commit with an explicit local Git ref."""
+    from blueprint_ai.evolution.template_update import check
+
+    try:
+        _dump(check(path, ref))
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@template_app.command("plan")
+def template_plan(
+    path: PathArg,
+    ref: Annotated[str, typer.Option("--ref")],
+    output: Annotated[Path, typer.Option("--output", help="Save sealed plan JSON")],
+    resolve: Annotated[
+        list[str] | None, typer.Option("--resolve", help="PATH=project|template|merged-file")
+    ] = None,
+) -> None:
+    """Preview a three-way update and save its exact proposed bytes."""
+    from blueprint_ai.evolution.template_update import plan
+
+    try:
+        choices = {}
+        for item in resolve or []:
+            name, sep, choice = item.partition("=")
+            if not sep or not name or not choice or name in choices:
+                raise ValueError("resolution must be a unique PATH=project|template|merged-file")
+            choices[name] = choice
+        result = plan(path, ref, choices)
+        if output.exists():
+            raise ValueError("plan output already exists")
+        output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        _dump(
+            {k: v for k, v in result.items() if k != "rows"}
+            | {
+                "rows": [
+                    {k: v for k, v in row.items() if k != "content"} for row in result["rows"]
+                ],
+                "plan_path": str(output),
+            }
+        )
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
+@template_app.command("apply")
+def template_apply(path: PathArg, saved_plan: Annotated[Path, typer.Option("--plan")]) -> None:
+    """Publish a fresh conflict-free plan and keep exact rollback bytes."""
+    from blueprint_ai.evolution.template_update import apply
+
+    try:
+        _dump(apply(path, json.loads(saved_plan.read_text())))
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()

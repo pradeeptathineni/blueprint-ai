@@ -732,7 +732,9 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
     return result
 
 
-def rollback_operation(root: Path, operation_id: str) -> ApplyResult | EvolutionReport:
+def rollback_operation(
+    root: Path, operation_id: str
+) -> ApplyResult | EvolutionReport | dict[str, object]:
     if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
         raise ValueError("invalid operation id")
     manifest = root / ".blueprint-ai" / "operations" / f"{operation_id}.json"
@@ -746,6 +748,14 @@ def rollback_operation(root: Path, operation_id: str) -> ApplyResult | Evolution
         from blueprint_ai.evolution import rollback_evolution
 
         return rollback_evolution(root, operation_id)
+    if (
+        isinstance(data, dict)
+        and data.get("version") == 4
+        and data.get("kind") == "template-update"
+    ):
+        from blueprint_ai.evolution.template_update import rollback
+
+        return rollback(root, operation_id)
     if (
         not isinstance(data, dict)
         or type(data.get("version")) is not int

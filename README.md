@@ -75,6 +75,7 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Project genesis](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/genesis.md): naming, providers, cloud starters, and compositions.
 - [Existing-project capabilities](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/capabilities.md): plan, add, verify, and rollback.
 - [Project evolution](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/evolution.md): desired-state plans, supported transformations, safety, and exact rollback.
+- [Template updates](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/template-update.md): preview and adopt pinned template changes while preserving authored files.
 - [Tools and sandbox policy](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/sandbox.md): acquisition and execution boundaries.
 - [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
 - [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
