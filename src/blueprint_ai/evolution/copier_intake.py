@@ -190,7 +190,10 @@ def _declarations(data: dict) -> tuple[dict, list[dict], list[str]]:
         declared.append(question)
     if len(declared) > MAX_QUESTIONS:
         refusals.append(f"template declares more than {MAX_QUESTIONS} questions")
-    subdirectory = settings["subdirectory"].strip("/")
+    subdirectory = settings["subdirectory"]
+    if not isinstance(subdirectory, str):
+        raise ValueError("_subdirectory must be a literal string")
+    subdirectory = subdirectory.strip("/")
     parts = subdirectory.split("/") if subdirectory else []
     if any(p in {"", ".", ".."} or "\\" in p for p in parts):
         refusals.append("_subdirectory must be a plain relative path")
