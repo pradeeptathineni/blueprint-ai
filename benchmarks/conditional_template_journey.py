@@ -222,14 +222,14 @@ def main() -> None:
             ],
         }
         steps["rollback"] = cli("rollback", applied["operation_id"], str(target), "--json")
+        record_restored = (target / ".blueprint-ai/template.json").read_bytes() == record_before
         steps["after_rollback"] = {
-            "record_restored": (target / ".blueprint-ai/template.json").read_bytes()
-            == record_before,
+            "record_restored": record_restored,
             "README.md": readme.read_text(),
             "ci/pipeline.yml": (target / "ci/pipeline.yml").read_text(),
             "NOTES.md": (target / "NOTES.md").read_text(),
         }
-        assert steps["after_rollback"]["record_restored"]
+        assert record_restored
     (output / "journey.json").write_text(json.dumps(steps, indent=2) + "\n")
     print(json.dumps(steps, indent=2))
 

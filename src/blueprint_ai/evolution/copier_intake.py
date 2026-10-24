@@ -171,6 +171,8 @@ def _check(question: dict, value: object) -> tuple[object, str | None]:
         return value, None
     if not isinstance(value, list):
         return None, f"must be a JSON list of {kind} choices, got {type(value).__name__}"
+    if choices is None:
+        return None, "needs literal choices"
     if len(value) > MAX_CHOICES:
         return None, f"has more than {MAX_CHOICES} selections"
     for index, item in enumerate(value):
