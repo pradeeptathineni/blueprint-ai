@@ -143,18 +143,22 @@ def _record(root: Path) -> dict:
         record = json.loads(current[0])
     except (UnicodeError, ValueError) as exc:
         raise ValueError("invalid template record") from exc
-    # Schema 2 is the copier-safe-v1 questionnaire intake; older releases reject it.
+    # Schemas 2 and 3 are the copier-safe-v1 and -v2 questionnaire intakes; releases that
+    # predate a schema reject it rather than treat it as a static template.
     schema = record.get("schema") if isinstance(record, dict) else None
-    if not (schema == 1 or (schema == 2 and record.get("format") == "copier-safe-v1")) or (
-        not isinstance(record.get("answers"), dict)
-    ):
+    formats = {2: "copier-safe-v1", 3: "copier-safe-v2"}
+    intake = type(schema) is int and schema in formats and record.get("format") == formats[schema]
+    if not (schema == 1 or intake) or not isinstance(record.get("answers"), dict):
         raise ValueError("invalid template record")
     return record
 
 
-def _rendered(source: Path, record: dict, commit: str) -> tuple[dict[str, tuple[bytes, int]], dict]:
+def _rendered(
+    source: Path, record: dict, commit: str
+) -> tuple[dict[str, tuple[bytes, int]], dict, dict]:
+    """Return rendered files, effective answers and the record format at ``commit``."""
     if record["schema"] == 1:
-        return _snapshot(source, commit, record["answers"]), record["answers"]
+        return _snapshot(source, commit, record["answers"]), record["answers"], {}
     from .copier_intake import render_for_record
 
     return render_for_record(source, commit, record["answers"])
@@ -229,9 +233,9 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
     root = root.resolve()
     record = _record(root)
     source = Path(record["source"])
-    old, _answers = _rendered(source, record, record["commit"])
+    old, _answers, _format = _rendered(source, record, record["commit"])
     target_commit = _commit(source, ref)
-    new, next_answers = _rendered(source, record, target_commit)
+    new, next_answers, next_format = _rendered(source, record, target_commit)
     resolutions = resolutions or {}
     if any(path not in old and path not in new for path in resolutions):
         raise ValueError("resolution names a path outside the template")
@@ -324,7 +328,9 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
             }
         )
     current_record = _read(root, RECORD)
-    next_record = {**record, "commit": target_commit, "answers": next_answers}
+    # A questionnaire record follows the target commit's dialect, so adopting a template that
+    # gained conditions moves it to schema 3; rollback restores the earlier record bytes.
+    next_record = {**record, **next_format, "commit": target_commit, "answers": next_answers}
     if target_commit != record["commit"]:
         assert current_record is not None
         rows.append(
