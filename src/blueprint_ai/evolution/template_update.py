@@ -143,9 +143,63 @@ def _record(root: Path) -> dict:
         record = json.loads(current[0])
     except (UnicodeError, ValueError) as exc:
         raise ValueError("invalid template record") from exc
-    if record.get("schema") != 1 or not isinstance(record.get("answers"), dict):
+    # Schema 2 is the copier-safe-v1 questionnaire intake; older releases reject it.
+    schema = record.get("schema") if isinstance(record, dict) else None
+    if not (schema == 1 or (schema == 2 and record.get("format") == "copier-safe-v1")) or (
+        not isinstance(record.get("answers"), dict)
+    ):
         raise ValueError("invalid template record")
     return record
+
+
+def _rendered(source: Path, record: dict, commit: str) -> tuple[dict[str, tuple[bytes, int]], dict]:
+    if record["schema"] == 1:
+        return _snapshot(source, commit, record["answers"]), record["answers"]
+    from .copier_intake import render_for_record
+
+    return render_for_record(source, commit, record["answers"])
+
+
+def _create(root: Path, files: dict[str, tuple[bytes, int]], record: dict) -> None:
+    if root.is_symlink() or (root.exists() and (not root.is_dir() or any(root.iterdir()))):
+        raise ValueError("template destination must be empty")
+    original = root.stat() if root.exists() else None
+    root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".blueprint-create-", dir=root.parent))
+    owned = staging.stat()
+    published = False
+    try:
+        _git(staging, "init", "-q")
+        for path, (content, mode) in [*files.items(), (RECORD, (_json(record), 0o644))]:
+            target = _safe_path(staging, path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            target.chmod(mode)
+            if _read(staging, path) != (content, mode):
+                raise OSError(f"post-write verification failed: {path}")
+        # Publish a complete tree; a populated or replaced destination is never cleaned up.
+        if root.is_symlink():
+            raise ValueError("template destination changed during creation")
+        if original is None:
+            if root.exists():
+                raise ValueError("template destination appeared during creation")
+        else:
+            current = root.stat()
+            if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino) or any(
+                root.iterdir()
+            ):
+                raise ValueError("template destination changed during creation")
+            staging.chmod(stat.S_IMODE(original.st_mode))
+        os.replace(staging, root)
+        published = True
+    finally:
+        if not published and staging.exists():
+            current = staging.lstat()
+            if stat.S_ISDIR(current.st_mode) and (current.st_dev, current.st_ino) == (
+                owned.st_dev,
+                owned.st_ino,
+            ):
+                shutil.rmtree(staging)
 
 
 def initialize(root: Path, source: Path, ref: str, answers: dict[str, str]) -> dict:
@@ -156,22 +210,8 @@ def initialize(root: Path, source: Path, ref: str, answers: dict[str, str]) -> d
         raise ValueError("template destination must be empty")
     commit = _commit(source, ref)
     files = _snapshot(source, commit, answers)
-    root.mkdir(parents=True, exist_ok=True)
-    _git(root, "init", "-q")
     record = {"schema": 1, "source": str(source), "commit": commit, "answers": answers}
-    try:
-        for path, (content, mode) in files.items():
-            target = _safe_path(root, path)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content)
-            target.chmod(mode)
-        target = _safe_path(root, RECORD)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(_json(record))
-    except Exception:
-        for path in [*files, RECORD]:
-            _safe_path(root, path).unlink(missing_ok=True)
-        raise
+    _create(root, files, record)
     return {"status": "initialized", "commit": commit, "files": sorted(files), "record": RECORD}
 
 
@@ -189,9 +229,9 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
     root = root.resolve()
     record = _record(root)
     source = Path(record["source"])
-    old = _snapshot(source, record["commit"], record["answers"])
+    old, _answers = _rendered(source, record, record["commit"])
     target_commit = _commit(source, ref)
-    new = _snapshot(source, target_commit, record["answers"])
+    new, next_answers = _rendered(source, record, target_commit)
     resolutions = resolutions or {}
     if any(path not in old and path not in new for path in resolutions):
         raise ValueError("resolution names a path outside the template")
@@ -284,7 +324,7 @@ def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dic
             }
         )
     current_record = _read(root, RECORD)
-    next_record = {**record, "commit": target_commit}
+    next_record = {**record, "commit": target_commit, "answers": next_answers}
     if target_commit != record["commit"]:
         assert current_record is not None
         rows.append(
