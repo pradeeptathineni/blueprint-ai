@@ -110,6 +110,32 @@ def test_preview_binds_answers_without_creating_target(source: Path, tmp_path: P
     assert other["preview_sha256"] != result["preview_sha256"]
 
 
+def test_v1_templates_keep_v1_binding_and_evaluate(source: Path, tmp_path: Path) -> None:
+    from blueprint_ai.evolution.copier_intake import evaluate
+    from blueprint_ai.evolution.template_update import _json, _sha
+
+    result = preview(source, tmp_path / "out", "v1", {"project_name": "Shop"})
+    v1_binding = (
+        "dialect source target ref commit config_path subdirectory templates_suffix answers"
+        " answer_sources excluded files file_count total_bytes record record_sha256"
+    ).split()
+    assert result["dialect"] == "copier-safe-v1" and "skipped" not in result
+    assert result["preview_sha256"] == _sha(_json({k: result[k] for k in v1_binding}))
+    evaluated = evaluate(source, "v1", {"project_name": "Shop"})
+    assert evaluated["dialect"] == "copier-safe-v1" and evaluated["complete"]
+    assert evaluated["answers"] == result["answers"] and evaluated["skipped"] == []
+    with pytest.raises(ValueError, match="requires copier-safe-v1, not copier-safe-v2"):
+        create(
+            source,
+            tmp_path / "out",
+            "v1",
+            {"project_name": "Shop"},
+            result["preview_sha256"],
+            "copier-safe-v2",
+        )
+    assert not (tmp_path / "out").exists()
+
+
 @pytest.mark.parametrize(
     ("answers", "message"),
     [
@@ -140,7 +166,7 @@ def test_invalid_answers_refuse(source: Path, tmp_path: Path, answers: dict, mes
             "token:\n  type: str\n  secret: true\n  default: x\n",
             "unsupported question fields: secret",
         ),
-        ("a:\n  type: str\n  when: false\n", "unsupported question fields: when"),
+        ("a:\n  type: str\n  validator: x\n", "unsupported question fields: validator"),
         ("a:\n  type: yaml\n", "type must be declared"),
         ("a:\n  help: no type\n", "type must be declared"),
         ("a:\n  type: str\n  default: '{{ b }}'\n", "default must be a literal"),

@@ -482,7 +482,8 @@ def template_init(
         Path | None, typer.Option("--answers", help="JSON answers (strings for static)")
     ] = None,
     template_format: Annotated[
-        str, typer.Option("--format", help="static (default) or copier-safe-v1")
+        str,
+        typer.Option("--format", help="static (default), copier-safe-v1 or copier-safe-v2"),
     ] = "static",
     confirm_digest: Annotated[
         str | None,
@@ -490,19 +491,22 @@ def template_init(
     ] = None,
 ) -> None:
     """Create a project from a local Git template; no hooks are run."""
-    from blueprint_ai.evolution.copier_intake import DIALECT, create
+    from blueprint_ai.evolution.copier_intake import DIALECT, DIALECT_V2, create
     from blueprint_ai.evolution.template_update import initialize
 
     try:
-        if template_format == DIALECT:
+        if template_format in {DIALECT, DIALECT_V2}:
             if not confirm_digest:
-                raise ValueError(f"--format {DIALECT} requires --confirm-digest from preview")
-            _dump(create(source, path, ref, _intake_answers(answers_file), confirm_digest))
+                raise ValueError(
+                    f"--format {template_format} requires --confirm-digest from preview"
+                )
+            answers = _intake_answers(answers_file)
+            _dump(create(source, path, ref, answers, confirm_digest, template_format))
             return
         if template_format != "static":
-            raise ValueError(f"--format must be static or {DIALECT}")
+            raise ValueError(f"--format must be static, {DIALECT} or {DIALECT_V2}")
         if confirm_digest:
-            raise ValueError(f"--confirm-digest applies only to --format {DIALECT}")
+            raise ValueError(f"--confirm-digest applies only to --format {DIALECT}/{DIALECT_V2}")
         answers = json.loads(answers_file.read_text()) if answers_file else {}
         if not isinstance(answers, dict):
             raise ValueError("answers must be a JSON object")
@@ -512,12 +516,22 @@ def template_init(
 
 
 def _intake_answers(answers_file: Path | None) -> dict:
+    from blueprint_ai.evolution.copier_intake import MAX_ANSWERS_FILE
+
     def unique(pairs: list[tuple[str, Any]]) -> dict:
         if len({key for key, _ in pairs}) != len(pairs):
             raise ValueError("answers contain a duplicate key")
         return dict(pairs)
 
-    answers = json.loads(answers_file.read_text(), object_pairs_hook=unique) if answers_file else {}
+    if answers_file is None:
+        return {}
+    if not answers_file.is_file():
+        raise ValueError("answers must be an existing JSON file")
+    with answers_file.open("rb") as handle:
+        raw = handle.read(MAX_ANSWERS_FILE + 1)
+    if len(raw) > MAX_ANSWERS_FILE:
+        raise ValueError("answers file exceeds 1 MiB")
+    answers = json.loads(raw.decode("utf-8"), object_pairs_hook=unique)
     if not isinstance(answers, dict):
         raise ValueError("answers must be a JSON object")
     return answers
@@ -525,11 +539,34 @@ def _intake_answers(answers_file: Path | None) -> dict:
 
 @template_app.command("questions")
 def template_questions(source: Path, ref: Annotated[str, typer.Option("--ref")]) -> None:
-    """Show the copier-safe-v1 questionnaire of a pinned local template; no writes."""
+    """Show the copier-safe questionnaire of a pinned local template; no writes."""
     from blueprint_ai.evolution.copier_intake import questions
 
     try:
         result = questions(source, ref)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _dump(result)
+    if not result["supported"]:
+        raise typer.Exit(3)
+
+
+@template_app.command("evaluate")
+def template_evaluate(
+    source: Path,
+    ref: Annotated[str, typer.Option("--ref")],
+    answers_file: Annotated[
+        Path | None, typer.Option("--answers", help="JSON typed answers, possibly partial")
+    ] = None,
+) -> None:
+    """Evaluate partial answers in question order: visible questions, errors, skipped; no writes.
+
+    Exits 0 with ``complete`` true or false, 3 for an unsupported template and 2 for bad input.
+    """
+    from blueprint_ai.evolution.copier_intake import evaluate
+
+    try:
+        result = evaluate(source, ref, _intake_answers(answers_file))
     except (OSError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     _dump(result)
@@ -546,7 +583,7 @@ def template_preview(
         Path | None, typer.Option("--answers", help="JSON typed answers")
     ] = None,
 ) -> None:
-    """Render copier-safe-v1 answers in memory; prints files, diffs and preview_sha256."""
+    """Render copier-safe answers in memory; prints files, diffs and preview_sha256."""
     from blueprint_ai.evolution.copier_intake import preview
 
     try:
