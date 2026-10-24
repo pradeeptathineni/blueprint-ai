@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, Literal, overload
 
 CONFIG = """\
 _subdirectory: template
@@ -48,14 +49,25 @@ def write(root: Path, files: dict[str, str]) -> None:
         (root / name).write_text(content)
 
 
-def cli(*args: str, expect: int = 0) -> dict | str:
+@overload
+def cli(*args: str, expect: Literal[0] = 0) -> dict[str, Any]: ...
+
+
+@overload
+def cli(*args: str, expect: int) -> dict[str, Any] | str: ...
+
+
+def cli(*args: str, expect: int = 0) -> dict[str, Any] | str:
     result = subprocess.run(
         [sys.executable, "-m", "blueprint_ai.cli", *args], capture_output=True, text=True
     )
     if result.returncode != expect:
         raise SystemExit(f"{args[:2]} exited {result.returncode}: {result.stderr[-800:]}")
     if expect == 0:
-        return json.loads(result.stdout)
+        value = json.loads(result.stdout)
+        if not isinstance(value, dict):
+            raise SystemExit("Expected a JSON object from the successful CLI")
+        return value
     lines = (line.strip(" │╭╮╰╯─") for line in result.stderr.splitlines())
     return " ".join(line for line in lines if line).partition("Invalid value: ")[2]
 
