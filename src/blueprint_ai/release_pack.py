@@ -27,6 +27,7 @@ MAX_FILES = 100
 MAX_FILE_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_BYTES = 24 * 1024 * 1024
 MAX_PACK_BYTES = 28 * 1024 * 1024
+MAX_PREVIEW_CHARS = 4_000
 _RECEIPT = re.compile(r"^[a-f0-9]{32}$")
 _CAPABILITIES = {row["id"] for row in maintenance.capability_catalog()["capabilities"]}
 
@@ -112,6 +113,11 @@ def _safe_paths(root: Path, paths: list[str]) -> tuple[list[dict[str, Any]], lis
         if b"\x00" in data:
             omissions.append({"path": name, "reason": "binary-file-unsupported"})
             continue
+        try:
+            data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            omissions.append({"path": name, "reason": "non-utf8-binary-or-unsupported-text"})
+            continue
         if total + len(data) > MAX_TOTAL_BYTES:
             omissions.append({"path": name, "reason": "pack-size-limit"})
             continue
@@ -163,18 +169,27 @@ def preview(
         in {"license", "license.md", "copying", "notice", "notice.md"}
     ]
     captured_notices = []
-    for name in notice_paths:
+    selected_text_evidence = []
+    for row in rows:
+        name = row["path"]
         content = read_bytes_bounded(root / name, MAX_FILE_BYTES, root=root).decode(
             "utf-8", errors="replace"
         )
-        captured_notices.append(
-            {
-                "path": name,
-                "sha256": next(row["sha256"] for row in rows if row["path"] == name),
-                "text_excerpt": content[:12000],
-                "truncated": len(content) > 12000,
-            }
-        )
+        excerpt = {
+            "path": name,
+            "sha256": row["sha256"],
+            "text_excerpt": content[:MAX_PREVIEW_CHARS],
+            "truncated": len(content) > MAX_PREVIEW_CHARS,
+            "qualification": "Selected text excerpt; remaining bytes are included in the pack.",
+        }
+        selected_text_evidence.append(excerpt)
+        if name in notice_paths:
+            captured_notices.append(
+                {
+                    **excerpt,
+                    "qualification": "Captured selected notice text; not a legal assessment.",
+                }
+            )
     source = project_source_snapshot(
         root, discover_project(root), evidence_paths=[row["path"] for row in rows]
     )
@@ -195,11 +210,14 @@ def preview(
         "registered_capabilities": catalog["capabilities"],
         "receipts": selected_receipts,
         "available_receipts": available_receipts,
+        "available_receipts_count": len(history["operations"]),
+        "available_receipts_truncated": len(history["operations"]) > len(available_receipts),
         "maintenance_history": {
             "status": history["history_status"],
             "unreadable_receipts": history["unreadable_receipts"],
         },
         "license_notice_evidence": captured_notices,
+        "selected_text_evidence": selected_text_evidence,
         "license_notice_evidence_status": "selected-evidence-only"
         if notice_paths
         else "not-selected-or-unavailable",
