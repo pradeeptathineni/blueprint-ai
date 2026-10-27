@@ -38,17 +38,24 @@ def _project(path: Path) -> Path:
 def test_pack_roundtrip_is_deterministic_and_only_contains_selected_files(tmp_path: Path) -> None:
     project = _project(tmp_path / "project")
     selected = ["LICENSE", "README.md"]
-    first = release_pack.build(project, selected)
-    second = release_pack.build(project, selected)
+    first = release_pack.build(project, selected, target_id="fixture")
+    second = release_pack.build(project, selected, target_id="fixture")
     assert first["pack_sha256"] == second["pack_sha256"]
     reopened = release_pack.verify_pack(
         __import__("base64").b64decode(first["zip_base64"], validate=True),
         first["pack_sha256"],
+        expected_target_id="fixture",
     )
     assert reopened["verified"] is True
     assert [row["path"] for row in reopened["manifest"]["files"]] == selected
     assert reopened["manifest"]["license_notice_evidence_status"] == "selected-evidence-only"
     assert reopened["manifest"]["source"]["working_tree_changed"] is False
+    with pytest.raises(ValueError, match="target identity"):
+        release_pack.verify_pack(
+            __import__("base64").b64decode(first["zip_base64"], validate=True),
+            first["pack_sha256"],
+            expected_target_id="other-project",
+        )
 
 
 def test_pack_refuses_omissions_binary_and_source_change(

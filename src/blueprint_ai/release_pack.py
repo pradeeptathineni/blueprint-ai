@@ -139,9 +139,12 @@ def preview(
     *,
     capability_ids: list[str] | None = None,
     receipt_ids: list[str] | None = None,
+    target_id: str | None = None,
 ) -> dict[str, Any]:
     """Preview only explicitly selected files and existing qualified owner metadata."""
     root = _root(root)
+    if target_id is not None and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", target_id):
+        raise ValueError("configured target identity is invalid")
     rows, omissions = _safe_paths(root, paths)
     capabilities = capability_ids or []
     receipts = receipt_ids or []
@@ -197,7 +200,7 @@ def preview(
     dirty = bool(_git(root, "status", "--porcelain", "--untracked-files=all"))
     return {
         "schema": SCHEMA,
-        "target": {"name": root.name},
+        "target": {"id": target_id, "name": root.name},
         "source": {
             "base_commit": commit,
             "working_tree_changed": dirty,
@@ -240,10 +243,17 @@ def build(
     *,
     capability_ids: list[str] | None = None,
     receipt_ids: list[str] | None = None,
+    target_id: str | None = None,
 ) -> dict[str, Any]:
     """Return deterministic ZIP bytes only after an exact before/after source check."""
     root = _root(root)
-    before = preview(root, paths, capability_ids=capability_ids, receipt_ids=receipt_ids)
+    before = preview(
+        root,
+        paths,
+        capability_ids=capability_ids,
+        receipt_ids=receipt_ids,
+        target_id=target_id,
+    )
     if before["omissions"]:
         raise ValueError("resolve every selected-file omission before building the pack")
     if not before["source"]["snapshot_complete"]:
@@ -254,7 +264,13 @@ def build(
         if _sha(data) != row["sha256"]:
             raise ValueError("selected source changed during pack creation")
         payloads[row["path"]] = data
-    after = preview(root, paths, capability_ids=capability_ids, receipt_ids=receipt_ids)
+    after = preview(
+        root,
+        paths,
+        capability_ids=capability_ids,
+        receipt_ids=receipt_ids,
+        target_id=target_id,
+    )
     if _json(before) != _json(after):
         raise ValueError("project source or selected provenance changed during pack creation")
     manifest = before
@@ -281,7 +297,9 @@ def build(
     }
 
 
-def verify_pack(data: bytes, expected_sha256: str) -> dict[str, Any]:
+def verify_pack(
+    data: bytes, expected_sha256: str, *, expected_target_id: str | None = None
+) -> dict[str, Any]:
     """Verify and reopen a portable pack without extracting it to a project."""
     if (
         len(data) > MAX_PACK_BYTES
@@ -301,6 +319,11 @@ def verify_pack(data: bytes, expected_sha256: str) -> dict[str, Any]:
         manifest = json.loads(archive.read("PROVENANCE.json"))
         if manifest.get("schema") != SCHEMA or manifest.get("omissions"):
             raise ValueError("pack manifest is unsupported or incomplete")
+        target = manifest.get("target")
+        if not isinstance(target, dict) or (
+            expected_target_id is not None and target.get("id") != expected_target_id
+        ):
+            raise ValueError("pack target identity does not match its configured artifact scope")
         rows = manifest.get("files")
         if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_FILES:
             raise ValueError("pack manifest exceeds the selected-file bound")
