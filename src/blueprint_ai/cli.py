@@ -90,9 +90,7 @@ def main(
 
 @release_pack_app.command("preview")
 def release_pack_preview(
-    project: Annotated[
-        Path, typer.Option("--project", exists=True, file_okay=False, resolve_path=True)
-    ],
+    project: Annotated[Path, typer.Option("--project", exists=True, file_okay=False)],
     files: Annotated[
         list[str],
         typer.Option("--file", help="Exact tracked relative file path; repeat to select more."),
@@ -112,12 +110,8 @@ def release_pack_preview(
 
 @release_pack_app.command("build")
 def release_pack_build(
-    project: Annotated[
-        Path, typer.Option("--project", exists=True, file_okay=False, resolve_path=True)
-    ],
-    output: Annotated[
-        Path, typer.Option("--output", file_okay=True, dir_okay=False, resolve_path=True)
-    ],
+    project: Annotated[Path, typer.Option("--project", exists=True, file_okay=False)],
+    output: Annotated[Path, typer.Option("--output", file_okay=True, dir_okay=False)],
     files: Annotated[
         list[str],
         typer.Option("--file", help="Exact tracked relative file path; repeat to select more."),
@@ -128,12 +122,14 @@ def release_pack_build(
     """Build a deterministic unsigned ZIP outside the managed project."""
     from blueprint_ai.release_pack import build
 
-    root = project.resolve(strict=True)
-    destination = output.resolve()
+    root = project.absolute()
+    destination = output.absolute()
     if destination == root or root in destination.parents:
         raise typer.BadParameter("output must be outside the managed project")
     result = build(root, files, capability_ids=capabilities, receipt_ids=receipts)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.parent.resolve(strict=True) != destination.parent:
+        raise typer.BadParameter("output parent must be an exact local directory")
     if destination.exists() or destination.is_symlink():
         raise typer.BadParameter("output must be a new exact file path")
     fd, temporary = tempfile.mkstemp(prefix=".blueprint-release-pack-", dir=destination.parent)
