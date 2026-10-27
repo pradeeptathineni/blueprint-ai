@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import platform
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -25,6 +26,10 @@ from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_o
 from blueprint_ai.safety import sanitize_label
 
 app = typer.Typer(help="Deterministic-first software project analysis.", no_args_is_help=True)
+release_pack_app = typer.Typer(
+    help="Prepare and verify unsigned local release packs.", no_args_is_help=True
+)
+app.add_typer(release_pack_app, name="release-pack")
 PathArg = Annotated[Path, typer.Argument(exists=True, file_okay=False, resolve_path=True)]
 BlueprintOption = Annotated[list[str] | None, typer.Option("--blueprint", "-b")]
 ProfileOption = Annotated[str | None, typer.Option("--profile", "-p")]
@@ -81,6 +86,87 @@ def main(
     ] = False,
 ) -> None:
     """Analyze and strengthen software projects."""
+
+
+@release_pack_app.command("preview")
+def release_pack_preview(
+    project: Annotated[
+        Path, typer.Option("--project", exists=True, file_okay=False, resolve_path=True)
+    ],
+    files: Annotated[
+        list[str],
+        typer.Option("--file", help="Exact tracked relative file path; repeat to select more."),
+    ],
+    capabilities: Annotated[
+        list[str] | None, typer.Option("--capability", help="Registered Blueprint capability ID.")
+    ] = None,
+    receipts: Annotated[
+        list[str] | None, typer.Option("--receipt", help="Exact retained maintenance receipt ID.")
+    ] = None,
+) -> None:
+    """Preview selected tracked files and retained maintenance metadata."""
+    from blueprint_ai.release_pack import preview
+
+    _dump(preview(project, files, capability_ids=capabilities, receipt_ids=receipts))
+
+
+@release_pack_app.command("build")
+def release_pack_build(
+    project: Annotated[
+        Path, typer.Option("--project", exists=True, file_okay=False, resolve_path=True)
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", file_okay=True, dir_okay=False, resolve_path=True)
+    ],
+    files: Annotated[
+        list[str],
+        typer.Option("--file", help="Exact tracked relative file path; repeat to select more."),
+    ],
+    capabilities: Annotated[list[str] | None, typer.Option("--capability")] = None,
+    receipts: Annotated[list[str] | None, typer.Option("--receipt")] = None,
+) -> None:
+    """Build a deterministic unsigned ZIP outside the managed project."""
+    from blueprint_ai.release_pack import build
+
+    root = project.resolve(strict=True)
+    destination = output.resolve()
+    if destination == root or root in destination.parents:
+        raise typer.BadParameter("output must be outside the managed project")
+    result = build(root, files, capability_ids=capabilities, receipt_ids=receipts)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        raise typer.BadParameter("output must be a new exact file path")
+    fd, temporary = tempfile.mkstemp(prefix=".blueprint-release-pack-", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(__import__("base64").b64decode(result["zip_base64"], validate=True))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, destination)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    _dump(
+        {key: value for key, value in result.items() if key != "zip_base64"}
+        | {"output": str(destination)}
+    )
+
+
+@release_pack_app.command("verify")
+def release_pack_verify(
+    pack: Annotated[Path, typer.Argument(exists=True, dir_okay=False, resolve_path=True)],
+) -> None:
+    """Verify and reopen one exact local ZIP pack without extracting it."""
+    from blueprint_ai.release_pack import MAX_PACK_BYTES, verify_pack
+
+    data = pack.read_bytes()
+    if len(data) > MAX_PACK_BYTES:
+        raise typer.BadParameter("Pack exceeds the supported local verification size.")
+    import hashlib
+
+    _dump(verify_pack(data, hashlib.sha256(data).hexdigest()))
 
 
 def _dump(data: object) -> None:
