@@ -136,7 +136,7 @@ def _operations(
                 (["go", "fmt", "./..."], False),
                 (["go", "vet", "./..."], False),
                 (["go", "test", "./..."], False),
-                (["go", "build", "./..."], False),
+                (["go", "build", "-o", ".blueprint-state/output", "./..."], False),
             ],
             ["go.mod"],
         )
@@ -424,6 +424,7 @@ def _go(root: Path, plan: GenesisPlan) -> None:
     kind = plan.intent.kind
     library = kind == "go-library"
     package = plan.identity.module if library else "main"
+    (root / ".blueprint-state").mkdir(mode=0o700, exist_ok=True)
     write(
         root,
         "greeting.go",
