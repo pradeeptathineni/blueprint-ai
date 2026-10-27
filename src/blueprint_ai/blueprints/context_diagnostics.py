@@ -145,8 +145,17 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
         not _closed(
             packet,
             {
-                "schema", "schema_version", "status", "stable", "source_digest",
-                "snapshot", "engine", "limits", "coverage", "files", "qualifications",
+                "schema",
+                "schema_version",
+                "status",
+                "stable",
+                "source_digest",
+                "snapshot",
+                "engine",
+                "limits",
+                "coverage",
+                "files",
+                "qualifications",
             },
         )
         or packet.get("schema") != "context.static-diagnostics.v1"
@@ -191,8 +200,12 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
             raise ValueError("Context returned an invalid analyzer hash.")
     limits = packet.get("limits")
     limit_keys = {
-        "max_tracked_files", "max_file_bytes", "max_total_bytes", "max_diagnostics",
-        "typescript_worker_timeout_seconds", "typescript_compiler_policy",
+        "max_tracked_files",
+        "max_file_bytes",
+        "max_total_bytes",
+        "max_diagnostics",
+        "typescript_worker_timeout_seconds",
+        "typescript_compiler_policy",
     }
     if (
         not _closed(limits, limit_keys)
@@ -207,8 +220,13 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
     if not _closed(
         coverage,
         {
-            "tracked_source_candidates", "analyzed_files", "unsupported_files",
-            "omitted_files", "diagnostics", "unknown_reasons", "column_units",
+            "tracked_source_candidates",
+            "analyzed_files",
+            "unsupported_files",
+            "omitted_files",
+            "diagnostics",
+            "unknown_reasons",
+            "column_units",
         },
     ):
         raise ValueError("Context returned invalid coverage status.")
@@ -256,8 +274,14 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
             not _closed(
                 item,
                 {
-                    "path", "language", "status", "sha256", "reason",
-                    "diagnostic_total", "diagnostics", "unknown_reasons",
+                    "path",
+                    "language",
+                    "status",
+                    "sha256",
+                    "reason",
+                    "diagnostic_total",
+                    "diagnostics",
+                    "unknown_reasons",
                 },
             )
             or not _relative(item.get("path"))
@@ -371,16 +395,12 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
     if coverage["omitted_files"] < sum(item["status"] == "omitted" for item in files):
         raise ValueError("Context omitted-file coverage counts are inconsistent.")
     if coverage["tracked_source_candidates"] != (
-        coverage["analyzed_files"]
-        + coverage["unsupported_files"]
-        + coverage["omitted_files"]
+        coverage["analyzed_files"] + coverage["unsupported_files"] + coverage["omitted_files"]
     ):
         raise ValueError("Context source coverage totals are inconsistent.")
     if coverage_diagnostics["returned"] != sum(len(item.get("diagnostics", [])) for item in files):
         raise ValueError("Context returned-diagnostic coverage counts are inconsistent.")
-    if coverage_diagnostics["total"] != sum(
-        item.get("diagnostic_total", 0) for item in files
-    ):
+    if coverage_diagnostics["total"] != sum(item.get("diagnostic_total", 0) for item in files):
         raise ValueError("Context per-file and global diagnostic totals are inconsistent.")
     digest = hashlib.sha256()
     for path in sorted(source_hashes, key=lambda value: value.encode("utf-8")):
@@ -407,9 +427,7 @@ def context_diagnostics(root: Path, facts: ProjectFacts) -> list[Finding]:
     profile = _profile()
     root = root.expanduser().resolve(strict=True)
     if not (root / ".git").exists():
-        raise ValueError(
-            "Context static diagnostics require a configured Git root; none ran."
-        )
+        raise ValueError("Context static diagnostics require a configured Git root; none ran.")
     before = project_source_snapshot(root, facts, evidence_paths=facts.graph.file_scopes.keys())
     if not before["complete"]:
         raise ValueError(
