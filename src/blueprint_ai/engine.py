@@ -12,9 +12,10 @@ from typing import Any, cast
 
 from blueprint_ai import __version__
 from blueprint_ai.adapters import applicable_adapters
+from blueprint_ai.support import TOOLS
 from blueprint_ai.blueprints import BLUEPRINTS, PROFILES
 from blueprint_ai.config import Settings, SuppressionRule, load_settings
-from blueprint_ai.core import BlueprintResult, Finding, RunContext, RunReport
+from blueprint_ai.core import BlueprintResult, Finding, RunContext, RunReport, ToolStatus
 from blueprint_ai.core.models import ResultStatus, RunMetadata, Suppression
 from blueprint_ai.core.priority import ORDER, deduplicate
 from blueprint_ai.discovery import discover_project
@@ -85,6 +86,8 @@ def make_context(
     trust_project_executables: bool = False,
     authorized_target: str | None = None,
     sandbox: dict | None = None,
+    run_external_tools: bool = True,
+    include_custom_blueprints: bool = True,
 ) -> tuple[RunContext, Settings]:
     root = path.expanduser().resolve()
     settings = load_settings(
@@ -105,8 +108,13 @@ def make_context(
             selected.extend(settings.profiles.get(selected_profile) or PROFILES[selected_profile])
     selected = [name for name in selected if name not in settings.disabled_blueprints]
     selected.extend(settings.enabled_blueprints)
+    if not include_custom_blueprints:
+        selected = [name for name in selected if not name.startswith("local-")]
     selected = list(dict.fromkeys(selected))
-    catalog = {**BLUEPRINTS, **load_custom_blueprints(root)}
+    catalog = {
+        **BLUEPRINTS,
+        **(load_custom_blueprints(root) if include_custom_blueprints else {}),
+    }
     unknown = [name for name in selected if name not in catalog]
     if unknown:
         raise ValueError(f"unknown blueprint: {', '.join(unknown)}")
@@ -127,6 +135,8 @@ def make_context(
         / hashlib.sha256(str(root).encode()).hexdigest()[:20],
         trust_project_executables=trust_project_executables,
         sandbox=sandbox or {},
+        run_external_tools=run_external_tools,
+        include_custom_blueprints=include_custom_blueprints,
     )
     return context, settings
 
@@ -276,6 +286,20 @@ def _collect_tool_results(
     return tools, notes, missing, errors
 
 
+def _not_run_tool_status(adapter) -> ToolStatus:
+    spec = TOOLS.get(adapter.name.split(":", 1)[0])
+    return ToolStatus(
+        name=adapter.name,
+        available=False,
+        outcome="not_run",
+        analysis_state="not_run",
+        detail="Static inspection did not launch external tools.",
+        network_required=getattr(adapter, "network_required", False),
+        requires_project_trust=getattr(adapter, "executes_project_code", False),
+        provenance=spec.model_dump(mode="json") if spec else {},
+    )
+
+
 def _finalize_findings(
     findings: list[Finding], context: RunContext, facts, baseline: set[str], settings: Settings
 ) -> list[Finding]:
@@ -373,7 +397,14 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
     started_at = datetime.now(UTC)
     started = time.monotonic()
     settings = Settings.model_validate(context.config)
-    catalog = {**BLUEPRINTS, **load_custom_blueprints(context.root)}
+    catalog = {
+        **BLUEPRINTS,
+        **(
+            load_custom_blueprints(context.root)
+            if context.include_custom_blueprints
+            else {}
+        ),
+    }
     facts = discover_project(
         context.root,
         settings.ignores,
@@ -421,9 +452,28 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
             check_error = f"Deterministic check incomplete: {exc}"
         if name == "completeness":
             findings.extend(_disabled_capability_findings(settings, facts))
-        tools, notes, missing, errors = _collect_tool_results(
-            context, settings, facts, name, findings
-        )
+        if context.run_external_tools:
+            tools, notes, missing, errors = _collect_tool_results(
+                context, settings, facts, name, findings
+            )
+        else:
+            planned = applicable_adapters(
+                facts,
+                name,
+                settings.tool_overrides,
+                authorized_target=settings.authorized_target,
+                offline=settings.offline,
+                allow_project_executables=False,
+                sandboxed=True,
+            )
+            tools = [_not_run_tool_status(adapter) for adapter in planned]
+            notes = (
+                ["External analyzers were not run under the static inspection policy."]
+                if planned
+                else []
+            )
+            missing = len(planned)
+            errors = 0
         if check_error:
             notes.append(check_error)
             errors += 1

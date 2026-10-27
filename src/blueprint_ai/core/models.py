@@ -16,7 +16,9 @@ Priority = Literal["P0", "P1", "P2", "P3"]
 Provenance = Literal["deterministic", "model"]
 ResultStatus = Literal["passed", "findings", "not_applicable", "tool_missing", "partial", "error"]
 ApplicabilityState = Literal["applicable", "partial", "not_applicable"]
-ToolOutcome = Literal["available", "passed", "finding", "tool_error", "tool_missing", "unsupported"]
+ToolOutcome = Literal[
+    "available", "passed", "finding", "tool_error", "tool_missing", "unsupported", "not_run"
+]
 Disposition = Literal["new", "baseline", "suppressed"]
 
 
@@ -181,6 +183,8 @@ class RunContext(BaseModel):
     cache_dir: Path | None = None
     trust_project_executables: bool = False
     sandbox: dict[str, Any] = Field(default_factory=dict)
+    run_external_tools: bool = True
+    include_custom_blueprints: bool = True
 
 
 class RunMetadata(BaseModel):
