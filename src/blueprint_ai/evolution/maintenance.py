@@ -19,6 +19,11 @@ from blueprint_ai.remediation import KITS, rollback_operation
 from blueprint_ai.safety import MAX_MANIFEST_BYTES, read_bytes_bounded
 from blueprint_ai.sandbox import SandboxPolicy
 from blueprint_ai.evolution import template_update
+from blueprint_ai.evolution.engine import (
+    _receipt_is_authoritative,
+    _safe_path,
+    rollback_evolution,
+)
 
 PLAN_SCHEMA = "blueprint-managed-capability-plan/1"
 MAX_OPERATION_FILES = 1000
@@ -220,6 +225,47 @@ def history(root: Path) -> dict[str, Any]:
                     "changes": record.get("changes", []),
                     "receipt_sha256": _sha(raw),
                 })
+            elif (
+                record.get("version") == 3
+                and record.get("kind") == "evolution"
+                and isinstance(record.get("requested_targets"), list)
+                and isinstance(record.get("changes"), list)
+                and _receipt_is_authoritative(root, path.stem, raw.decode("utf-8"))
+            ):
+                changes = []
+                seen: set[str] = set()
+                for change in record["changes"]:
+                    target = change.get("target") if isinstance(change, dict) else None
+                    if not isinstance(target, str) or target in seen:
+                        unreadable.append({"receipt_id": path.stem, "reason": "invalid-evolution-change"})
+                        changes = []
+                        break
+                    try:
+                        _safe_path(root, target)
+                    except ValueError:
+                        unreadable.append({"receipt_id": path.stem, "reason": "unsafe-evolution-change"})
+                        changes = []
+                        break
+                    seen.add(target)
+                    changes.append({
+                        "target": target,
+                        "sha256": change.get("after_sha256"),
+                        "status": change.get("status"),
+                    })
+                if changes:
+                    rows.append({
+                        "kind": "evolution",
+                        "operation_id": path.stem,
+                        "status": record.get("status"),
+                        "transformations": [
+                            value for value in record["requested_targets"] if isinstance(value, str)
+                        ],
+                        "plan_sha256": record.get("plan_sha256"),
+                        "changes": changes,
+                        "receipt_sha256": _sha(raw),
+                    })
+                elif not record["changes"]:
+                    unreadable.append({"receipt_id": path.stem, "reason": "empty-evolution-change-set"})
             elif record.get("version") in {1, 2} and isinstance(record.get("changes"), list):
                 kits = sorted({str(change.get("blueprint", "")).removeprefix("kit:")
                                for change in record["changes"] if isinstance(change, dict)
@@ -264,6 +310,22 @@ def rollback(root: Path, operation_id: str) -> dict[str, Any]:
     if record.get("kind") == "template-update" and record.get("version") == 4:
         result = template_update.rollback(root, operation_id)
         return {**result, "kind": "template-update"}
+    if record.get("kind") == "evolution" and record.get("version") == 3:
+        result = rollback_evolution(root, operation_id)
+        report = result.model_dump(mode="json")
+        return {
+            **report,
+            "changes": [
+                {
+                    "path": row["target"],
+                    "status": row["status"],
+                    "before": row.get("before_sha256"),
+                    "after": row.get("after_sha256"),
+                }
+                for row in report.get("changes", [])
+            ],
+            "kind": "evolution",
+        }
     changes = record.get("changes")
     if record.get("version") not in {1, 2} or not isinstance(changes, list):
         raise ValueError("operation is outside managed maintenance rollback scope")

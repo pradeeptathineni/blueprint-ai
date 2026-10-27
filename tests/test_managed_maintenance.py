@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from blueprint_ai.evolution import maintenance, template_update
+from blueprint_ai.evolution import apply_evolution, plan_evolution
 
 
 def commit(root: Path, message: str) -> str:
@@ -113,3 +114,63 @@ def test_cold_history_marks_unqualified_receipts_instead_of_reporting_empty(tmp_
     assert retained["unreadable_receipts"] == [
         {"receipt_id": "a" * 32, "reason": "unreadable-or-invalid"}
     ]
+
+
+def test_supported_configuration_modernization_is_previewed_retained_and_reversible(tmp_path: Path):
+    source = tmp_path / "template"
+    source.mkdir()
+    (source / "README.md").write_text("# Service\n")
+    first = commit(source, "template")
+    project = tmp_path / "project"
+    template_update.initialize(project, source, first, {})
+    workflow = project / ".github" / "workflows" / "ci.yml"
+    workflow.parent.mkdir(parents=True)
+    original = (
+        "name: CI\n"
+        "on: [push]\n"
+        "jobs:\n"
+        "  check:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: third-party/example@v4\n"
+    )
+    workflow.write_text(original)
+    unrelated = project / "author-notes.txt"
+    unrelated.write_text("preserve local notes\n")
+    commit(project, "existing project")
+    from subprocess import run
+
+    run(["git", "-C", str(project), "checkout", "-qb", "config-modernization"], check=True)
+
+    plan = plan_evolution(project, ["github-actions/pin-official-actions"])
+    assert plan.status == "ready"
+    assert plan.steps[0].files == [".github/workflows/ci.yml"]
+    preview = apply_evolution(
+        project, plan, dry_run=True, run_blueprint_review=False, report_failures=True
+    )
+    assert preview.status == "dry_run"
+    assert "actions/checkout@v4" in preview.diffs[".github/workflows/ci.yml"]
+    assert workflow.read_text() == original
+
+    applied = apply_evolution(
+        project, plan, run_blueprint_review=False, report_failures=True
+    )
+    assert applied.status == "verified"
+    assert applied.operation_id
+    modernized = workflow.read_text()
+    assert "actions/checkout@v4" not in modernized
+    assert "actions/checkout@" in modernized
+    assert "third-party/example@v4" in modernized
+    assert unrelated.read_text() == "preserve local notes\n"
+
+    retained = maintenance.history(project)
+    row = next(item for item in retained["operations"] if item["operation_id"] == applied.operation_id)
+    assert row["kind"] == "evolution"
+    assert row["transformations"] == ["github-actions/pin-official-actions"]
+    assert row["changes"][0]["target"] == ".github/workflows/ci.yml"
+
+    rolled_back = maintenance.rollback(project, applied.operation_id)
+    assert rolled_back["status"] == "rolled_back"
+    assert workflow.read_text() == original
+    assert unrelated.read_text() == "preserve local notes\n"
