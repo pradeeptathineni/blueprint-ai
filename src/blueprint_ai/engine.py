@@ -12,7 +12,6 @@ from typing import Any, cast
 
 from blueprint_ai import __version__
 from blueprint_ai.adapters import applicable_adapters
-from blueprint_ai.support import TOOLS
 from blueprint_ai.blueprints import BLUEPRINTS, PROFILES
 from blueprint_ai.config import Settings, SuppressionRule, load_settings
 from blueprint_ai.core import BlueprintResult, Finding, RunContext, RunReport, ToolStatus
@@ -29,6 +28,7 @@ from blueprint_ai.safety import (
     read_text_bounded,
     run_process,
 )
+from blueprint_ai.support import TOOLS
 
 
 def detect_profiles(project_types: list[str]) -> list[str]:
@@ -106,6 +106,8 @@ def make_context(
     if not selected:
         for selected_profile in profiles:
             selected.extend(settings.profiles.get(selected_profile) or PROFILES[selected_profile])
+    if blueprints is None:
+        selected.append("context-diagnostics")
     selected = [name for name in selected if name not in settings.disabled_blueprints]
     selected.extend(settings.enabled_blueprints)
     if not include_custom_blueprints:

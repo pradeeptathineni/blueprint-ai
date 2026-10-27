@@ -15,6 +15,7 @@ from pathlib import Path
 
 import yaml
 
+from blueprint_ai.blueprints.context_diagnostics import context_diagnostics
 from blueprint_ai.config import load_yaml_mapping
 from blueprint_ai.core import Applicability, Finding, ProjectFacts
 from blueprint_ai.core.models import FileRange, Priority, Remediation, Severity
@@ -1277,6 +1278,15 @@ BLUEPRINTS: dict[str, Blueprint] = {
         lambda f: True,
         completeness_checks,
     ),
+    "context-diagnostics": Blueprint(
+        "context-diagnostics",
+        "Read-only syntax diagnostics from the pinned Context owner",
+        lambda f: True,
+        context_diagnostics,
+        not_applicable_reason="Context diagnostics are unavailable for this project.",
+        partial=lambda f: True,
+        partial_reason="Syntax checks do not establish semantic or runtime correctness.",
+    ),
 }
 
 CORE = [
@@ -1289,6 +1299,7 @@ CORE = [
     "testing",
     "documentation",
     "completeness",
+    "context-diagnostics",
 ]
 SERVICE = ["architecture", "api-data-config", "ci-cd", "reliability", "operations"]
 PROFILES = {
