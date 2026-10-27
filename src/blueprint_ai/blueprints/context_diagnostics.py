@@ -307,12 +307,10 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
         raise ValueError("Context omitted-file coverage counts are inconsistent.")
     if coverage_diagnostics["returned"] != sum(len(item.get("diagnostics", [])) for item in files):
         raise ValueError("Context returned-diagnostic coverage counts are inconsistent.")
-    if coverage_diagnostics["total"] != sum(item.get("diagnostic_total", 0) for item in files):
-        # Global producer totals bound returned rows; per-file parser counters may
-        # include diagnostics that could not be represented as selectable rows.
-        coverage_notes.append(
-            "Context's per-file and global diagnostic counts differ; missing rows are unknown."
-        )
+    if coverage_diagnostics["total"] != sum(
+        item.get("diagnostic_total", 0) for item in files
+    ):
+        raise ValueError("Context per-file and global diagnostic totals are inconsistent.")
     digest = hashlib.sha256()
     for path in sorted(source_hashes, key=lambda value: value.encode("utf-8")):
         digest.update(path.encode("utf-8"))
