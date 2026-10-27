@@ -97,3 +97,19 @@ def test_conflict_and_source_binding_refuse_without_project_writes(tmp_path: Pat
         maintenance.apply_capability(project, "dependency-updates", plan["plan_sha256"], source)
     assert (project / "renovate.json").read_bytes() == before
     assert maintenance.history(project)["operations"] == []
+
+
+def test_cold_history_marks_unqualified_receipts_instead_of_reporting_empty(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+    operations = project / ".blueprint-ai" / "operations"
+    operations.mkdir(parents=True)
+    (operations / ("a" * 32 + ".json")).write_text("{truncated")
+
+    retained = maintenance.history(project)
+
+    assert retained["operations"] == []
+    assert retained["history_status"] == "partial"
+    assert retained["unreadable_receipts"] == [
+        {"receipt_id": "a" * 32, "reason": "unreadable-or-invalid"}
+    ]

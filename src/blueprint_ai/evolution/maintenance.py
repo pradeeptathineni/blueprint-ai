@@ -187,6 +187,7 @@ def history(root: Path) -> dict[str, Any]:
     root = _root(root)
     operations = root / ".blueprint-ai" / "operations"
     rows: list[dict[str, Any]] = []
+    unreadable: list[dict[str, str]] = []
     if operations.exists():
         info = operations.lstat()
         if not stat.S_ISDIR(info.st_mode) or operations.is_symlink() or operations.resolve() != operations:
@@ -202,10 +203,13 @@ def history(root: Path) -> dict[str, Any]:
             if path.stat().st_size > MAX_MANIFEST_BYTES or total > MAX_OPERATION_BYTES:
                 raise ValueError("project operation history exceeds its byte bound")
             try:
-                record = json.loads(read_bytes_bounded(path, MAX_MANIFEST_BYTES, root=root))
+                raw = read_bytes_bounded(path, MAX_MANIFEST_BYTES, root=root)
+                record = json.loads(raw)
             except (OSError, ValueError, UnicodeError):
+                unreadable.append({"receipt_id": path.stem, "reason": "unreadable-or-invalid"})
                 continue
             if not isinstance(record, dict) or record.get("operation_id") != path.stem:
+                unreadable.append({"receipt_id": path.stem, "reason": "identity-mismatch"})
                 continue
             if record.get("kind") == "template-update":
                 rows.append({
@@ -214,7 +218,7 @@ def history(root: Path) -> dict[str, Any]:
                     "plan_sha256": record.get("plan_sha256"),
                     "from_commit": record.get("from_commit"), "to_commit": record.get("to_commit"),
                     "changes": record.get("changes", []),
-                    "receipt_sha256": _sha(path.read_bytes()),
+                    "receipt_sha256": _sha(raw),
                 })
             elif record.get("version") in {1, 2} and isinstance(record.get("changes"), list):
                 kits = sorted({str(change.get("blueprint", "")).removeprefix("kit:")
@@ -228,14 +232,20 @@ def history(root: Path) -> dict[str, Any]:
                         "changes": [{key: change.get(key) for key in ("target", "sha256", "status")}
                                     for change in record["changes"] if isinstance(change, dict)
                                     and str(change.get("blueprint", "")).startswith("kit:")],
-                        "receipt_sha256": _sha(path.read_bytes()),
+                        "receipt_sha256": _sha(raw),
                     })
+                else:
+                    unreadable.append({"receipt_id": path.stem, "reason": "unsupported-receipt"})
+            else:
+                unreadable.append({"receipt_id": path.stem, "reason": "unsupported-receipt"})
     rows.sort(key=lambda row: (str(row.get("from_commit", "")), row["operation_id"]))
     return {
         "schema": "blueprint-managed-maintenance-history/1",
         "template": _template_record(root),
         "operations": rows,
-        "qualification": "Read from existing project template and operation receipts; no missing record is regenerated.",
+        "history_status": "partial" if unreadable else "complete",
+        "unreadable_receipts": unreadable,
+        "qualification": "Read from existing project template and operation receipts; no missing record is regenerated. Partial history means at least one receipt could not be qualified.",
     }
 
 

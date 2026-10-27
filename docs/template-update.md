@@ -18,6 +18,12 @@ protected by the native conflict checks. The proposal is deterministic file
 maintenance, not a claim that the project conforms to the capability's
 conventions.
 
+The history result includes `history_status` (`complete` or `partial`) and
+`unreadable_receipts`. A malformed, unsupported, or identity-mismatched receipt
+is reported by its receipt ID instead of being silently omitted from an
+apparently empty history. Receipt digests are calculated from the same bounded
+bytes that were parsed.
+
 Blueprint can create a project from a local Git template and later adopt changes from another commit. It records the template path, commit and string answers in `.blueprint-ai/template.json`. Templates are regular files with optional `{{answer_name}}` placeholders. The source repository must be available at update time. Blueprint does not run template hooks.
 
 ```sh
