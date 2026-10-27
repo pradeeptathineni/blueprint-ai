@@ -200,7 +200,7 @@ def preview(
     dirty = bool(_git(root, "status", "--porcelain", "--untracked-files=all"))
     return {
         "schema": SCHEMA,
-        "target": {"id": target_id, "name": root.name},
+        "target": {"name": root.name, **({"id": target_id} if target_id else {})},
         "source": {
             "base_commit": commit,
             "working_tree_changed": dirty,
@@ -298,7 +298,11 @@ def build(
 
 
 def verify_pack(
-    data: bytes, expected_sha256: str, *, expected_target_id: str | None = None
+    data: bytes,
+    expected_sha256: str,
+    *,
+    expected_target_id: str | None = None,
+    allow_legacy_scoped_target: bool = False,
 ) -> dict[str, Any]:
     """Verify and reopen a portable pack without extracting it to a project."""
     if (
@@ -320,8 +324,12 @@ def verify_pack(
         if manifest.get("schema") != SCHEMA or manifest.get("omissions"):
             raise ValueError("pack manifest is unsupported or incomplete")
         target = manifest.get("target")
-        if not isinstance(target, dict) or (
-            expected_target_id is not None and target.get("id") != expected_target_id
+        if not isinstance(target, dict):
+            raise ValueError("pack target metadata is unsupported")
+        has_target_id = isinstance(target.get("id"), str)
+        if expected_target_id is not None and (
+            (has_target_id and target.get("id") != expected_target_id)
+            or (not has_target_id and not allow_legacy_scoped_target)
         ):
             raise ValueError("pack target identity does not match its configured artifact scope")
         rows = manifest.get("files")
@@ -362,4 +370,14 @@ def verify_pack(
         "bytes": len(data),
         "verified": True,
         "manifest": manifest,
+        "target_binding": "manifest-target-id"
+        if has_target_id
+        else "legacy-private-journal-scope",
+        "qualification": None
+        if has_target_id
+        else (
+            "Legacy pack predates embedded target IDs. Its target scope is established by "
+            "the exact private target-scoped retained journal; the immutable ZIP bytes and "
+            "manifest remain unchanged."
+        ),
     }

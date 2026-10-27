@@ -58,6 +58,26 @@ def test_pack_roundtrip_is_deterministic_and_only_contains_selected_files(tmp_pa
         )
 
 
+def test_legacy_pack_can_only_use_explicit_private_scope_compatibility(tmp_path: Path) -> None:
+    project = _project(tmp_path / "project")
+    legacy = release_pack.build(project, ["LICENSE"])
+    data = __import__("base64").b64decode(legacy["zip_base64"], validate=True)
+    with pytest.raises(ValueError, match="target identity"):
+        release_pack.verify_pack(
+            data, legacy["pack_sha256"], expected_target_id="fixture"
+        )
+    reopened = release_pack.verify_pack(
+        data,
+        legacy["pack_sha256"],
+        expected_target_id="fixture",
+        allow_legacy_scoped_target=True,
+    )
+    assert reopened["verified"] is True
+    assert reopened["target_binding"] == "legacy-private-journal-scope"
+    assert "predates embedded target IDs" in reopened["qualification"]
+    assert reopened["manifest"]["target"] == {"name": "project"}
+
+
 def test_pack_refuses_omissions_binary_and_source_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
