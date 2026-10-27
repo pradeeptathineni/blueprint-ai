@@ -229,6 +229,85 @@ def check(root: Path, ref: str) -> dict:
     }
 
 
+def inspect_target(root: Path) -> dict:
+    """Report drift in files managed by a recorded template, without changing the target."""
+    requested = Path(root)
+    if requested.is_symlink():
+        raise ValueError("template project must not be a symlink")
+    if not requested.is_dir():
+        raise ValueError("template project must be an existing directory")
+    root = requested.resolve()
+    record = _record(root)
+    if (
+        not isinstance(record.get("source"), str)
+        or not Path(record["source"]).is_absolute()
+        or not isinstance(record.get("commit"), str)
+        or not re.fullmatch(r"[0-9a-f]{40,64}", record["commit"])
+    ):
+        raise ValueError("invalid template provenance record")
+    source = Path(record["source"])
+    if _commit(source, record["commit"]) != record["commit"]:
+        raise ValueError("recorded template commit is no longer available")
+    files, answers, format_info = _rendered(source, record, record["commit"])
+    if len(files) > 2000:
+        raise ValueError("template project has more than 2000 managed files to inspect")
+    rows = []
+    for path in sorted(files):
+        expected, expected_mode = files[path]
+        current = _read(root, path)
+        status = (
+            "missing"
+            if current is None
+            else "unchanged"
+            if current == (expected, expected_mode)
+            else "modified"
+        )
+        rows.append(
+            {
+                "path": path,
+                "status": status,
+                "expected_sha256": _sha(expected),
+                "current_sha256": _sha(current[0]) if current else None,
+                "expected_mode": expected_mode,
+                "current_mode": current[1] if current else None,
+            }
+        )
+    record_file = _read(root, RECORD)
+    record_status = (
+        "current"
+        if record_file is not None
+        and record_file[0] == _json(record)
+        and record_file[1] == 0o644
+        else "modified"
+    )
+    counts = {
+        status: sum(row["status"] == status for row in rows)
+        for status in ("unchanged", "modified", "missing")
+    }
+    drift = counts["modified"] > 0 or counts["missing"] > 0 or record_status != "current"
+    return {
+        "schema": "blueprint-template-target-inspection/1",
+        "status": "drift" if drift else "current",
+        "target": str(root),
+        "recipe": {
+            "source": record["source"],
+            "commit": record["commit"],
+            "format": record.get("format", "static"),
+            "answers": answers,
+            **format_info,
+        },
+        "record": {
+            "path": RECORD,
+            "status": record_status,
+            "sha256": _sha(record_file[0]) if record_file else None,
+            "expected_mode": 0o644,
+            "current_mode": record_file[1] if record_file else None,
+        },
+        "summary": {"file_count": len(rows), **counts},
+        "files": rows,
+    }
+
+
 def plan(root: Path, ref: str, resolutions: dict[str, str] | None = None) -> dict:
     root = root.resolve()
     record = _record(root)

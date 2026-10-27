@@ -603,6 +603,17 @@ def template_check(path: PathArg, ref: Annotated[str, typer.Option("--ref")]) ->
         raise typer.BadParameter(str(exc)) from exc
 
 
+@template_app.command("inspect")
+def template_inspect(path: PathArg) -> None:
+    """Inspect recorded template provenance and local drift without writing."""
+    from blueprint_ai.evolution.template_update import inspect_target
+
+    try:
+        _dump(inspect_target(path))
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+
 @template_app.command("plan")
 def template_plan(
     path: PathArg,

@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from blueprint_ai.cli import app
 from blueprint_ai.evolution.copier_intake import create, evaluate, preview, questions
-from blueprint_ai.evolution.template_update import apply, plan, rollback
+from blueprint_ai.evolution.template_update import apply, inspect_target, plan, rollback
 
 CONFIG = """\
 _subdirectory: template
@@ -544,6 +544,162 @@ def test_cli_evaluate_preview_and_init_with_json_answers(source: Path, tmp_path:
     )
     assert made_.exit_code == 0, made_.output
     assert 'Features: ["lint"]' in (target / "README.md").read_text()
+
+
+def test_cli_recipe_lifecycle_inspects_drift_and_previews_conflicting_update(
+    source: Path, tmp_path: Path
+) -> None:
+    runner = CliRunner()
+    commit(source, CI_FILE, "first composed recipe")
+    initial_commit = git(source, "rev-parse", "HEAD")
+    answers = tmp_path / "recipe-inputs.json"
+    answers.write_text(
+        json.dumps({"project_name": "Shop", "ci": True, "ci_provider": "github"})
+    )
+    target = tmp_path / "bounded-output" / "shop"
+
+    questionnaire = runner.invoke(
+        app, ["template", "questions", str(source), "--ref", initial_commit]
+    )
+    assert questionnaire.exit_code == 0, questionnaire.output
+    declared = json.loads(questionnaire.stdout)
+    assert declared["supported"] and declared["dialect"] == "copier-safe-v2"
+
+    evaluated = runner.invoke(
+        app,
+        ["template", "evaluate", str(source), "--ref", initial_commit,
+         "--answers", str(answers)],
+    )
+    assert evaluated.exit_code == 0, evaluated.output
+    evaluation = json.loads(evaluated.stdout)
+    assert evaluation["complete"] and evaluation["answers"]["ci_provider"] == "github"
+
+    previewed = runner.invoke(
+        app,
+        ["template", "preview", str(source), str(target), "--ref", initial_commit,
+         "--answers", str(answers)],
+    )
+    assert previewed.exit_code == 0, previewed.output
+    preview_value = json.loads(previewed.stdout)
+    assert not target.exists(), "preview resolves files without materializing the target"
+    assert preview_value["file_count"] == 2
+    assert {row["path"] for row in preview_value["files"]} == {"README.md", "ci.yml"}
+    assert preview_value["total_bytes"] > 0
+    assert all(row["sha256"] and row["mode"] for row in preview_value["files"])
+
+    initialized = runner.invoke(
+        app,
+        ["template", "init", str(source), str(target), "--ref", initial_commit,
+         "--answers", str(answers), "--format", "copier-safe-v2", "--confirm-digest",
+         preview_value["preview_sha256"]],
+    )
+    assert initialized.exit_code == 0, initialized.output
+    record = json.loads((target / ".blueprint-ai/template.json").read_text())
+    assert record == {
+        "schema": 3,
+        "format": "copier-safe-v2",
+        "source": str(source.resolve()),
+        "commit": initial_commit,
+        "answers": evaluation["answers"],
+    }
+    clean = runner.invoke(app, ["template", "inspect", str(target)])
+    assert clean.exit_code == 0, clean.output
+    clean_value = json.loads(clean.stdout)
+    assert clean_value["status"] == "current"
+    assert clean_value["recipe"]["source"] == str(source.resolve())
+    assert clean_value["recipe"]["commit"] == initial_commit
+    assert clean_value["recipe"]["answers"] == evaluation["answers"]
+    assert clean_value["summary"] == {
+        "file_count": 2,
+        "unchanged": 2,
+        "modified": 0,
+        "missing": 0,
+    }
+    generated_ci = (target / "ci.yml").read_bytes()
+    (target / "ci.yml").unlink()
+    missing_file = inspect_target(target)
+    assert missing_file["status"] == "drift"
+    assert next(row for row in missing_file["files"] if row["path"] == "ci.yml")[
+        "status"
+    ] == "missing"
+    (target / "ci.yml").write_bytes(generated_ci)
+
+    authored = (target / "README.md").read_text().replace(
+        "CI: True", "CI: Human choice", 1
+    )
+    (target / "README.md").write_text(authored)
+    drifted = inspect_target(target)
+    assert drifted["status"] == "drift"
+    assert next(row for row in drifted["files"] if row["path"] == "README.md")[
+        "status"
+    ] == "modified"
+    assert next(row for row in drifted["files"] if row["path"] == "ci.yml")[
+        "status"
+    ] == "unchanged"
+
+    next_commit = commit(
+        source,
+        {
+            "template/README.md.jinja": README.replace(
+                "CI: {{ ci }}", "CI: Enabled {{ ci }}"
+            ),
+            "template/ci.yml.jinja": "provider: {{ ci_provider }}\ncoverage: true\n",
+            "template/START-HERE.md.jinja": "Project: {{ project_name }}\n",
+        },
+        "updated recipe",
+    )
+    conflict_plan_path = tmp_path / "recipe-update-conflict.json"
+    conflicting = runner.invoke(
+        app,
+        ["template", "plan", str(target), "--ref", next_commit, "--output",
+         str(conflict_plan_path)],
+    )
+    assert conflicting.exit_code == 0, conflicting.output
+    saved_conflict = json.loads(conflict_plan_path.read_text())
+    assert saved_conflict["status"] == "conflict"
+    assert next(row for row in saved_conflict["rows"] if row["path"] == "README.md")[
+        "conflict_reasons"
+    ] == ["content"]
+    before_refusal = tree(target)
+    refused_apply = runner.invoke(
+        app,
+        ["template", "apply", str(target), "--plan", str(conflict_plan_path)],
+    )
+    assert refused_apply.exit_code == 2
+    assert tree(target) == before_refusal
+
+    resolved_path = tmp_path / "recipe-update-resolved.json"
+    resolved = runner.invoke(
+        app,
+        ["template", "plan", str(target), "--ref", next_commit, "--resolve",
+         "README.md=project", "--output", str(resolved_path)],
+    )
+    assert resolved.exit_code == 0, resolved.output
+    saved_resolved = json.loads(resolved_path.read_text())
+    assert saved_resolved["status"] == "ready"
+    readme_row = next(row for row in saved_resolved["rows"] if row["path"] == "README.md")
+    assert readme_row["status"] == "noop" and readme_row["after"] == readme_row["before"]
+    published = runner.invoke(
+        app,
+        ["template", "apply", str(target), "--plan", str(resolved_path)],
+    )
+    assert published.exit_code == 0, published.output
+    assert (target / "README.md").read_text() == authored
+    assert (target / "ci.yml").read_text() == "provider: github\ncoverage: true\n"
+    assert (target / "START-HERE.md").read_text() == "Project: Shop\n"
+    updated_record = json.loads((target / ".blueprint-ai/template.json").read_text())
+    assert updated_record["commit"] == next_commit
+    assert updated_record["answers"] == evaluation["answers"]
+    inspected_update = json.loads(
+        runner.invoke(app, ["template", "inspect", str(target)]).stdout
+    )
+    assert inspected_update["status"] == "drift"
+    assert next(
+        row for row in inspected_update["files"] if row["path"] == "README.md"
+    )["status"] == "modified"
+    assert runner.invoke(
+        app, ["template", "check", str(target), "--ref", next_commit]
+    ).exit_code == 0
 
 
 @pytest.mark.parametrize(

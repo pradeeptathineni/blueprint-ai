@@ -16,6 +16,20 @@ blueprint-ai template plan ./my-api --ref <v2-commit> \
 blueprint-ai template apply ./my-api --plan /tmp/resolved-plan.json
 ```
 
+Inspect a materialized template target before planning an update:
+
+```sh
+blueprint-ai template inspect ./my-api
+blueprint-ai template plan ./my-api --ref <v2-commit> --output /tmp/update-plan.json
+```
+
+`inspect` is read-only. It reports the recorded source, commit, format and effective answers, plus
+the expected/current hashes and modes for each template-managed file. `current` means the managed
+files and provenance record match their retained baseline; `drift` reports edited or missing
+managed files or a changed record. Untracked project files are outside this inventory. `check`
+continues to compare template commit identity, while `plan` previews the exact result against the
+current target, including conflicts and user-authored changes. Neither command writes to the target.
+
 For a conflict, `--resolve PATH=project` retains the authored file and `--resolve PATH=template` accepts the new template file, including its executable mode. A file path supplies exact merged bytes and retains the project's mode. The preview lists content and mode conflict reasons and both file modes. Review the resulting plan before applying it. Blueprint refuses a plan if a target's content or mode changed after preview. Applying a matching update again returns `noop`.
 
 The apply result contains `operation_id`, changed file hashes, a manifest path and a rollback command. `blueprint-ai rollback OPERATION_ID ./my-api --json` restores exact pre-update bytes and modes only while every changed file still matches its published version. Unrelated files are left alone. Run the project's own tests after applying; the `verified` status means Blueprint checked published bytes, not that project code was executed. The runnable API journey in `benchmarks/template_update_journey.py` includes a project smoke test.
