@@ -108,6 +108,10 @@ def _digest(value: Any) -> bool:
     return isinstance(value, str) and bool(_DIGEST.fullmatch(value))
 
 
+def _closed(value: Any, keys: set[str]) -> bool:
+    return isinstance(value, dict) and set(value) == keys
+
+
 def _diagnostic_id(diagnostic: dict[str, Any], path: str, file_sha: str) -> str:
     material = {
         "path": path,
@@ -138,7 +142,13 @@ def _line_evidence(root: Path, path: str, file_sha: str, line: int) -> str:
 
 def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
     if (
-        not isinstance(packet, dict)
+        not _closed(
+            packet,
+            {
+                "schema", "schema_version", "status", "stable", "source_digest",
+                "snapshot", "engine", "limits", "coverage", "files", "qualifications",
+            },
+        )
         or packet.get("schema") != "context.static-diagnostics.v1"
         or packet.get("schema_version") != 1
     ):
@@ -147,23 +157,60 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
         raise ValueError("Context could not confirm a stable static-diagnostics snapshot.")
     snapshot = packet.get("snapshot")
     if (
-        not isinstance(snapshot, dict)
+        not _closed(snapshot, {"id", "head", "dirty", "stable", "files"})
         or not _digest(snapshot.get("id"))
         or not isinstance(snapshot.get("files"), list)
         or snapshot.get("stable") is not True
         or not isinstance(snapshot.get("dirty"), bool)
-        or (
-            snapshot.get("head") is not None
-            and not re.fullmatch(r"[a-f0-9]{40,64}", snapshot.get("head", ""))
-        )
+        or not re.fullmatch(r"[a-f0-9]{40,64}", snapshot.get("head", ""))
     ):
         raise ValueError("Context returned an invalid source snapshot.")
     if not _digest(packet.get("source_digest")):
         raise ValueError("Context returned an invalid source digest.")
     if packet.get("schema_version") != 1:
         raise ValueError("Context returned an unsupported static-diagnostics version.")
+    engine = packet.get("engine")
+    if not _closed(engine, {"python", "node", "typescript", "worker"}):
+        raise ValueError("Context omitted a closed analyzer identity.")
+    for key, expected in (
+        ("python", {"path", "version"}),
+        ("node", {"path", "version"}),
+        ("typescript", {"path", "version", "sha256"}),
+        ("worker", {"path", "sha256"}),
+    ):
+        identity = engine.get(key)
+        if (
+            not _closed(identity, expected)
+            or not isinstance(identity.get("path"), str)
+            or not Path(identity["path"]).is_absolute()
+        ):
+            raise ValueError("Context returned an invalid analyzer identity.")
+        if "version" in expected and not isinstance(identity.get("version"), str):
+            raise ValueError("Context returned an invalid analyzer version.")
+        if "sha256" in expected and not _digest(identity.get("sha256")):
+            raise ValueError("Context returned an invalid analyzer hash.")
+    limits = packet.get("limits")
+    limit_keys = {
+        "max_tracked_files", "max_file_bytes", "max_total_bytes", "max_diagnostics",
+        "typescript_worker_timeout_seconds", "typescript_compiler_policy",
+    }
+    if (
+        not _closed(limits, limit_keys)
+        or any(
+            type(limits.get(key)) is not int or limits[key] <= 0
+            for key in limit_keys - {"typescript_compiler_policy"}
+        )
+        or not isinstance(limits.get("typescript_compiler_policy"), str)
+    ):
+        raise ValueError("Context returned invalid analysis limits.")
     coverage = packet.get("coverage")
-    if not isinstance(coverage, dict):
+    if not _closed(
+        coverage,
+        {
+            "tracked_source_candidates", "analyzed_files", "unsupported_files",
+            "omitted_files", "diagnostics", "unknown_reasons", "column_units",
+        },
+    ):
         raise ValueError("Context returned invalid coverage status.")
     if coverage.get("column_units") != "UTF-16 code units; 1-based, end-exclusive":
         raise ValueError("Context returned an unsupported source-column convention.")
@@ -189,7 +236,7 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
     if any(type(coverage.get(key)) is not int or coverage[key] < 0 for key in coverage_counts):
         raise ValueError("Context returned invalid coverage counts.")
     coverage_diagnostics = coverage.get("diagnostics")
-    if not isinstance(coverage_diagnostics, dict) or any(
+    if not _closed(coverage_diagnostics, {"total", "returned", "omitted"}) or any(
         type(coverage_diagnostics.get(key)) is not int or coverage_diagnostics[key] < 0
         for key in ("total", "returned", "omitted")
     ):
@@ -205,7 +252,17 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
             f"Context omitted {coverage_diagnostics['omitted']} diagnostics at its response bound."
         )
     for item in files:
-        if not isinstance(item, dict) or not _relative(item.get("path")) or item["path"] in seen:
+        if (
+            not _closed(
+                item,
+                {
+                    "path", "language", "status", "sha256", "reason",
+                    "diagnostic_total", "diagnostics", "unknown_reasons",
+                },
+            )
+            or not _relative(item.get("path"))
+            or item["path"] in seen
+        ):
             raise ValueError("Context returned an unsafe or duplicate source path.")
         seen.add(item["path"])
         state = item.get("status")
@@ -221,6 +278,9 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
         language = item.get("language")
         if not isinstance(language, str) or not language or len(language) > 100:
             raise ValueError("Context returned an invalid source language.")
+        reason = item.get("reason")
+        if reason is not None and (not isinstance(reason, str) or len(reason) > 1000):
+            raise ValueError("Context returned an invalid file coverage reason.")
         total = item.get("diagnostic_total")
         if type(total) is not int or total < 0:
             raise ValueError("Context returned an invalid diagnostic count.")
@@ -247,7 +307,10 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
                 f"{item['path']}: per-file count exceeds returned rows; missing findings unknown."
             )
         for diagnostic in rows:
-            if not isinstance(diagnostic, dict):
+            if not _closed(
+                diagnostic,
+                {"diagnosticId", "code", "message", "severity", "path", "fileSha256", "range"},
+            ):
                 raise ValueError("Context returned an invalid diagnostic.")
             code, message, severity = (
                 diagnostic.get("code"),
@@ -261,14 +324,16 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
                 or not isinstance(message, str)
                 or len(message) > 2000
                 or severity not in _SEVERITY
+                or diagnostic.get("path") != item["path"]
+                or diagnostic.get("fileSha256") != file_sha
             ):
                 raise ValueError("Context returned malformed diagnostic fields.")
-            if not isinstance(location, dict) or set(location) != {"start", "end"}:
+            if not _closed(location, {"start", "end"}):
                 raise ValueError("Context returned an invalid diagnostic range.")
             start, end = location["start"], location["end"]
             if (
-                not isinstance(start, dict)
-                or not isinstance(end, dict)
+                not _closed(start, {"line", "column"})
+                or not _closed(end, {"line", "column"})
                 or not all(
                     type(v) is int and v > 0
                     for v in (
@@ -290,7 +355,7 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
     snapshot_hashes: dict[str, str] = {}
     for item in snapshot["files"]:
         if (
-            not isinstance(item, dict)
+            not _closed(item, {"path", "sha256"})
             or not _relative(item.get("path"))
             or not _digest(item.get("sha256"))
             or item["path"] in snapshot_hashes
@@ -305,6 +370,12 @@ def _validate_packet(packet: Any) -> tuple[list[dict[str, Any]], list[str]]:
         raise ValueError("Context unsupported-file coverage counts are inconsistent.")
     if coverage["omitted_files"] < sum(item["status"] == "omitted" for item in files):
         raise ValueError("Context omitted-file coverage counts are inconsistent.")
+    if coverage["tracked_source_candidates"] != (
+        coverage["analyzed_files"]
+        + coverage["unsupported_files"]
+        + coverage["omitted_files"]
+    ):
+        raise ValueError("Context source coverage totals are inconsistent.")
     if coverage_diagnostics["returned"] != sum(len(item.get("diagnostics", [])) for item in files):
         raise ValueError("Context returned-diagnostic coverage counts are inconsistent.")
     if coverage_diagnostics["total"] != sum(
