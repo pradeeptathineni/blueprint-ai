@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -246,7 +247,7 @@ def test_multi_package_selection_and_planning_readiness_remain_source_bound(tmp_
         **readiness,
         "currentness": "unknown",
         "project_binding": {
-            **readiness["project_binding"],
+            **cast(dict[str, str], readiness["project_binding"]),
             "currentness": "unknown",
         },
         "qualification": [

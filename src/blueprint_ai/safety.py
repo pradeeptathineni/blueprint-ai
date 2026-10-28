@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import os
 import re
@@ -197,6 +198,18 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         time.sleep(0.01)
 
 
+def _cleanup_isolated_home(home: tempfile.TemporaryDirectory[str]) -> None:
+    """Retry a bounded concurrent cache removal after provider descendants exit."""
+    for attempt in range(10):
+        try:
+            home.cleanup()
+            return
+        except OSError as error:
+            if error.errno not in (errno.ENOTEMPTY, errno.EEXIST) or attempt == 9:
+                raise
+            time.sleep(0.1 * (attempt + 1))
+
+
 def run_process_bytes(
     command: list[str],
     cwd: Path,
@@ -226,7 +239,7 @@ def run_process_bytes(
             start_new_session=True,
         )
     except OSError:
-        isolated_home.cleanup()
+        _cleanup_isolated_home(isolated_home)
         raise
     stdout = bytearray()
     stderr = bytearray()
@@ -259,7 +272,7 @@ def run_process_bytes(
         timed_out,
         len(stdout) > output_limit or len(stderr) > output_limit,
     )
-    isolated_home.cleanup()
+    _cleanup_isolated_home(isolated_home)
     return result
 
 
