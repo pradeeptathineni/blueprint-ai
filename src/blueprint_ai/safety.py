@@ -8,6 +8,7 @@ import stat
 import subprocess
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -169,6 +170,33 @@ def _read_pipe(pipe, sink: bytearray, limit: int) -> None:
         pipe.close()
 
 
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    """Stop a tool's remaining descendants and wait for the group to drain."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except AttributeError:
+        if process.poll() is None:
+            process.kill()
+    except OSError:
+        pass
+
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+    # killpg only requests termination. Wait before callers remove temporary
+    # work/cache trees that descendants may still be using.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(process.pid, 0)
+        except (AttributeError, OSError):
+            return
+        time.sleep(0.01)
+
+
 def run_process_bytes(
     command: list[str],
     cwd: Path,
@@ -218,17 +246,10 @@ def run_process_bytes(
         process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (AttributeError, OSError):
-            process.kill()
-        process.wait(timeout=5)
+        _terminate_process_group(process)
     else:
         # A hostile tool must not leave background children holding resources after it exits.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (AttributeError, OSError):
-            pass
+        _terminate_process_group(process)
     for reader in readers:
         reader.join(timeout=5)
     result = RawProcessResult(

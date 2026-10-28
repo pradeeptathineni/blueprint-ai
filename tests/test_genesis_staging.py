@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 import uuid
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from blueprint_ai.genesis.executor import (
 )
 from blueprint_ai.genesis.models import IntentSpec
 from blueprint_ai.genesis.plan import plan_project
+from blueprint_ai.safety import run_process_bytes
 from blueprint_ai.sandbox import SandboxPolicy
 
 
@@ -129,3 +131,25 @@ def test_go_cli_stage_failure_recovery_explicit_publish_and_cold_reopen(
     )
     assert (destination / "main.go").is_file()
     assert (destination / "go.mod").is_file()
+
+
+def test_process_runner_waits_for_killed_descendant_group(tmp_path: Path) -> None:
+    if os.name != "posix":
+        pytest.skip("process-group cleanup is POSIX-specific")
+
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import os, subprocess, sys\n"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'], "
+            "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+            "print(os.getpgrp(), flush=True)\n"
+        ),
+    ]
+    result = run_process_bytes(command, tmp_path, timeout=5)
+
+    assert result.returncode == 0
+    process_group = int(result.stdout.decode().strip())
+    with pytest.raises(ProcessLookupError):
+        os.killpg(process_group, 0)
