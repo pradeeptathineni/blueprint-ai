@@ -24,6 +24,7 @@ def test_phase_two_taxonomy_is_complete() -> None:
         "documentation",
         "architecture",
         "ai-context",
+        "context-diagnostics",
     }
 
 

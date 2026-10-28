@@ -275,9 +275,7 @@ def inspect_target(root: Path) -> dict:
     record_file = _read(root, RECORD)
     record_status = (
         "current"
-        if record_file is not None
-        and record_file[0] == _json(record)
-        and record_file[1] == 0o644
+        if record_file is not None and record_file[0] == _json(record) and record_file[1] == 0o644
         else "modified"
     )
     counts = {

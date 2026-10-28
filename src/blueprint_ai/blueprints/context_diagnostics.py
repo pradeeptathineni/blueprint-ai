@@ -13,7 +13,7 @@ from typing import Any
 
 from blueprint_ai.config import load_settings
 from blueprint_ai.core import Finding, ProjectFacts
-from blueprint_ai.core.models import FileRange
+from blueprint_ai.core.models import FileRange, Severity
 from blueprint_ai.discovery import discover_project, project_source_snapshot
 from blueprint_ai.safety import read_bytes_bounded
 
@@ -25,7 +25,12 @@ _PROFILE_ENV = {
     "typescript": "BLUEPRINT_CONTEXT_TYPESCRIPT",
 }
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
-_SEVERITY = {"error": "high", "warning": "medium", "suggestion": "low", "info": "info"}
+_SEVERITY: dict[str, Severity] = {
+    "error": "high",
+    "warning": "medium",
+    "suggestion": "low",
+    "info": "info",
+}
 _MAX_RESPONSE = 4_000_000
 _MAX_DIAGNOSTICS = 20_000
 

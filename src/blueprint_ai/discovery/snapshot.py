@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from blueprint_ai.core import ProjectFacts
 from blueprint_ai.discovery.project import discover_project
@@ -50,9 +50,7 @@ def project_source_snapshot(
             )
             break
         try:
-            data = read_bytes_bounded(
-                root / rel, MAX_SNAPSHOT_FILE_BYTES, root=root
-            )
+            data = read_bytes_bounded(root / rel, MAX_SNAPSHOT_FILE_BYTES, root=root)
             if total + len(data) > MAX_SNAPSHOT_BYTES:
                 complete = False
                 diagnostics.append(
