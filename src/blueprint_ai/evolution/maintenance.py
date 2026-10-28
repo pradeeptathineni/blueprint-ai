@@ -11,7 +11,7 @@ import json
 import re
 import stat
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from blueprint_ai.capabilities import add_capability, plan_add
 from blueprint_ai.core import ProjectFacts
@@ -21,7 +21,7 @@ from blueprint_ai.evolution.engine import (
     _safe_path,
     rollback_evolution,
 )
-from blueprint_ai.remediation import KITS, rollback_operation
+from blueprint_ai.remediation import KITS, ApplyResult, rollback_operation
 from blueprint_ai.safety import MAX_MANIFEST_BYTES, read_bytes_bounded
 from blueprint_ai.sandbox import SandboxPolicy
 
@@ -270,7 +270,7 @@ def history(root: Path) -> dict[str, Any]:
                 and isinstance(record.get("changes"), list)
                 and _receipt_is_authoritative(root, path.stem, raw.decode("utf-8"))
             ):
-                changes = []
+                changes: list[dict[str, object]] = []
                 seen: set[str] = set()
                 for change in record["changes"]:
                     target = change.get("target") if isinstance(change, dict) else None
@@ -373,11 +373,11 @@ def rollback(root: Path, operation_id: str) -> dict[str, Any]:
     if not isinstance(record, dict) or record.get("operation_id") != operation_id:
         raise ValueError("operation receipt identity mismatch")
     if record.get("kind") == "template-update" and record.get("version") == 4:
-        result = template_update.rollback(root, operation_id)
-        return {**result, "kind": "template-update"}
+        template_result = template_update.rollback(root, operation_id)
+        return {**template_result, "kind": "template-update"}
     if record.get("kind") == "evolution" and record.get("version") == 3:
-        result = rollback_evolution(root, operation_id)
-        report = result.model_dump(mode="json")
+        evolution_result = rollback_evolution(root, operation_id)
+        report = evolution_result.model_dump(mode="json")
         return {
             **report,
             "changes": [
@@ -401,5 +401,5 @@ def rollback(root: Path, operation_id: str) -> dict[str, Any]:
     }
     if not kits or any(name not in KITS or KITS[name].verification for name in kits):
         raise ValueError("only retained no-verifier capability receipts can be rolled back here")
-    result = rollback_operation(root, operation_id)
-    return {**result.model_dump(mode="json"), "kind": "capability"}
+    capability_result = cast(ApplyResult, rollback_operation(root, operation_id))
+    return {**capability_result.model_dump(mode="json"), "kind": "capability"}
