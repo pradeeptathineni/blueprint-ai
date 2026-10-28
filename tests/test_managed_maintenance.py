@@ -4,14 +4,15 @@ from pathlib import Path
 
 import pytest
 
-from blueprint_ai.evolution import maintenance, template_update
-from blueprint_ai.evolution import apply_evolution, plan_evolution
+from blueprint_ai.evolution import apply_evolution, maintenance, plan_evolution, template_update
 
 
 def commit(root: Path, message: str) -> str:
     subprocess.run(["git", "-C", str(root), "init", "-q", "-b", "main"], check=True)
     subprocess.run(["git", "-C", str(root), "config", "user.name", "Synthetic"], check=True)
-    subprocess.run(["git", "-C", str(root), "config", "user.email", "synthetic@example.test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(root), "config", "user.email", "synthetic@example.test"], check=True
+    )
     subprocess.run(["git", "-C", str(root), "add", "--all"], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-qm", message], check=True)
     return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
@@ -63,7 +64,9 @@ def test_capability_template_evolution_cold_history_and_scoped_rollback(tmp_path
 
     capability_rollback = maintenance.rollback(project, capability_operation)
     assert any(change["status"] == "conflicted" for change in capability_rollback["changes"])
-    assert (project / "renovate.json").is_file(), "a later template-authored file is never deleted by the old capability receipt"
+    assert (project / "renovate.json").is_file(), (
+        "a later template-authored file is never deleted by the old capability receipt"
+    )
 
     template_rollback = maintenance.rollback(project, template_operation)
     assert template_rollback["status"] == "rolled_back"
@@ -153,9 +156,7 @@ def test_supported_configuration_modernization_is_previewed_retained_and_reversi
     assert "actions/checkout@v4" in preview.diffs[".github/workflows/ci.yml"]
     assert workflow.read_text() == original
 
-    applied = apply_evolution(
-        project, plan, run_blueprint_review=False, report_failures=True
-    )
+    applied = apply_evolution(project, plan, run_blueprint_review=False, report_failures=True)
     assert applied.status == "verified"
     assert applied.operation_id
     modernized = workflow.read_text()
@@ -165,7 +166,9 @@ def test_supported_configuration_modernization_is_previewed_retained_and_reversi
     assert unrelated.read_text() == "preserve local notes\n"
 
     retained = maintenance.history(project)
-    row = next(item for item in retained["operations"] if item["operation_id"] == applied.operation_id)
+    row = next(
+        item for item in retained["operations"] if item["operation_id"] == applied.operation_id
+    )
     assert row["kind"] == "evolution"
     assert row["transformations"] == ["github-actions/pin-official-actions"]
     assert row["changes"][0]["target"] == ".github/workflows/ci.yml"

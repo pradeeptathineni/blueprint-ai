@@ -13,17 +13,17 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from blueprint_ai.core import ProjectFacts
 from blueprint_ai.capabilities import add_capability, plan_add
-from blueprint_ai.remediation import KITS, rollback_operation
-from blueprint_ai.safety import MAX_MANIFEST_BYTES, read_bytes_bounded
-from blueprint_ai.sandbox import SandboxPolicy
+from blueprint_ai.core import ProjectFacts
 from blueprint_ai.evolution import template_update
 from blueprint_ai.evolution.engine import (
     _receipt_is_authoritative,
     _safe_path,
     rollback_evolution,
 )
+from blueprint_ai.remediation import KITS, rollback_operation
+from blueprint_ai.safety import MAX_MANIFEST_BYTES, read_bytes_bounded
+from blueprint_ai.sandbox import SandboxPolicy
 
 PLAN_SCHEMA = "blueprint-managed-capability-plan/1"
 MAX_OPERATION_FILES = 1000
@@ -55,7 +55,9 @@ def _enabled_kit(name: str):
     if kit is None:
         raise ValueError("choose a registered Blueprint capability")
     if kit.verification:
-        raise ValueError("this maintenance flow only offers declarative capabilities without project verifiers")
+        raise ValueError(
+            "this maintenance flow only offers declarative capabilities without project verifiers"
+        )
     if not kit.files or len(kit.files) > 32:
         raise ValueError("registered capability file set exceeds the maintenance bound")
     return kit
@@ -65,14 +67,16 @@ def capability_catalog() -> dict[str, Any]:
     rows = []
     for name, kit in sorted(KITS.items()):
         if not kit.verification and kit.files and len(kit.files) <= 32:
-            rows.append({
-                "id": name,
-                "label": name.replace("-", " ").title(),
-                "version": kit.version,
-                "paths": sorted(kit.files),
-                "mode": "create-only",
-                "verification": "built-in asset parsing only; no project command",
-            })
+            rows.append(
+                {
+                    "id": name,
+                    "label": name.replace("-", " ").title(),
+                    "version": kit.version,
+                    "paths": sorted(kit.files),
+                    "mode": "create-only",
+                    "verification": "built-in asset parsing only; no project command",
+                }
+            )
     return {"schema": "blueprint-managed-capability-catalog/1", "capabilities": rows}
 
 
@@ -88,9 +92,20 @@ def _template_binding(root: Path, source: Path) -> dict[str, Any]:
         "format": recipe.get("format"),
         "commit": recipe.get("commit"),
         "record_sha256": inspection["record"].get("sha256"),
-        "files": [{key: row.get(key) for key in
-                   ("path", "status", "expected_sha256", "current_sha256", "expected_mode", "current_mode")}
-                  for row in inspection["files"]],
+        "files": [
+            {
+                key: row.get(key)
+                for key in (
+                    "path",
+                    "status",
+                    "expected_sha256",
+                    "current_sha256",
+                    "expected_mode",
+                    "current_mode",
+                )
+            }
+            for row in inspection["files"]
+        ],
     }
 
 
@@ -109,22 +124,27 @@ def plan_capability(root: Path, capability: str, template_source: Path) -> dict[
                 before = _sha(read_bytes_bounded(path, MAX_MANIFEST_BYTES, root=root))
             except (OSError, ValueError):
                 before = "unreadable"
-        rows.append({
-            "path": row["path"],
-            "status": row["status"],
-            "before_sha256": before,
-            "after_sha256": _sha(content),
-            "after_mode": 0o644,
-            "content": row["content"],
-        })
+        rows.append(
+            {
+                "path": row["path"],
+                "status": row["status"],
+                "before_sha256": before,
+                "after_sha256": _sha(content),
+                "after_mode": 0o644,
+                "content": row["content"],
+            }
+        )
     body = {
         "schema": PLAN_SCHEMA,
         "target": str(root),
         "capability": capability,
         "capability_version": kit.version,
         "template_binding": template,
-        "status": "conflict" if native["conflicts"] else
-                  "noop" if rows and all(row["status"] == "already-present" for row in rows) else "ready",
+        "status": "conflict"
+        if native["conflicts"]
+        else "noop"
+        if rows and all(row["status"] == "already-present" for row in rows)
+        else "ready",
         "files": rows,
         "conflicts": list(native["conflicts"]),
         "verification": "built-in asset parsing only; no project code or verifier command runs",
@@ -132,7 +152,9 @@ def plan_capability(root: Path, capability: str, template_source: Path) -> dict[
     return {**body, "plan_sha256": _hash(body)}
 
 
-def apply_capability(root: Path, capability: str, plan_sha256: str, template_source: Path) -> dict[str, Any]:
+def apply_capability(
+    root: Path, capability: str, plan_sha256: str, template_source: Path
+) -> dict[str, Any]:
     root = _root(root)
     if not re.fullmatch(r"[a-f0-9]{64}", plan_sha256 or ""):
         raise ValueError("invalid capability plan digest")
@@ -142,8 +164,13 @@ def apply_capability(root: Path, capability: str, plan_sha256: str, template_sou
     if fresh["status"] == "conflict":
         raise ValueError("existing configuration conflict; project files were preserved")
     if fresh["status"] == "noop":
-        return {"status": "noop", "operation_id": None, "plan_sha256": plan_sha256,
-                "changes": [], "verification": fresh["verification"]}
+        return {
+            "status": "noop",
+            "operation_id": None,
+            "plan_sha256": plan_sha256,
+            "changes": [],
+            "verification": fresh["verification"],
+        }
     # These no-verifier kits do not inspect language-specific project facts. Avoid a broad
     # project scan: the native planner already bound the exact target paths and contents.
     facts = ProjectFacts(path=str(root), name=root.name)
@@ -154,7 +181,9 @@ def apply_capability(root: Path, capability: str, plan_sha256: str, template_sou
         policy=SandboxPolicy(backend="auto", network="none", trusted=False, writable=False),
     )
     if any(row.status in {"conflicted", "unsupported"} for row in result.changes):
-        raise ValueError("native capability apply encountered a conflict; inspect the operation receipt")
+        raise ValueError(
+            "native capability apply encountered a conflict; inspect the operation receipt"
+        )
     return {
         "status": "verified" if result.changed else "noop",
         "operation_id": result.operation_id,
@@ -183,7 +212,8 @@ def _template_record(root: Path) -> dict[str, Any] | None:
         "format": record.get("format", "static"),
         "commit": record.get("commit"),
         "sha256": _sha(raw),
-        "source_available": isinstance(record.get("source"), str) and Path(record["source"]).is_dir(),
+        "source_available": isinstance(record.get("source"), str)
+        and Path(record["source"]).is_dir(),
     }
 
 
@@ -195,7 +225,11 @@ def history(root: Path) -> dict[str, Any]:
     unreadable: list[dict[str, str]] = []
     if operations.exists():
         info = operations.lstat()
-        if not stat.S_ISDIR(info.st_mode) or operations.is_symlink() or operations.resolve() != operations:
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or operations.is_symlink()
+            or operations.resolve() != operations
+        ):
             raise ValueError("project operation history path is unsafe")
         paths = sorted(operations.glob("*.json"))
         if len(paths) > MAX_OPERATION_FILES:
@@ -217,14 +251,18 @@ def history(root: Path) -> dict[str, Any]:
                 unreadable.append({"receipt_id": path.stem, "reason": "identity-mismatch"})
                 continue
             if record.get("kind") == "template-update":
-                rows.append({
-                    "kind": "template-update", "operation_id": path.stem,
-                    "status": record.get("status"),
-                    "plan_sha256": record.get("plan_sha256"),
-                    "from_commit": record.get("from_commit"), "to_commit": record.get("to_commit"),
-                    "changes": record.get("changes", []),
-                    "receipt_sha256": _sha(raw),
-                })
+                rows.append(
+                    {
+                        "kind": "template-update",
+                        "operation_id": path.stem,
+                        "status": record.get("status"),
+                        "plan_sha256": record.get("plan_sha256"),
+                        "from_commit": record.get("from_commit"),
+                        "to_commit": record.get("to_commit"),
+                        "changes": record.get("changes", []),
+                        "receipt_sha256": _sha(raw),
+                    }
+                )
             elif (
                 record.get("version") == 3
                 and record.get("kind") == "evolution"
@@ -237,49 +275,73 @@ def history(root: Path) -> dict[str, Any]:
                 for change in record["changes"]:
                     target = change.get("target") if isinstance(change, dict) else None
                     if not isinstance(target, str) or target in seen:
-                        unreadable.append({"receipt_id": path.stem, "reason": "invalid-evolution-change"})
+                        unreadable.append(
+                            {"receipt_id": path.stem, "reason": "invalid-evolution-change"}
+                        )
                         changes = []
                         break
                     try:
                         _safe_path(root, target)
                     except ValueError:
-                        unreadable.append({"receipt_id": path.stem, "reason": "unsafe-evolution-change"})
+                        unreadable.append(
+                            {"receipt_id": path.stem, "reason": "unsafe-evolution-change"}
+                        )
                         changes = []
                         break
                     seen.add(target)
-                    changes.append({
-                        "target": target,
-                        "sha256": change.get("after_sha256"),
-                        "status": change.get("status"),
-                    })
+                    changes.append(
+                        {
+                            "target": target,
+                            "sha256": change.get("after_sha256"),
+                            "status": change.get("status"),
+                        }
+                    )
                 if changes:
-                    rows.append({
-                        "kind": "evolution",
-                        "operation_id": path.stem,
-                        "status": record.get("status"),
-                        "transformations": [
-                            value for value in record["requested_targets"] if isinstance(value, str)
-                        ],
-                        "plan_sha256": record.get("plan_sha256"),
-                        "changes": changes,
-                        "receipt_sha256": _sha(raw),
-                    })
+                    rows.append(
+                        {
+                            "kind": "evolution",
+                            "operation_id": path.stem,
+                            "status": record.get("status"),
+                            "transformations": [
+                                value
+                                for value in record["requested_targets"]
+                                if isinstance(value, str)
+                            ],
+                            "plan_sha256": record.get("plan_sha256"),
+                            "changes": changes,
+                            "receipt_sha256": _sha(raw),
+                        }
+                    )
                 elif not record["changes"]:
-                    unreadable.append({"receipt_id": path.stem, "reason": "empty-evolution-change-set"})
+                    unreadable.append(
+                        {"receipt_id": path.stem, "reason": "empty-evolution-change-set"}
+                    )
             elif record.get("version") in {1, 2} and isinstance(record.get("changes"), list):
-                kits = sorted({str(change.get("blueprint", "")).removeprefix("kit:")
-                               for change in record["changes"] if isinstance(change, dict)
-                               and str(change.get("blueprint", "")).startswith("kit:")})
+                kits = sorted(
+                    {
+                        str(change.get("blueprint", "")).removeprefix("kit:")
+                        for change in record["changes"]
+                        if isinstance(change, dict)
+                        and str(change.get("blueprint", "")).startswith("kit:")
+                    }
+                )
                 if kits and all(name in KITS and not KITS[name].verification for name in kits):
-                    rows.append({
-                        "kind": "capability", "operation_id": path.stem,
-                        "status": record.get("status"),
-                        "capabilities": kits, "created_at": record.get("created_at"),
-                        "changes": [{key: change.get(key) for key in ("target", "sha256", "status")}
-                                    for change in record["changes"] if isinstance(change, dict)
-                                    and str(change.get("blueprint", "")).startswith("kit:")],
-                        "receipt_sha256": _sha(raw),
-                    })
+                    rows.append(
+                        {
+                            "kind": "capability",
+                            "operation_id": path.stem,
+                            "status": record.get("status"),
+                            "capabilities": kits,
+                            "created_at": record.get("created_at"),
+                            "changes": [
+                                {key: change.get(key) for key in ("target", "sha256", "status")}
+                                for change in record["changes"]
+                                if isinstance(change, dict)
+                                and str(change.get("blueprint", "")).startswith("kit:")
+                            ],
+                            "receipt_sha256": _sha(raw),
+                        }
+                    )
                 else:
                     unreadable.append({"receipt_id": path.stem, "reason": "unsupported-receipt"})
             else:
@@ -291,7 +353,10 @@ def history(root: Path) -> dict[str, Any]:
         "operations": rows,
         "history_status": "partial" if unreadable else "complete",
         "unreadable_receipts": unreadable,
-        "qualification": "Read from existing project template and operation receipts; no missing record is regenerated. Partial history means at least one receipt could not be qualified.",
+        "qualification": (
+            "Read from existing project template and operation receipts; no missing record is "
+            "regenerated. Partial history means at least one receipt could not be qualified."
+        ),
     }
 
 
@@ -329,8 +394,11 @@ def rollback(root: Path, operation_id: str) -> dict[str, Any]:
     changes = record.get("changes")
     if record.get("version") not in {1, 2} or not isinstance(changes, list):
         raise ValueError("operation is outside managed maintenance rollback scope")
-    kits = {str(change.get("blueprint", "")).removeprefix("kit:") for change in changes
-            if isinstance(change, dict) and str(change.get("blueprint", "")).startswith("kit:")}
+    kits = {
+        str(change.get("blueprint", "")).removeprefix("kit:")
+        for change in changes
+        if isinstance(change, dict) and str(change.get("blueprint", "")).startswith("kit:")
+    }
     if not kits or any(name not in KITS or KITS[name].verification for name in kits):
         raise ValueError("only retained no-verifier capability receipts can be rolled back here")
     result = rollback_operation(root, operation_id)
