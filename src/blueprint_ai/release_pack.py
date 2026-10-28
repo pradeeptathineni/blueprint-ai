@@ -350,12 +350,19 @@ def _verify_package_provenance(manifest: dict[str, Any], selected_paths: set[str
                 or PurePosixPath(path).is_absolute()
                 or PurePosixPath(path).as_posix() != path
                 or any(part in {"", ".", ".."} for part in PurePosixPath(path).parts)
+                or Path(path).name not in _PACKAGE_MANIFESTS
                 for path in manifests
             )
             or len(set(manifests)) != len(manifests)
             or not isinstance(files, list)
             or not files
-            or any(not isinstance(path, str) or path not in selected_paths for path in files)
+            or any(
+                not isinstance(path, str)
+                or path not in selected_paths
+                or root != "."
+                and not path.startswith(f"{root}/")
+                for path in files
+            )
             or len(set(files)) != len(files)
         ):
             raise ValueError("pack selected package files or manifests are invalid")
