@@ -63,9 +63,7 @@ def test_legacy_pack_can_only_use_explicit_private_scope_compatibility(tmp_path:
     legacy = release_pack.build(project, ["LICENSE"])
     data = __import__("base64").b64decode(legacy["zip_base64"], validate=True)
     with pytest.raises(ValueError, match="target identity"):
-        release_pack.verify_pack(
-            data, legacy["pack_sha256"], expected_target_id="fixture"
-        )
+        release_pack.verify_pack(data, legacy["pack_sha256"], expected_target_id="fixture")
     reopened = release_pack.verify_pack(
         data,
         legacy["pack_sha256"],

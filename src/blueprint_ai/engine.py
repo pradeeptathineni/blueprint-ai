@@ -401,11 +401,7 @@ def review(context: RunContext, provider: ModelProvider | None = None) -> RunRep
     settings = Settings.model_validate(context.config)
     catalog = {
         **BLUEPRINTS,
-        **(
-            load_custom_blueprints(context.root)
-            if context.include_custom_blueprints
-            else {}
-        ),
+        **(load_custom_blueprints(context.root) if context.include_custom_blueprints else {}),
     }
     facts = discover_project(
         context.root,

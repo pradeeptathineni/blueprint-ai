@@ -370,9 +370,7 @@ def verify_pack(
         "bytes": len(data),
         "verified": True,
         "manifest": manifest,
-        "target_binding": "manifest-target-id"
-        if has_target_id
-        else "legacy-private-journal-scope",
+        "target_binding": "manifest-target-id" if has_target_id else "legacy-private-journal-scope",
         "qualification": None
         if has_target_id
         else (
