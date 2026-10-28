@@ -29,6 +29,17 @@ MAX_TOTAL_BYTES = 24 * 1024 * 1024
 MAX_PACK_BYTES = 28 * 1024 * 1024
 MAX_PREVIEW_CHARS = 4_000
 _RECEIPT = re.compile(r"^[a-f0-9]{32}$")
+_SHA = re.compile(r"^[a-f0-9]{64}$")
+_PLANNING_REVISION = re.compile(r"^[a-f0-9]{7,64}$")
+_PACKAGE_MANIFESTS = {
+    "package.json",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+}
 _CAPABILITIES = {row["id"] for row in maintenance.capability_catalog()["capabilities"]}
 
 
@@ -133,6 +144,226 @@ def _safe_paths(root: Path, paths: list[str]) -> tuple[list[dict[str, Any]], lis
     return rows, omissions
 
 
+def _selected_packages(
+    facts: Any, rows: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    components = {component.id: component for component in facts.graph.components}
+    grouped: dict[str, dict[str, Any]] = {}
+    unmapped: list[str] = []
+    for row in rows:
+        owner = facts.graph.owner(row["path"])
+        if owner is None or owner.id not in components:
+            unmapped.append(row["path"])
+            continue
+        manifests = sorted(
+            manifest for manifest in owner.manifests if Path(manifest).name in _PACKAGE_MANIFESTS
+        )
+        if not manifests:
+            unmapped.append(row["path"])
+            continue
+        package = grouped.setdefault(
+            owner.id,
+            {
+                "component_id": owner.id,
+                "name": owner.name,
+                "root": owner.root,
+                "manifests": manifests,
+                "files": [],
+            },
+        )
+        package["files"].append(row["path"])
+    packages = sorted(grouped.values(), key=lambda row: (row["root"], row["component_id"]))
+    for package in packages:
+        package["files"].sort()
+    return packages, sorted(unmapped)
+
+
+def _planning_readiness(
+    value: Any, *, target_id: str | None, source_digest: str
+) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    fields = {
+        "schema",
+        "owner",
+        "owner_revision",
+        "assessment",
+        "specification",
+        "project_binding",
+        "currentness",
+        "qualification",
+    }
+    if not isinstance(value, dict) or set(value) != fields:
+        raise ValueError("Planning readiness projection has unsupported fields")
+    if value["schema"] != "deep.planning-release-readiness.v1" or value["owner"] != "planning-ai":
+        raise ValueError("Planning readiness owner evidence is unsupported")
+    if not isinstance(value["owner_revision"], str) or not _PLANNING_REVISION.fullmatch(
+        value["owner_revision"]
+    ):
+        raise ValueError("Planning readiness owner revision is invalid")
+    if value["currentness"] not in {"current", "unknown"}:
+        raise ValueError("Planning readiness currentness is invalid")
+    if (
+        not isinstance(value["qualification"], list)
+        or len(value["qualification"]) > 12
+        or any(
+            not isinstance(item, str) or not item or len(item) > 500
+            for item in value["qualification"]
+        )
+    ):
+        raise ValueError("Planning readiness qualifications are invalid")
+    assessment = value["assessment"]
+    if not isinstance(assessment, dict) or set(assessment) != {
+        "id",
+        "revision",
+        "sha256",
+        "readiness",
+        "requirement_count",
+        "blocker_count",
+    }:
+        raise ValueError("Planning readiness assessment identity is invalid")
+    if (
+        not isinstance(assessment["id"], str)
+        or not re.fullmatch(
+            r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}", assessment["id"]
+        )
+        or type(assessment["revision"]) is not int
+        or assessment["revision"] < 1
+        or assessment["readiness"] not in {"ready_for_human_review", "not_ready", "unknown"}
+        or not (
+            assessment["sha256"] is None
+            or isinstance(assessment["sha256"], str)
+            and _SHA.fullmatch(assessment["sha256"])
+        )
+        or not (
+            assessment["requirement_count"] is None
+            or type(assessment["requirement_count"]) is int
+            and 0 <= assessment["requirement_count"] <= 64
+        )
+        or not (
+            assessment["blocker_count"] is None
+            or type(assessment["blocker_count"]) is int
+            and 0 <= assessment["blocker_count"] <= 64
+        )
+    ):
+        raise ValueError("Planning readiness assessment values are invalid")
+    specification = value["specification"]
+    if specification is not None and (
+        not isinstance(specification, dict)
+        or set(specification) != {"id", "revision", "sha256"}
+        or not isinstance(specification["id"], str)
+        or not specification["id"]
+        or len(specification["id"]) > 200
+        or type(specification["revision"]) is not int
+        or specification["revision"] < 1
+        or not isinstance(specification["sha256"], str)
+        or not _SHA.fullmatch(specification["sha256"])
+    ):
+        raise ValueError("Planning readiness specification binding is invalid")
+    binding = value["project_binding"]
+    if binding is not None and (
+        not isinstance(binding, dict)
+        or set(binding) != {"target_id", "report_id", "source_digest", "currentness"}
+        or not isinstance(binding["target_id"], str)
+        or not binding["target_id"]
+        or len(binding["target_id"]) > 64
+        or not isinstance(binding["report_id"], str)
+        or not _SHA.fullmatch(binding["report_id"])
+        or not isinstance(binding["source_digest"], str)
+        or not _SHA.fullmatch(binding["source_digest"])
+        or binding["currentness"] not in {"current", "unknown"}
+    ):
+        raise ValueError("Planning readiness project binding is invalid")
+    if value["currentness"] == "current":
+        if (
+            assessment["sha256"] is None
+            or assessment["readiness"] == "unknown"
+            or specification is None
+            or binding is None
+            or binding["currentness"] != "current"
+            or target_id is None
+            or binding["target_id"] != target_id
+            or binding["source_digest"] != source_digest
+        ):
+            raise ValueError("Current Planning readiness does not bind this exact project source")
+    return value
+
+
+def _verify_package_provenance(manifest: dict[str, Any], selected_paths: set[str]) -> None:
+    has_packages = "selected_packages" in manifest
+    has_unmapped = "unmapped_selected_files" in manifest
+    if not has_packages and not has_unmapped:
+        return  # Older schema-1 packs predate package-component provenance.
+    if not has_packages or not has_unmapped:
+        raise ValueError("pack package provenance is incomplete")
+    packages = manifest["selected_packages"]
+    unmapped = manifest["unmapped_selected_files"]
+    if not isinstance(packages, list) or len(packages) > MAX_FILES:
+        raise ValueError("pack package provenance exceeds its bounds")
+    if (
+        not isinstance(unmapped, list)
+        or len(unmapped) > MAX_FILES
+        or any(not isinstance(path, str) or path not in selected_paths for path in unmapped)
+    ):
+        raise ValueError("pack unmapped selected-file provenance is invalid")
+    assigned = list(unmapped)
+    package_ids: set[str] = set()
+    for package in packages:
+        if not isinstance(package, dict) or set(package) != {
+            "component_id",
+            "name",
+            "root",
+            "manifests",
+            "files",
+        }:
+            raise ValueError("pack selected package record is invalid")
+        component_id = package["component_id"]
+        root = package["root"]
+        if (
+            not isinstance(component_id, str)
+            or not component_id
+            or len(component_id) > 500
+            or component_id in package_ids
+            or not isinstance(package["name"], (str, type(None)))
+            or isinstance(package["name"], str)
+            and len(package["name"]) > 500
+            or not isinstance(root, str)
+            or not root
+            or len(root) > 1000
+            or root != "."
+            and (
+                PurePosixPath(root).is_absolute()
+                or PurePosixPath(root).as_posix() != root
+                or any(part in {"", ".", ".."} for part in PurePosixPath(root).parts)
+            )
+        ):
+            raise ValueError("pack selected package identity is invalid")
+        package_ids.add(component_id)
+        manifests = package["manifests"]
+        files = package["files"]
+        if (
+            not isinstance(manifests, list)
+            or not manifests
+            or any(
+                not isinstance(path, str)
+                or not path
+                or PurePosixPath(path).is_absolute()
+                or PurePosixPath(path).as_posix() != path
+                or any(part in {"", ".", ".."} for part in PurePosixPath(path).parts)
+                for path in manifests
+            )
+            or len(set(manifests)) != len(manifests)
+            or not isinstance(files, list)
+            or not files
+            or any(not isinstance(path, str) or path not in selected_paths for path in files)
+            or len(set(files)) != len(files)
+        ):
+            raise ValueError("pack selected package files or manifests are invalid")
+        assigned.extend(files)
+    if len(assigned) != len(set(assigned)) or set(assigned) != selected_paths:
+        raise ValueError("pack selected package files do not cover the exact selected file set")
+
+
 def preview(
     root: Path,
     paths: list[str],
@@ -140,6 +371,7 @@ def preview(
     capability_ids: list[str] | None = None,
     receipt_ids: list[str] | None = None,
     target_id: str | None = None,
+    planning_readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Preview only explicitly selected files and existing qualified owner metadata."""
     root = _root(root)
@@ -193,12 +425,17 @@ def preview(
                     "qualification": "Captured selected notice text; not a legal assessment.",
                 }
             )
-    source = project_source_snapshot(
-        root, discover_project(root), evidence_paths=[row["path"] for row in rows]
+    facts = discover_project(root)
+    source = project_source_snapshot(root, facts, evidence_paths=[row["path"] for row in rows])
+    selected_packages, unmapped_selected_files = _selected_packages(facts, rows)
+    planning = _planning_readiness(
+        planning_readiness,
+        target_id=target_id,
+        source_digest=source["source_digest"],
     )
     commit = _git(root, "rev-parse", "--verify", "HEAD^{commit}").decode().strip()
     dirty = bool(_git(root, "status", "--porcelain", "--untracked-files=all"))
-    return {
+    manifest = {
         "schema": SCHEMA,
         "target": {"name": root.name, **({"id": target_id} if target_id else {})},
         "source": {
@@ -209,6 +446,8 @@ def preview(
         },
         "files": rows,
         "omissions": omissions,
+        "selected_packages": selected_packages,
+        "unmapped_selected_files": unmapped_selected_files,
         "capabilities": registered,
         "registered_capabilities": catalog["capabilities"],
         "receipts": selected_receipts,
@@ -233,8 +472,17 @@ def preview(
             "listed.",
             "Dirty working-tree bytes are captured explicitly and are not represented as the base "
             "commit contents.",
+            "Selected package groups follow native graph ownership; omitted package files and "
+            "dependencies are not inferred.",
         ],
     }
+    if planning is not None:
+        manifest["planning_readiness"] = planning
+        manifest["qualification"].append(
+            "Planning readiness is a human-review qualification for this captured source "
+            "snapshot, not release or publication approval."
+        )
+    return manifest
 
 
 def build(
@@ -244,6 +492,7 @@ def build(
     capability_ids: list[str] | None = None,
     receipt_ids: list[str] | None = None,
     target_id: str | None = None,
+    planning_readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return deterministic ZIP bytes only after an exact before/after source check."""
     root = _root(root)
@@ -253,6 +502,7 @@ def build(
         capability_ids=capability_ids,
         receipt_ids=receipt_ids,
         target_id=target_id,
+        planning_readiness=planning_readiness,
     )
     if before["omissions"]:
         raise ValueError("resolve every selected-file omission before building the pack")
@@ -270,6 +520,7 @@ def build(
         capability_ids=capability_ids,
         receipt_ids=receipt_ids,
         target_id=target_id,
+        planning_readiness=planning_readiness,
     )
     if _json(before) != _json(after):
         raise ValueError("project source or selected provenance changed during pack creation")
@@ -332,6 +583,12 @@ def verify_pack(
             or (not has_target_id and not allow_legacy_scoped_target)
         ):
             raise ValueError("pack target identity does not match its configured artifact scope")
+        if "planning_readiness" in manifest:
+            _planning_readiness(
+                manifest["planning_readiness"],
+                target_id=target.get("id") if has_target_id else None,
+                source_digest=manifest.get("source", {}).get("source_digest", ""),
+            )
         rows = manifest.get("files")
         if not isinstance(rows, list) or not 1 <= len(rows) <= MAX_FILES:
             raise ValueError("pack manifest exceeds the selected-file bound")
@@ -360,6 +617,7 @@ def verify_pack(
                 raise ValueError("portable content exceeds its manifest bounds")
         if set(names[:-1]) != selected:
             raise ValueError("pack file list does not match its manifest")
+        _verify_package_provenance(manifest, selected)
         for row in rows:
             content = archive.read(row["path"])
             if _sha(content) != row["sha256"] or len(content) != row["bytes"]:
@@ -370,9 +628,7 @@ def verify_pack(
         "bytes": len(data),
         "verified": True,
         "manifest": manifest,
-        "target_binding": "manifest-target-id"
-        if has_target_id
-        else "legacy-private-journal-scope",
+        "target_binding": "manifest-target-id" if has_target_id else "legacy-private-journal-scope",
         "qualification": None
         if has_target_id
         else (
