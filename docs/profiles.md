@@ -27,3 +27,51 @@ Changed-file review requires usable Git comparison evidence and includes individ
 untracked directories. Invalid refs fail explicitly; a clean tree does not reintroduce file-scoped
 findings. JUnit represents incomplete concerns without active findings as skipped, and counts only
 active failures. SARIF includes execution completeness and per-concern tool/sandbox evidence.
+
+## Project settings
+
+Inspect, search, preview, save or reset ordinary defaults from either the CLI or a local browser:
+
+```bash
+blueprint-ai settings show ./project --json
+blueprint-ai settings show ./project --category Reports --changed
+blueprint-ai settings set minimum_severity high ./project --dry-run --json
+blueprint-ai settings set minimum_severity high ./project
+blueprint-ai settings reset minimum_severity ./project
+blueprint-ai settings serve ./project
+```
+
+Open the printed `http://127.0.0.1:PORT` URL manually. The page searches controls by name or
+description, filters categories and changed values, and shows each default, saved effective value,
+source and project scope. It requires a valid preview before saving. A lost save response requires
+reloading saved settings before another edit. The server stops with Ctrl-C and starts no review.
+
+The editable controls are `minimum_severity`, `maximum_priority`, `fail_on_priority`, `tool_timeout`,
+`max_workers` and `max_tool_output_bytes`. Settings constrain the next operation. A tool can impose
+a shorter timeout. The existing review CLI's `--fail-on` overrides the saved failure threshold for
+that command. `null` disables the saved failure policy. Reset removes just the selected YAML key,
+so the installed version's default takes effect. Different from defaults compares effective values.
+An explicit project value equal to its built-in default does not appear in this filter.
+
+The native `blueprint_ai.settings` API and `settings show --json` expose `blueprint.settings.v1`.
+Read and preview start no tools or models. Each control has a stable ID, category, constraints,
+default, effective value, source, scope and next-operation timing. The document revision is the
+SHA-256 of the exact saved bytes, or `missing`. API writes require `expected_revision`. CLI callers
+can pass `--expect REVISION` to bind a reviewed draft, or omit it for an immediate edit against the
+current document. `--dry-run` returns the proposed values and changes without saving them.
+
+Edits validate against the existing `Settings` model and preserve unrelated YAML values, comments
+and formatting. Writers serialize with a project-local lock and replace the document atomically.
+Other settings writers and changed bytes are refused. Direct editors do not take this lock, so
+avoid editing the file simultaneously. A leftover `.blueprint-ai.settings.lock` after a terminated
+process requires the operator to check that no settings writer is active before removing it.
+Symlinks, invalid YAML, duplicate keys and aliases are refused. Editing requires block-style YAML.
+The settings reader can inspect valid flow-style mappings, but never rewrites them silently.
+
+The interface returns only the six ordinary values. Other project fields are listed by name and
+keep their existing YAML interfaces. Model/provider spending controls, credentials, executable
+trust, network target authorization, suppressions and output paths stay outside this editor.
+Saving defaults never grants execution or network authority. Consumers such as Deep must map
+trusted, configured target IDs to project roots on the server and invoke this owner API. A browser
+must never supply a root path, executable or credentials. Existing Deep capability discovery and
+appearance adapters remain separate owners.

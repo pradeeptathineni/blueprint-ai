@@ -24,8 +24,10 @@ from blueprint_ai.model import configuration_from_environment, provider_from_env
 from blueprint_ai.output import serialize_report
 from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_operation
 from blueprint_ai.safety import sanitize_label
+from blueprint_ai.settings_cli import app as settings_app
 
 app = typer.Typer(help="Deterministic-first software project analysis.", no_args_is_help=True)
+app.add_typer(settings_app, name="settings")
 release_pack_app = typer.Typer(
     help="Prepare and verify unsigned local release packs.", no_args_is_help=True
 )

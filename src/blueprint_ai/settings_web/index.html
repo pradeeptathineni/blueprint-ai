@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="settings-token" content="TOKEN" />
+    <title>Blueprint settings</title>
+    <link rel="stylesheet" href="/settings.css" />
+    <script src="/settings.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p id="project">Blueprint AI / Project</p>
+        <h1>Settings</h1>
+        <p>Choose defaults for this project's next operation.</p>
+      </header>
+      <p id="status" role="status" aria-live="polite">
+        Loading saved settings…
+      </p>
+      <nav aria-label="Filter settings">
+        <label
+          >Search settings<input
+            id="search"
+            type="search"
+            placeholder="Find a control or workflow" /></label
+        ><label
+          >Category<select id="category" aria-label="Category">
+            <option value="">All categories</option>
+          </select></label
+        >
+        <label
+          ><input id="changed" type="checkbox" /> Different from defaults</label
+        >
+      </nav>
+      <p>
+        Scope: this project · Stored in <code>.blueprint-ai.yml</code> · No
+        restart required.
+      </p>
+      <section id="settings" aria-label="Project settings"></section>
+      <section aria-label="Review changes">
+        <h2>Review changes</h2>
+        <ul id="draft"></ul>
+        <button id="preview" disabled>Preview changes</button>
+        <button id="save" disabled>Save changes</button>
+        <button id="reload">Reload saved settings</button>
+      </section>
+      <details>
+        <summary>Coverage and protected controls</summary>
+        <ul id="limits"></ul>
+        <p>Other YAML fields, kept unchanged:</p>
+        <p id="unmanaged"></p>
+      </details>
+    </main>
+  </body>
+</html>

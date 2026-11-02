@@ -78,6 +78,7 @@ starters validate locally without provisioning resources or choosing remote stat
 - [Template updates](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/template-update.md): preview and adopt pinned template changes while preserving authored files.
 - [Tools and sandbox policy](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/sandbox.md): acquisition and execution boundaries.
 - [Profiles](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/profiles.md): review selection, CI output, baselines, and suppressions.
+- [Project settings](docs/profiles.md#project-settings): shared CLI and local browser controls, defaults, preview, persistence and reset.
 - [Provider and extension contracts](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/providers.md): architecture.
 - [1.x compatibility contract](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/compatibility.md): stable surfaces, deprecation, and exceptions.
 - [Testing, threat model, and release gate](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/releasing.md): verification and release operations.

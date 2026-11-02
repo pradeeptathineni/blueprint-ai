@@ -1,0 +1,127 @@
+:root {
+  color-scheme: light dark;
+  font:
+    16px system-ui,
+    sans-serif;
+  background: Canvas;
+  color: CanvasText;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 28px 22px 60px;
+}
+header p {
+  opacity: 0.75;
+}
+h1 {
+  font-size: 2.4rem;
+  margin: 0.2em 0;
+}
+h2 {
+  font-size: 1.15rem;
+}
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: end;
+  margin: 26px 0;
+}
+nav label {
+  display: grid;
+  gap: 7px;
+}
+nav label:last-child {
+  display: block;
+}
+input,
+select,
+button {
+  font: inherit;
+  padding: 9px;
+  border: 1px solid GrayText;
+  border-radius: 6px;
+  background: Canvas;
+  color: CanvasText;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+input[type="checkbox"] {
+  accent-color: Highlight;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 3px solid Highlight;
+  outline-offset: 3px;
+}
+article {
+  border: 1px solid GrayText;
+  border-radius: 10px;
+  padding: 18px;
+  margin: 12px 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  gap: 12px 22px;
+}
+article p {
+  margin: 0.4em 0;
+}
+article small {
+  display: block;
+  margin: 0.5em 0;
+  opacity: 0.8;
+}
+article label {
+  font-weight: 600;
+}
+article .control {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+}
+section[aria-label="Review changes"],
+details {
+  border-top: 1px solid GrayText;
+  margin-top: 28px;
+  padding-top: 15px;
+}
+#status {
+  padding: 12px;
+  border: 1px solid GrayText;
+  border-radius: 6px;
+  min-height: 1.4em;
+}
+#draft {
+  padding-left: 22px;
+}
+li {
+  margin: 8px 0;
+}
+code,
+#unmanaged {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  article {
+    grid-template-columns: 1fr;
+  }
+  nav {
+    display: grid;
+  }
+  main {
+    padding: 20px 16px;
+  }
+}

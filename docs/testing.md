@@ -1,5 +1,14 @@
 # Verification
 
+The project settings boundary has focused checks in `tests/test_settings.py` and
+`tests/test_settings_web.py`. `benchmarks/settings_browser.cjs` uses an already installed
+Playwright, Axe, Node 20+ and headless Chrome. Select their module directory through `NODE_PATH`
+and the Python runtime through `BLUEPRINT_PYTHON`. It starts only a temporary loopback settings
+server and uses synthetic project data. It checks browser/CLI agreement, actual deterministic
+review filters, reset, stale drafts and lost save responses without model calls. Set
+`BLUEPRINT_PACKAGE_ROOT` to an extracted candidate wheel to run the same workflow against its
+packaged Python code and browser assets. Screenshots and `results.json` go to the first argument.
+
 Use deterministic unit and property checks, native scanner mutation fixtures, fresh generated
 projects, compositions, public repositories, hostile inputs, and isolated package installs together.
 The [independent Phase 6 audit](phase-6-redteam.md) records corrected results and environment limits.
