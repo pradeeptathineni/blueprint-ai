@@ -222,7 +222,8 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         "operation_id": applied.operation_id,
         "changes": [change.model_dump(mode="json") for change in applied.changes],
         "verification": (
-            "finding-absent" if not remaining and actual_content_sha256 == proposed_content_sha256
+            "finding-absent"
+            if not remaining and actual_content_sha256 == proposed_content_sha256
             else "finding-remains-or-content-mismatch"
         ),
         "remaining_finding_fingerprints": [item.fingerprint for item in remaining],

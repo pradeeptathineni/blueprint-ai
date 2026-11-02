@@ -41,8 +41,16 @@ def test_reviewed_repair_cold_plan_confirmation_and_verification(
         and item["remediation"]["safe"]
     )
     prepared = _cli(
-        "repair", "prepare", "--project", str(python_project), "--report", str(report_path),
-        "--finding", finding["fingerprint"], "--output", str(plan_path),
+        "repair",
+        "prepare",
+        "--project",
+        str(python_project),
+        "--report",
+        str(report_path),
+        "--finding",
+        finding["fingerprint"],
+        "--output",
+        str(plan_path),
     )
     assert prepared.returncode == 0, prepared.stderr
     plan_ref = json.loads(prepared.stdout)
@@ -52,8 +60,14 @@ def test_reviewed_repair_cold_plan_confirmation_and_verification(
     assert cold_plan["proposed_content"]
 
     applied = _cli(
-        "repair", "apply", "--project", str(python_project), "--plan", str(plan_path),
-        "--confirm-digest", plan_ref["plan_sha256"],
+        "repair",
+        "apply",
+        "--project",
+        str(python_project),
+        "--plan",
+        str(plan_path),
+        "--confirm-digest",
+        plan_ref["plan_sha256"],
     )
     assert applied.returncode == 0, applied.stderr
     receipt = json.loads(applied.stdout)
@@ -78,19 +92,36 @@ def test_reviewed_repair_refuses_stale_source(python_project: Path, tmp_path: Pa
         item
         for result in report["results"]
         for item in result["findings"]
-        if item["provenance"] == "deterministic" and item["source"] == "blueprint-ai"
-        and item["disposition"] == "new" and item["remediation"] and item["remediation"]["safe"]
+        if item["provenance"] == "deterministic"
+        and item["source"] == "blueprint-ai"
+        and item["disposition"] == "new"
+        and item["remediation"]
+        and item["remediation"]["safe"]
     )
     prepared = _cli(
-        "repair", "prepare", "--project", str(python_project), "--report", str(report_path),
-        "--finding", finding["fingerprint"], "--output", str(plan_path),
+        "repair",
+        "prepare",
+        "--project",
+        str(python_project),
+        "--report",
+        str(report_path),
+        "--finding",
+        finding["fingerprint"],
+        "--output",
+        str(plan_path),
     )
     assert prepared.returncode == 0, prepared.stderr
     digest = json.loads(prepared.stdout)["plan_sha256"]
     (python_project / "README.md").write_text("changed after inspection\n")
     stale = _cli(
-        "repair", "apply", "--project", str(python_project), "--plan", str(plan_path),
-        "--confirm-digest", digest,
+        "repair",
+        "apply",
+        "--project",
+        str(python_project),
+        "--plan",
+        str(plan_path),
+        "--confirm-digest",
+        digest,
     )
     assert stale.returncode != 0
     assert "stale repair plan" in stale.stderr

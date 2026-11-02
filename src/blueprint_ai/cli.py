@@ -486,15 +486,17 @@ def repair_prepare(
         )
     except (ValueError, OSError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    _dump({
-        "plan": str(destination),
-        "plan_sha256": plan.plan_sha256,
-        "finding": plan.finding_fingerprint,
-        "message": plan.finding["message"],
-        "recommendation": plan.finding["recommendation"],
-        "remediation": plan.finding["remediation"],
-        "proposed_content": plan.proposed_content,
-    })
+    _dump(
+        {
+            "plan": str(destination),
+            "plan_sha256": plan.plan_sha256,
+            "finding": plan.finding_fingerprint,
+            "message": plan.finding["message"],
+            "recommendation": plan.finding["recommendation"],
+            "remediation": plan.finding["remediation"],
+            "proposed_content": plan.proposed_content,
+        }
+    )
 
 
 @repair_app.command("apply")
