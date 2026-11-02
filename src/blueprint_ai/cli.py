@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import json
 import os
@@ -824,6 +825,18 @@ def bootstrap(json_output: JsonOption = False) -> None:
             typer.echo(f"{status.name}: {status.detail}")
 
 
+def _doctor_tool_rows(definitions: list[Any]) -> list[dict[str, Any]]:
+    """Probe tools concurrently while keeping the registry's stable display order."""
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(8, max(1, len(definitions)))
+    ) as pool:
+        statuses = list(pool.map(lambda adapter: adapter.status(), definitions))
+    return [
+        {**status.model_dump(mode="json"), "blueprint": adapter.blueprint}
+        for adapter, status in zip(definitions, statuses, strict=True)
+    ]
+
+
 @app.command()
 def doctor(json_output: JsonOption = False) -> None:
     """Show runtime, external tool, and model availability."""
@@ -831,10 +844,7 @@ def doctor(json_output: JsonOption = False) -> None:
     from blueprint_ai.support_view import support_data
 
     definitions = known_tools()
-    tools = [
-        {**adapter.status().model_dump(mode="json"), "blueprint": adapter.blueprint}
-        for adapter in definitions
-    ]
+    tools = _doctor_tool_rows(definitions)
     try:
         model_configuration = configuration_from_environment()
         model_detail = None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Barrier
 
 from typer.testing import CliRunner
 
@@ -18,7 +19,7 @@ from blueprint_ai.adapters.base import (
     parse_trivy,
 )
 from blueprint_ai.adapters.registry import applicable_adapters, known_tools
-from blueprint_ai.cli import app
+from blueprint_ai.cli import _doctor_tool_rows, app
 from blueprint_ai.core import ToolStatus
 from blueprint_ai.core.priority import deduplicate
 from blueprint_ai.discovery import discover_project
@@ -480,3 +481,22 @@ def test_doctor_explains_missing_model_credential(monkeypatch) -> None:
     assert json.loads(result.stdout)["model"]["detail"] == (
         "OPENAI_API_KEY is not set; deterministic review remains available"
     )
+
+
+def test_doctor_probes_tools_in_parallel_and_preserves_registry_order() -> None:
+    barrier = Barrier(3)
+
+    class Adapter:
+        def __init__(self, name: str, blueprint: str) -> None:
+            self.name = name
+            self.blueprint = blueprint
+
+        def status(self) -> ToolStatus:
+            barrier.wait(timeout=3)
+            return ToolStatus(name=self.name, available=True)
+
+    rows = _doctor_tool_rows(
+        [Adapter("first", "one"), Adapter("second", "two"), Adapter("third", "three")]
+    )
+    assert [row["name"] for row in rows] == ["first", "second", "third"]
+    assert [row["blueprint"] for row in rows] == ["one", "two", "three"]
