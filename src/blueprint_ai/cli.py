@@ -23,6 +23,7 @@ from blueprint_ai.extensions import custom_blueprint_schema, load_custom_bluepri
 from blueprint_ai.model import configuration_from_environment, provider_from_environment
 from blueprint_ai.output import serialize_report
 from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_operation
+from blueprint_ai.reviewed_repair import apply_repair, prepare_repair
 from blueprint_ai.safety import sanitize_label
 from blueprint_ai.settings_cli import app as settings_app
 
@@ -31,7 +32,9 @@ app.add_typer(settings_app, name="settings")
 release_pack_app = typer.Typer(
     help="Prepare and verify unsigned local release packs.", no_args_is_help=True
 )
+repair_app = typer.Typer(help="Prepare and explicitly apply one inspected finding.", no_args_is_help=True)
 app.add_typer(release_pack_app, name="release-pack")
+app.add_typer(repair_app, name="repair")
 PathArg = Annotated[Path, typer.Argument(exists=True, file_okay=False, resolve_path=True)]
 BlueprintOption = Annotated[list[str] | None, typer.Option("--blueprint", "-b")]
 ProfileOption = Annotated[str | None, typer.Option("--profile", "-p")]
@@ -456,6 +459,42 @@ def apply(
         if verification_report:
             typer.echo("\nVerification:")
             _report_human(verification_report)
+
+
+@repair_app.command("prepare")
+def repair_prepare(
+    project: Annotated[Path, typer.Option("--project", exists=True, file_okay=False)],
+    report: Annotated[Path, typer.Option("--report", exists=True, dir_okay=False)],
+    finding: Annotated[str, typer.Option("--finding", help="Exact inspected finding fingerprint")],
+    output: Annotated[Path, typer.Option("--output", dir_okay=False)],
+) -> None:
+    """Create a read-only repair plan for one exact deterministic finding."""
+    from blueprint_ai.safety import atomic_write_text
+
+    root = project.resolve()
+    destination = output.expanduser().resolve()
+    if destination == root or root in destination.parents:
+        raise typer.BadParameter("repair plan output must be outside the project source tree")
+    try:
+        plan = prepare_repair(report, finding, root)
+        atomic_write_text(destination, json.dumps(plan.model_dump(mode="json"), indent=2) + "\n", overwrite=False)
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _dump({"plan": str(destination), "plan_sha256": plan.plan_sha256, "finding": plan.finding_fingerprint})
+
+
+@repair_app.command("apply")
+def repair_apply(
+    project: Annotated[Path, typer.Option("--project", exists=True, file_okay=False)],
+    plan: Annotated[Path, typer.Option("--plan", exists=True, dir_okay=False)],
+    confirm_digest: Annotated[str, typer.Option("--confirm-digest", help="Exact digest printed by repair prepare")],
+) -> None:
+    """Explicitly apply one confirmed plan, then verify its exact finding again."""
+    try:
+        receipt = apply_repair(plan, project.resolve(), confirm_digest)
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    _dump(receipt)
 
 
 @app.command()

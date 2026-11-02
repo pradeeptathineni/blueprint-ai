@@ -36,6 +36,10 @@ access is optional; `--no-model` makes no remote calls. See
 ```bash
 blueprint-ai inspect ./project
 blueprint-ai review ./project --no-model --format json
+blueprint-ai repair prepare --project ./project --report /tmp/review.json \
+  --finding <fingerprint> --output /tmp/repair-plan.json
+blueprint-ai repair apply --project ./project --plan /tmp/repair-plan.json \
+  --confirm-digest <plan-sha256>
 blueprint-ai support
 blueprint-ai init ./new-service --kind python-api --dry-run --no-model
 blueprint-ai add security-policy ./project
@@ -88,3 +92,4 @@ starters validate locally without provisioning resources or choosing remote stat
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or
 complete test coverage. Public package publishing and cloud deployment are separate explicit actions.
+The single-finding reviewed repair flow is documented in [reviewed repair](docs/reviewed-repair.md).
