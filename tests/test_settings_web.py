@@ -22,7 +22,9 @@ def local_settings(tmp_path: Path):
         with urlopen(url, timeout=3) as page:
             html = page.read().decode()
             assert "frame-ancestors 'none'" in page.headers["Content-Security-Policy"]
-        token = re.search(r'name="settings-token" content="([^"]+)"', html)[1]
+        token_match = re.search(r'name="settings-token" content="([^"]+)"', html)
+        assert token_match is not None
+        token = token_match.group(1)
         try:
             yield url, token, tmp_path
         finally:
@@ -95,7 +97,7 @@ def test_cross_origin_and_unbound_writes_are_refused(
 
 def test_invalid_request_and_unsafe_control_have_no_effect(local_settings) -> None:
     url, token, root = local_settings
-    for body in [
+    cases: list[dict[str, object]] = [
         {"action": "save"},
         {
             "action": "save",
@@ -103,7 +105,8 @@ def test_invalid_request_and_unsafe_control_have_no_effect(local_settings) -> No
             "resets": [],
             "expectedRevision": "missing",
         },
-    ]:
+    ]
+    for body in cases:
         with pytest.raises(HTTPError) as error:
             request(url, token, body)
         assert error.value.code == 422
