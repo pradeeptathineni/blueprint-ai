@@ -18,39 +18,50 @@
       <p id="status" role="status" aria-live="polite">
         Loading saved settings…
       </p>
-      <nav aria-label="Filter settings">
-        <label
-          >Search settings<input
-            id="search"
-            type="search"
-            placeholder="Find a control or workflow" /></label
-        ><label
-          >Category<select id="category" aria-label="Category">
-            <option value="">All categories</option>
-          </select></label
-        >
-        <label
-          ><input id="changed" type="checkbox" /> Different from defaults</label
-        >
-      </nav>
-      <p>
-        Scope: this project · Stored in <code>.blueprint-ai.yml</code> · No
-        restart required.
-      </p>
-      <section id="settings" aria-label="Project settings"></section>
-      <section aria-label="Review changes">
-        <h2>Review changes</h2>
-        <ul id="draft"></ul>
-        <button id="preview" disabled>Preview changes</button>
-        <button id="save" disabled>Save changes</button>
-        <button id="reload">Reload saved settings</button>
-      </section>
-      <details>
-        <summary>Coverage and protected controls</summary>
-        <ul id="limits"></ul>
-        <p>Other YAML fields, kept unchanged:</p>
-        <p id="unmanaged"></p>
-      </details>
+      <div class="settings-layout">
+        <aside aria-label="Settings navigation">
+          <h2>Browse settings</h2>
+          <label
+            >Search settings<input
+              id="search"
+              type="search"
+              placeholder="Find a control or workflow"
+              aria-describedby="settings-count"
+          /></label>
+          <label
+            ><input id="changed" type="checkbox" /> Different from
+            defaults</label
+          >
+          <nav id="categories" aria-label="Settings categories"></nav>
+        </aside>
+        <div class="settings-content">
+          <h2 id="category-heading">All settings</h2>
+          <p
+            id="settings-count"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          ></p>
+          <p>
+            Scope: this project · Stored in <code>.blueprint-ai.yml</code> · No
+            restart required.
+          </p>
+          <section id="settings" aria-label="Project settings"></section>
+          <section aria-label="Review changes">
+            <h2>Review changes</h2>
+            <ul id="draft"></ul>
+            <button id="preview" disabled>Preview changes</button>
+            <button id="save" disabled>Save changes</button>
+            <button id="reload">Reload saved settings</button>
+          </section>
+          <details>
+            <summary>Coverage and protected controls</summary>
+            <ul id="limits"></ul>
+            <p>Other YAML fields, kept unchanged:</p>
+            <p id="unmanaged"></p>
+          </details>
+        </div>
+      </div>
     </main>
   </body>
 </html>

@@ -79,6 +79,14 @@ async function main() {
     });
     const page = await context.newPage();
     const errors = [];
+    let settingsRequests = 0;
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        request.url().endsWith("/api/settings")
+      )
+        settingsRequests++;
+    });
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(url);
     await page
@@ -86,9 +94,42 @@ async function main() {
       .filter({ hasText: "Saved settings loaded" })
       .waitFor();
     assert.equal(await page.locator("article").count(), 7);
+    const navigation = page.getByRole("navigation", {
+      name: "Settings categories",
+    });
+    await navigation
+      .getByRole("button", { name: "Reports (3)", exact: true })
+      .click();
+    assert.equal(await page.locator("article").count(), 3);
     await page.getByLabel("Search settings").fill("worker");
     assert.equal(await page.locator("article").count(), 1);
+    assert.equal(
+      await navigation
+        .getByRole("button", { name: "All settings (1)" })
+        .getAttribute("aria-pressed"),
+      "true",
+    );
     await page.getByLabel("Parallel workers").fill("8");
+    await navigation
+      .getByRole("button", { name: "Reports (0)", exact: true })
+      .click();
+    const execution = navigation.getByRole("button", {
+      name: "Execution limits (3)",
+      exact: true,
+    });
+    await execution.focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await page.getByLabel("Parallel workers").inputValue(), "8");
+    assert.equal(
+      await execution.evaluate((e) => e === document.activeElement),
+      true,
+    );
+    await page.getByLabel("Search settings").fill("no-such-setting");
+    assert.equal(await page.locator("article").count(), 0);
+    assert.equal(
+      await page.locator("#settings-count").textContent(),
+      "0 settings matching your search",
+    );
     assert.equal(
       await page
         .getByRole("button", { name: "Save changes", exact: true })
@@ -96,6 +137,7 @@ async function main() {
       true,
     );
     await page.getByLabel("Search settings").fill("");
+    assert.equal(settingsRequests, 0);
     await page
       .getByLabel("Maximum priority", { exact: true })
       .selectOption('"P0"');
@@ -163,7 +205,9 @@ async function main() {
       .filter({ hasText: "Saved settings loaded" })
       .waitFor();
     assert.equal(await page.getByLabel("Parallel workers").inputValue(), "8");
-    await page.getByLabel("Category", { exact: true }).selectOption("Reports");
+    await navigation
+      .getByRole("button", { name: "Reports (3)", exact: true })
+      .click();
     assert.equal(await page.locator("article").count(), 3);
     await page
       .locator("article")
@@ -182,7 +226,9 @@ async function main() {
         "--json",
       ).results.flatMap((r) => r.findings).length > 0,
     );
-    await page.getByLabel("Category", { exact: true }).selectOption("");
+    await navigation
+      .getByRole("button", { name: "All settings (7)", exact: true })
+      .click();
     cli("settings", "set", "max_workers", "12", root, "--json");
     await page.getByLabel("Tool timeout").fill("30");
     await page.getByRole("button", { name: "Preview changes" }).click();
@@ -252,6 +298,15 @@ async function main() {
       .withTags(["wcag2a", "wcag2aa"])
       .analyze();
     assert.deepEqual(audit.violations, []);
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const desktopSidebar = await page
+      .getByRole("complementary", { name: "Settings navigation" })
+      .boundingBox();
+    const desktopContent = await page
+      .locator(".settings-content")
+      .boundingBox();
+    assert.ok(desktopSidebar.x + desktopSidebar.width < desktopContent.x);
+    assert.ok(Math.abs(desktopSidebar.y - desktopContent.y) < 5);
     await page.screenshot({
       path: path.join(output, "settings-desktop.png"),
       fullPage: true,
@@ -263,6 +318,18 @@ async function main() {
       ),
       true,
     );
+    const mobileSidebar = await page
+      .getByRole("complementary", { name: "Settings navigation" })
+      .boundingBox();
+    const mobileContent = await page.locator(".settings-content").boundingBox();
+    assert.ok(mobileSidebar.y + mobileSidebar.height <= mobileContent.y);
+    await navigation
+      .getByRole("button", { name: "Reports (3)", exact: true })
+      .click();
+    assert.equal(await page.locator("article").count(), 3);
+    await navigation
+      .getByRole("button", { name: "All settings (7)", exact: true })
+      .click();
     await page.getByLabel("Search settings").focus();
     assert.equal(
       await page
@@ -284,6 +351,9 @@ async function main() {
           synthetic: true,
           modelCalls: 0,
           coverage: [
+            "contextual sidebar and responsive stacking",
+            "global settings search and category result counts",
+            "keyboard category navigation preserves focus and unsaved drafts",
             "additional ignored paths change native inspection and reset",
             "search",
             "categories",

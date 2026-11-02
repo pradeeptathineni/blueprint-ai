@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const token = document.querySelector('meta[name="settings-token"]').content;
 let saved,
+  category = "",
   updates = {},
   resets = new Set(),
   reviewed = false,
@@ -64,24 +65,57 @@ function draft() {
   }
   controls();
 }
+function categories(matches) {
+  const names = ["", ...new Set(saved.settings.map((item) => item.category))];
+  const nav = $("categories");
+  if (nav.dataset.names !== JSON.stringify(names)) {
+    nav.replaceChildren();
+    for (const name of names) {
+      const button = node("button");
+      button.type = "button";
+      button.dataset.category = name;
+      button.setAttribute("aria-controls", "settings");
+      button.addEventListener("click", () => {
+        category = name;
+        $("search").value = "";
+        render();
+      });
+      nav.append(button);
+    }
+    nav.dataset.names = JSON.stringify(names);
+  }
+  for (const button of nav.children) {
+    const name = button.dataset.category;
+    const count = matches.filter(
+      (item) => !name || item.category === name,
+    ).length;
+    button.textContent = `${name || "All settings"} (${count})`;
+    button.setAttribute("aria-pressed", String(category === name));
+  }
+}
 function render() {
   if (!saved) return;
-  const query = $("search").value.toLowerCase(),
-    category = $("category").value;
-  const entries = saved.settings.filter(
+  const query = $("search").value.toLowerCase();
+  const matches = saved.settings.filter(
     (item) =>
-      (!category || item.category === category) &&
       (!$("changed").checked || item.effective !== item.default) &&
       [item.id, item.label, item.category, item.description]
         .join(" ")
         .toLowerCase()
         .includes(query),
   );
+  const entries = matches.filter(
+    (item) => !category || item.category === category,
+  );
+  categories(matches);
+  $("category-heading").textContent = category || "All settings";
+  $("settings-count").textContent =
+    `${entries.length} ${entries.length === 1 ? "setting" : "settings"}${query ? " matching your search" : ""}`;
   $("settings").replaceChildren();
   let group;
   for (const item of entries) {
     if (item.category !== group) {
-      $("settings").append(node("h2", item.category));
+      if (!category) $("settings").append(node("h2", item.category));
       group = item.category;
     }
     const row = node("article"),
@@ -185,13 +219,8 @@ async function reload() {
     resets = new Set();
     reviewed = false;
     uncertain = false;
-    $("category").replaceChildren(node("option", "All categories"));
-    $("category").firstChild.value = "";
-    for (const category of new Set(saved.settings.map((s) => s.category))) {
-      const opt = node("option", category);
-      opt.value = category;
-      $("category").append(opt);
-    }
+    if (!saved.settings.some((item) => item.category === category))
+      category = "";
     $("limits").replaceChildren(...saved.limitations.map((s) => node("li", s)));
     $("unmanaged").textContent = saved.unmanaged.join(", ");
     status("Saved settings loaded. Preview a change before saving.");
@@ -244,6 +273,9 @@ async function submit(action) {
 $("preview").addEventListener("click", () => submit("preview"));
 $("save").addEventListener("click", () => submit("save"));
 $("reload").addEventListener("click", reload);
-for (const id of ["search", "category", "changed"])
-  $(id).addEventListener("input", render);
+$("search").addEventListener("input", () => {
+  category = "";
+  render();
+});
+$("changed").addEventListener("input", render);
 reload();
