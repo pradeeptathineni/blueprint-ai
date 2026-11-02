@@ -118,7 +118,9 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
         or finding.remediation is None
         or not finding.remediation.safe
     ):
-        raise ValueError("only active deterministic findings with a declared safe remediation qualify")
+        raise ValueError(
+            "only active deterministic findings with a declared safe remediation qualify"
+        )
     current, exact = _current_finding(root, finding)
     snapshot = project_source_snapshot(root, current.facts)
     if not snapshot["complete"]:
@@ -171,7 +173,9 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
 
     applied = apply_findings(root, before.facts, [exact])
     if not applied.changed:
-        raise ValueError("the selected finding produced no applied change; no verification receipt created")
+        raise ValueError(
+            "the selected finding produced no applied change; no verification receipt created"
+        )
     verify_context, _ = make_context(
         root,
         blueprints=[finding.blueprint],
@@ -190,5 +194,7 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         "changes": [change.model_dump(mode="json") for change in applied.changes],
         "verification": "finding-absent" if not remaining else "finding-remains",
         "remaining_finding_fingerprints": [item.fingerprint for item in remaining],
-        "verification_scope": "same deterministic blueprint/finding only; no independent trial or quality claim",
+        "verification_scope": (
+            "same deterministic blueprint/finding only; no independent trial or quality claim"
+        ),
     }

@@ -32,7 +32,9 @@ app.add_typer(settings_app, name="settings")
 release_pack_app = typer.Typer(
     help="Prepare and verify unsigned local release packs.", no_args_is_help=True
 )
-repair_app = typer.Typer(help="Prepare and explicitly apply one inspected finding.", no_args_is_help=True)
+repair_app = typer.Typer(
+    help="Prepare and explicitly apply one inspected finding.", no_args_is_help=True
+)
 app.add_typer(release_pack_app, name="release-pack")
 app.add_typer(repair_app, name="repair")
 PathArg = Annotated[Path, typer.Argument(exists=True, file_okay=False, resolve_path=True)]
@@ -477,17 +479,27 @@ def repair_prepare(
         raise typer.BadParameter("repair plan output must be outside the project source tree")
     try:
         plan = prepare_repair(report, finding, root)
-        atomic_write_text(destination, json.dumps(plan.model_dump(mode="json"), indent=2) + "\n", overwrite=False)
+        atomic_write_text(
+            destination,
+            json.dumps(plan.model_dump(mode="json"), indent=2) + "\n",
+            overwrite=False,
+        )
     except (ValueError, OSError) as exc:
         raise typer.BadParameter(str(exc)) from exc
-    _dump({"plan": str(destination), "plan_sha256": plan.plan_sha256, "finding": plan.finding_fingerprint})
+    _dump({
+        "plan": str(destination),
+        "plan_sha256": plan.plan_sha256,
+        "finding": plan.finding_fingerprint,
+    })
 
 
 @repair_app.command("apply")
 def repair_apply(
     project: Annotated[Path, typer.Option("--project", exists=True, file_okay=False)],
     plan: Annotated[Path, typer.Option("--plan", exists=True, dir_okay=False)],
-    confirm_digest: Annotated[str, typer.Option("--confirm-digest", help="Exact digest printed by repair prepare")],
+    confirm_digest: Annotated[
+        str, typer.Option("--confirm-digest", help="Exact digest printed by repair prepare")
+    ],
 ) -> None:
     """Explicitly apply one confirmed plan, then verify its exact finding again."""
     try:

@@ -18,10 +18,14 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_reviewed_repair_cold_plan_confirmation_and_verification(python_project: Path, tmp_path: Path) -> None:
-    report_path = tmp_path / "review.json"
-    plan_path = tmp_path / "repair-plan.json"
-    reviewed = _cli("review", str(python_project), "--blueprint", "repository", "--model", "off", "--json")
+def test_reviewed_repair_cold_plan_confirmation_and_verification(
+    python_project: Path, tmp_path: Path
+) -> None:
+    report_path = tmp_path.parent / f"{tmp_path.name}-review.json"
+    plan_path = tmp_path.parent / f"{tmp_path.name}-repair-plan.json"
+    reviewed = _cli(
+        "review", str(python_project), "--blueprint", "repository", "--model", "off", "--json"
+    )
     assert reviewed.returncode == 0, reviewed.stderr
     report_path.write_text(reviewed.stdout)
     report = json.loads(reviewed.stdout)
@@ -57,9 +61,11 @@ def test_reviewed_repair_cold_plan_confirmation_and_verification(python_project:
 
 
 def test_reviewed_repair_refuses_stale_source(python_project: Path, tmp_path: Path) -> None:
-    report_path = tmp_path / "review.json"
-    plan_path = tmp_path / "repair-plan.json"
-    reviewed = _cli("review", str(python_project), "--blueprint", "repository", "--model", "off", "--json")
+    report_path = tmp_path.parent / f"{tmp_path.name}-review.json"
+    plan_path = tmp_path.parent / f"{tmp_path.name}-repair-plan.json"
+    reviewed = _cli(
+        "review", str(python_project), "--blueprint", "repository", "--model", "off", "--json"
+    )
     report = json.loads(reviewed.stdout)
     report_path.write_text(reviewed.stdout)
     finding = next(
