@@ -493,6 +493,7 @@ def repair_prepare(
         "message": plan.finding["message"],
         "recommendation": plan.finding["recommendation"],
         "remediation": plan.finding["remediation"],
+        "proposed_content": plan.proposed_content,
     })
 
 

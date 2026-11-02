@@ -48,6 +48,8 @@ def test_reviewed_repair_cold_plan_confirmation_and_verification(
     plan_ref = json.loads(prepared.stdout)
     cold_plan = json.loads(plan_path.read_text())
     assert cold_plan["finding_fingerprint"] == finding["fingerprint"]
+    assert plan_ref["proposed_content"] == cold_plan["proposed_content"]
+    assert cold_plan["proposed_content"]
 
     applied = _cli(
         "repair", "apply", "--project", str(python_project), "--plan", str(plan_path),
@@ -58,6 +60,8 @@ def test_reviewed_repair_cold_plan_confirmation_and_verification(
     assert receipt["finding_fingerprint"] == finding["fingerprint"]
     assert receipt["verification"] == "finding-absent"
     assert len(receipt["changes"]) == 1
+    assert receipt["changes"][0]["target"] == cold_plan["target"]
+    assert receipt["target_after_sha256"] == receipt["proposed_content_sha256"]
     assert "no independent trial" in receipt["verification_scope"]
 
 

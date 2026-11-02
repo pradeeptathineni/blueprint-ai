@@ -16,12 +16,13 @@ from pydantic import BaseModel, ConfigDict
 from blueprint_ai.core import Finding, RunReport
 from blueprint_ai.discovery import project_source_snapshot
 from blueprint_ai.engine import make_context, review
-from blueprint_ai.remediation import apply_findings
+from blueprint_ai.remediation import _content_for, apply_findings
 from blueprint_ai.safety import read_bytes_bounded
 
 FORMAT = "blueprint-ai/reviewed-repair-plan/v1"
 MAX_PLAN_BYTES = 2_000_000
 MAX_TARGET_BYTES = 8_000_000
+MAX_PROPOSED_BYTES = 64_000
 
 
 class RepairPlan(BaseModel):
@@ -34,6 +35,7 @@ class RepairPlan(BaseModel):
     finding: dict[str, Any]
     target: str
     target_sha256: str | None
+    proposed_content: str
     plan_sha256: str = ""
 
     def digest(self) -> str:
@@ -127,6 +129,15 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
     if not snapshot["complete"]:
         raise ValueError("project source snapshot is incomplete; repair plan refused")
     target_bytes = _target_bytes(root, finding.remediation.target)
+    if target_bytes is not None:
+        raise ValueError(
+            "reviewed repair only creates a missing target; existing files are preserved"
+        )
+    proposed_content = _content_for(
+        root, current.facts, exact.remediation.kind, exact.remediation.target
+    )
+    if proposed_content is None or len(proposed_content.encode("utf-8")) > MAX_PROPOSED_BYTES:
+        raise ValueError("the selected remediation has no bounded single-file preview")
     plan = RepairPlan(
         project=str(root),
         source_snapshot=snapshot["source_digest"],
@@ -134,6 +145,7 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
         finding=exact.model_dump(mode="json", exclude={"fingerprint"}),
         target=exact.remediation.target,
         target_sha256=_sha(target_bytes),
+        proposed_content=proposed_content,
     )
     plan.plan_sha256 = plan.digest()
     return plan
@@ -172,6 +184,11 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         raise ValueError("stale repair plan: project source changed after inspection")
     if _sha(_target_bytes(root, plan.target)) != plan.target_sha256:
         raise ValueError("stale repair plan: repair target changed after inspection")
+    proposed_content = _content_for(
+        root, before.facts, exact.remediation.kind, exact.remediation.target
+    )
+    if proposed_content != plan.proposed_content:
+        raise ValueError("stale repair plan: proposed repair content changed")
 
     applied = apply_findings(root, before.facts, [exact])
     if not applied.changed:
@@ -186,6 +203,8 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
     )
     after = review(verify_context)
     remaining = [item for item in after.findings if item.fingerprint == finding.fingerprint]
+    actual_content_sha256 = _sha(_target_bytes(root, plan.target))
+    proposed_content_sha256 = _sha(plan.proposed_content.encode("utf-8"))
     return {
         "format": "blueprint-ai/reviewed-repair-receipt/v1",
         "plan_sha256": plan.plan_sha256,
@@ -193,8 +212,13 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         "target": plan.target,
         "target_before_sha256": plan.target_sha256,
         "target_after_sha256": _sha(_target_bytes(root, plan.target)),
+        "proposed_content_sha256": proposed_content_sha256,
+        "operation_id": applied.operation_id,
         "changes": [change.model_dump(mode="json") for change in applied.changes],
-        "verification": "finding-absent" if not remaining else "finding-remains",
+        "verification": (
+            "finding-absent" if not remaining and actual_content_sha256 == proposed_content_sha256
+            else "finding-remains-or-content-mismatch"
+        ),
         "remaining_finding_fingerprints": [item.fingerprint for item in remaining],
         "verification_scope": (
             "same deterministic blueprint/finding only; no independent trial or quality claim"
