@@ -125,6 +125,9 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
             "only active deterministic findings with a declared safe remediation qualify"
         )
     current, exact = _current_finding(root, finding)
+    exact_remediation = exact.remediation
+    if exact_remediation is None:
+        raise ValueError("current finding has no supported remediation")
     snapshot = project_source_snapshot(root, current.facts)
     if not snapshot["complete"]:
         raise ValueError("project source snapshot is incomplete; repair plan refused")
@@ -134,7 +137,7 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
             "reviewed repair only creates a missing target; existing files are preserved"
         )
     proposed_content = _content_for(
-        root, current.facts, exact.remediation.kind, exact.remediation.target
+        root, current.facts, exact_remediation.kind, exact_remediation.target
     )
     if proposed_content is None or len(proposed_content.encode("utf-8")) > MAX_PROPOSED_BYTES:
         raise ValueError("the selected remediation has no bounded single-file preview")
@@ -143,7 +146,7 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
         source_snapshot=snapshot["source_digest"],
         finding_fingerprint=exact.fingerprint,
         finding=exact.model_dump(mode="json", exclude={"fingerprint"}),
-        target=exact.remediation.target,
+        target=exact_remediation.target,
         target_sha256=_sha(target_bytes),
         proposed_content=proposed_content,
     )
@@ -179,13 +182,16 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         raise ValueError("repair plan finding binding is invalid")
 
     before, exact = _current_finding(root, finding)
+    exact_remediation = exact.remediation
+    if exact_remediation is None:
+        raise ValueError("current finding has no supported remediation")
     snapshot = project_source_snapshot(root, before.facts)
     if not snapshot["complete"] or snapshot["source_digest"] != plan.source_snapshot:
         raise ValueError("stale repair plan: project source changed after inspection")
     if _sha(_target_bytes(root, plan.target)) != plan.target_sha256:
         raise ValueError("stale repair plan: repair target changed after inspection")
     proposed_content = _content_for(
-        root, before.facts, exact.remediation.kind, exact.remediation.target
+        root, before.facts, exact_remediation.kind, exact_remediation.target
     )
     if proposed_content != plan.proposed_content:
         raise ValueError("stale repair plan: proposed repair content changed")
