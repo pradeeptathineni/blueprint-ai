@@ -28,6 +28,12 @@ async function main() {
     path.join(root, ".blueprint-ai.yml"),
     "# Synthetic fixture\nmodel_mode: off\n",
   );
+  await fs.writeFile(path.join(root, "keep.py"), "keep = True\n");
+  await fs.mkdir(path.join(root, "scratch"));
+  await fs.writeFile(
+    path.join(root, "scratch", "generated.py"),
+    "generated = True\n",
+  );
   const cli = (...args) => {
     const result = spawnSync(python, ["-m", "blueprint_ai.cli", ...args], {
       env,
@@ -79,7 +85,7 @@ async function main() {
       .getByRole("status")
       .filter({ hasText: "Saved settings loaded" })
       .waitFor();
-    assert.equal(await page.locator("article").count(), 6);
+    assert.equal(await page.locator("article").count(), 7);
     await page.getByLabel("Search settings").fill("worker");
     assert.equal(await page.locator("article").count(), 1);
     await page.getByLabel("Parallel workers").fill("8");
@@ -109,6 +115,39 @@ async function main() {
     };
     await save();
     assert.equal(setting("max_workers").effective, 8);
+    assert.equal(cli("inspect", root, "--json").languages.Python, 2);
+    await page.getByLabel("Additional ignored paths").fill("scratch/");
+    await save();
+    assert.deepEqual(setting("ignores").effective, ["scratch/"]);
+    assert.equal(cli("inspect", root, "--json").languages.Python, 1);
+    await page.reload();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Saved settings loaded" })
+      .waitFor();
+    assert.equal(
+      await page.getByLabel("Additional ignored paths").inputValue(),
+      "scratch/",
+    );
+    await page
+      .locator("article")
+      .filter({ has: page.getByLabel("Additional ignored paths") })
+      .getByRole("button", { name: "Use default" })
+      .click();
+    await save();
+    assert.equal(cli("inspect", root, "--json").languages.Python, 2);
+    await page.getByLabel("Additional ignored paths").fill("x".repeat(1001));
+    await page.getByRole("button", { name: "Preview changes" }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Invalid settings" })
+      .waitFor();
+    assert.deepEqual(setting("ignores").effective, []);
+    await page.getByRole("button", { name: "Reload saved settings" }).click();
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Saved settings loaded" })
+      .waitFor();
     const review = cli(
       "review",
       root,
@@ -245,6 +284,7 @@ async function main() {
           synthetic: true,
           modelCalls: 0,
           coverage: [
+            "additional ignored paths change native inspection and reset",
             "search",
             "categories",
             "preview",

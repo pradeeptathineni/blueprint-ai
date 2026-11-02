@@ -40,6 +40,7 @@ nav label:last-child {
 }
 input,
 select,
+textarea,
 button {
   font: inherit;
   padding: 9px;
@@ -62,6 +63,7 @@ button:disabled {
 }
 button:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible,
 summary:focus-visible {
   outline: 3px solid Highlight;

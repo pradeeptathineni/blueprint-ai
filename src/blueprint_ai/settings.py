@@ -18,6 +18,11 @@ from blueprint_ai.safety import MAX_CONFIG_BYTES, read_bytes_bounded
 
 CONFIG_FILE = ".blueprint-ai.yml"
 CONTROLS = {
+    "ignores": (
+        "Additional ignored paths",
+        "File selection",
+        "One Git-style pattern per line. Matching files are left out of inspection and review.",
+    ),
     "minimum_severity": (
         "Minimum severity",
         "Reports",
@@ -114,9 +119,11 @@ def _catalog(data: bytes | None, raw: dict[str, Any], settings: Settings) -> dic
                 "risk": "preference",
                 "restartRequired": False,
                 "takesEffect": "next operation",
-                "overrides": "--fail-on overrides this value for one command"
-                if key == "fail_on_priority"
-                else "",
+                "overrides": {
+                    "fail_on_priority": "--fail-on overrides this value for one command",
+                    "ignores": "Built-in exclusions always apply. .gitignore rules are processed "
+                    "after these additional patterns. Removing a pattern can include more files.",
+                }.get(key, ""),
                 "constraints": properties[key],
             }
         )
@@ -129,7 +136,9 @@ def _catalog(data: bytes | None, raw: dict[str, Any], settings: Settings) -> dic
         "settings": entries,
         "unmanaged": sorted(set(Settings.model_fields) - set(CONTROLS)),
         "limitations": [
-            "Only report filters, CI failure policy and execution limits are editable here.",
+            "Only additional ignored paths, report filters, CI failure policy and execution "
+            "limits are editable here.",
+            "Local browser requests are limited to 16 KiB. Larger supported lists can use the CLI.",
             "Other project values remain in YAML. Their values are not returned by this interface.",
             "Model/provider settings, credentials, network authorization and executable trust "
             "keep their existing explicit interfaces.",
@@ -155,12 +164,19 @@ def _render(data: bytes | None, updates: dict[str, Any], resets: list[str]) -> b
             raise ValueError("Editing requires a block YAML mapping. Convert the document first.")
         for key, value in node.value:
             name = key.value
+            end = value.end_mark.index
+            # Block sequence marks include following comments. Keep those outside the edit
+            if isinstance(value, yaml.SequenceNode) and not value.flow_style and value.value:
+                end = value.value[-1].end_mark.index
             if name in resets:
-                replacements.append((key.start_mark.index, value.end_mark.index, ""))
+                replacements.append((key.start_mark.index, end, ""))
             elif name in remaining:
                 replacement = json.dumps(remaining.pop(name), ensure_ascii=True)
-                replacements.append((value.start_mark.index, value.end_mark.index, replacement))
-    # Replace only selected scalar spans so unrelated values, comments and formatting survive
+                segment = text[value.start_mark.index : end]
+                if segment.endswith(("\r", "\n")):
+                    replacement += "\r\n" if segment.endswith("\r\n") else segment[-1]
+                replacements.append((value.start_mark.index, end, replacement))
+    # Replace only selected value spans so unrelated values, comments and formatting survive
     for start, end, value in sorted(replacements, reverse=True):
         text = text[:start] + value + text[end:]
     for key, value in remaining.items():

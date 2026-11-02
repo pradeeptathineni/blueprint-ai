@@ -45,13 +45,32 @@ Open the printed `http://127.0.0.1:PORT` URL manually. The page searches control
 description, filters categories and changed values, and shows each default, saved effective value,
 source and project scope. It requires a valid preview before saving. A lost save response requires
 reloading saved settings before another edit. The server stops with Ctrl-C and starts no review.
+Persistent defaults live in this dedicated Settings section. A receiving GUI should keep temporary
+filters and one-time actions beside their affected data, and use Settings for saved configuration.
 
-The editable controls are `minimum_severity`, `maximum_priority`, `fail_on_priority`, `tool_timeout`,
+The editable controls are `ignores`, `minimum_severity`, `maximum_priority`, `fail_on_priority`, `tool_timeout`,
 `max_workers` and `max_tool_output_bytes`. Settings constrain the next operation. A tool can impose
 a shorter timeout. The existing review CLI's `--fail-on` overrides the saved failure threshold for
 that command. `null` disables the saved failure policy. Reset removes just the selected YAML key,
 so the installed version's default takes effect. Different from defaults compares effective values.
 An explicit project value equal to its built-in default does not appear in this filter.
+
+Additional ignored paths accepts one Git-style pattern per line in the browser, or a JSON list:
+
+```bash
+blueprint-ai settings set ignores '["scratch/", "*.generated.py"]' ./project --dry-run --json
+blueprint-ai settings set ignores '["scratch/", "*.generated.py"]' ./project
+blueprint-ai inspect ./project --json
+blueprint-ai settings reset ignores ./project
+```
+
+These patterns change the next inspection and review's file selection. Built-in exclusions always
+apply. The existing discovery engine processes `.gitignore` rules after the additional patterns,
+and a Git checkout's standard excludes still apply. Reset removes only these additional patterns.
+It does not clear `.gitignore`. Removing an exclusion can include more files in the next review.
+Native limits allow at most 1,000 patterns and 1,000 characters per pattern. Browser requests have
+a 16 KiB limit. Larger supported lists can use the CLI. The line editor preserves spaces and
+comment lines, and leaves an existing list unchanged until the user edits it.
 
 The native `blueprint_ai.settings` API and `settings show --json` expose `blueprint.settings.v1`.
 Read and preview start no tools or models. Each control has a stable ID, category, constraints,
@@ -68,7 +87,7 @@ process requires the operator to check that no settings writer is active before 
 Symlinks, invalid YAML, duplicate keys and aliases are refused. Editing requires block-style YAML.
 The settings reader can inspect valid flow-style mappings, but never rewrites them silently.
 
-The interface returns only the six ordinary values. Other project fields are listed by name and
+The interface returns only the seven ordinary values. Other project fields are listed by name and
 keep their existing YAML interfaces. Model/provider spending controls, credentials, executable
 trust, network target authorization, suppressions and output paths stay outside this editor.
 Saving defaults never grants execution or network authority. Consumers such as Deep must map

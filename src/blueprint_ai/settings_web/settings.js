@@ -15,7 +15,12 @@ const node = (tag, text) => {
 const status = (text) => {
   $("status").textContent = text;
 };
-const display = (value) => (value === null ? "Disabled" : String(value));
+const display = (value) =>
+  value === null
+    ? "Disabled"
+    : Array.isArray(value)
+      ? JSON.stringify(value)
+      : String(value);
 async function api(body) {
   const response = await fetch(
     "/api/settings",
@@ -40,7 +45,9 @@ function controls() {
   $("preview").disabled = busy || uncertain || !dirty;
   $("save").disabled = busy || uncertain || !reviewed;
   $("reload").disabled = busy;
-  for (const input of $("settings").querySelectorAll("input,select,button"))
+  for (const input of $("settings").querySelectorAll(
+    "input,select,textarea,button",
+  ))
     input.disabled = busy || uncertain;
 }
 function draft() {
@@ -95,7 +102,17 @@ function render() {
     const schema = item.constraints,
       enumValues = schema.enum || schema.anyOf?.find((s) => s.enum)?.enum;
     let input;
-    if (enumValues) {
+    if (schema.type === "array") {
+      input = node("textarea");
+      input.rows = 5;
+      input.spellcheck = false;
+      const value = resets.has(item.id)
+        ? item.default
+        : item.id in updates
+          ? updates[item.id]
+          : item.effective;
+      input.value = value.join("\n");
+    } else if (enumValues) {
       input = node("select");
       if (schema.anyOf?.some((s) => s.type === "null")) {
         const opt = node("option", "Disabled");
@@ -128,9 +145,14 @@ function render() {
     }
     input.id = "setting-" + item.id;
     input.addEventListener("input", () => {
-      updates[item.id] = enumValues
-        ? JSON.parse(input.value)
-        : Number(input.value);
+      updates[item.id] =
+        schema.type === "array"
+          ? input.value === ""
+            ? []
+            : input.value.split("\n")
+          : enumValues
+            ? JSON.parse(input.value)
+            : Number(input.value);
       resets.delete(item.id);
       reviewed = false;
       draft();
