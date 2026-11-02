@@ -47,6 +47,11 @@ source and project scope. It requires a valid preview before saving. A lost save
 reloading saved settings before another edit. The server stops with Ctrl-C and starts no review.
 Persistent defaults live in this dedicated Settings section. A receiving GUI should keep temporary
 filters and one-time actions beside their affected data, and use Settings for saved configuration.
+The Settings contextual sidebar derives File selection, Reports and Execution limits from the
+owner's existing category metadata. It shows result counts and the active category. Search starts
+across all supported settings, while choosing a category clears the search. Navigation preserves
+unsaved changes and never saves a preference. On narrow screens the contextual navigation stacks
+above the controls. An application's main navigation remains separate from this Settings sidebar.
 
 The editable controls are `ignores`, `minimum_severity`, `maximum_priority`, `fail_on_priority`, `tool_timeout`,
 `max_workers` and `max_tool_output_bytes`. Settings constrain the next operation. A tool can impose

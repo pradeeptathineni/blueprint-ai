@@ -10,7 +10,7 @@ body {
   margin: 0;
 }
 main {
-  max-width: 960px;
+  max-width: 1240px;
   margin: 0 auto;
   padding: 28px 22px 60px;
 }
@@ -24,19 +24,47 @@ h1 {
 h2 {
   font-size: 1.15rem;
 }
-nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-  align-items: end;
-  margin: 26px 0;
+.settings-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+  margin-top: 24px;
 }
-nav label {
+aside {
+  position: sticky;
+  top: 20px;
+  display: grid;
+  gap: 18px;
+  padding-right: 20px;
+  border-right: 1px solid GrayText;
+}
+aside h2 {
+  margin: 0;
+}
+aside label {
   display: grid;
   gap: 7px;
 }
-nav label:last-child {
+aside label:has(input[type="checkbox"]) {
   display: block;
+}
+nav {
+  display: grid;
+  gap: 8px;
+}
+nav button {
+  text-align: left;
+}
+nav button[aria-pressed="true"] {
+  font-weight: 700;
+  border: 2px solid Highlight;
+}
+.settings-content {
+  min-width: 0;
+}
+#category-heading {
+  margin-top: 0;
 }
 input,
 select,
@@ -120,8 +148,18 @@ code,
   article {
     grid-template-columns: 1fr;
   }
+  .settings-layout {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  aside {
+    position: static;
+    padding: 0 0 20px;
+    border-right: 0;
+    border-bottom: 1px solid GrayText;
+  }
   nav {
-    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   main {
     padding: 20px 16px;
