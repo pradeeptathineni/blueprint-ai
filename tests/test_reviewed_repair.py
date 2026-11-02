@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ def _cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "blueprint_ai.cli", *args],
         cwd=root,
-        env={"PYTHONPATH": str(root / "src")},
+        env={**os.environ, "PYTHONPATH": str(root / "src")},
         capture_output=True,
         text=True,
         check=False,
@@ -66,6 +67,7 @@ def test_reviewed_repair_refuses_stale_source(python_project: Path, tmp_path: Pa
     reviewed = _cli(
         "review", str(python_project), "--blueprint", "repository", "--model", "off", "--json"
     )
+    assert reviewed.returncode == 0, reviewed.stderr
     report = json.loads(reviewed.stdout)
     report_path.write_text(reviewed.stdout)
     finding = next(

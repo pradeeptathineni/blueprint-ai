@@ -490,6 +490,9 @@ def repair_prepare(
         "plan": str(destination),
         "plan_sha256": plan.plan_sha256,
         "finding": plan.finding_fingerprint,
+        "message": plan.finding["message"],
+        "recommendation": plan.finding["recommendation"],
+        "remediation": plan.finding["remediation"],
     })
 
 
@@ -507,6 +510,8 @@ def repair_apply(
     except (ValueError, OSError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     _dump(receipt)
+    if receipt["verification"] != "finding-absent":
+        raise typer.Exit(code=2)
 
 
 @app.command()

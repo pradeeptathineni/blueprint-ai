@@ -101,7 +101,8 @@ def _current_finding(root: Path, finding: Finding) -> tuple[RunReport, Finding]:
 def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> RepairPlan:
     """Prepare a read-only single-finding plan from an inspection report."""
     root = root.expanduser().resolve(strict=True)
-    raw = report_path.read_bytes()
+    with report_path.open("rb") as source:
+        raw = source.read(MAX_PLAN_BYTES + 1)
     if len(raw) > MAX_PLAN_BYTES:
         raise ValueError("inspection report exceeds size limit")
     report = _load_inspection_report(raw)
@@ -141,7 +142,8 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
 def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, Any]:
     """Apply exactly one confirmed finding and retain finding-bound verification."""
     root = root.expanduser().resolve(strict=True)
-    raw = plan_path.read_bytes()
+    with plan_path.open("rb") as source:
+        raw = source.read(MAX_PLAN_BYTES + 1)
     if len(raw) > MAX_PLAN_BYTES:
         raise ValueError("repair plan exceeds size limit")
     plan = RepairPlan.model_validate_json(raw)
