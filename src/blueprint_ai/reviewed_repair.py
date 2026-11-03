@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict
 from blueprint_ai.core import Finding, RunReport
 from blueprint_ai.discovery import project_source_snapshot
 from blueprint_ai.engine import make_context, review
-from blueprint_ai.remediation import _content_for, apply_findings
+from blueprint_ai.remediation import _content_for, apply_findings, is_safe_repair_candidate
 from blueprint_ai.safety import read_bytes_bounded
 
 FORMAT = "blueprint-ai/reviewed-repair-plan/v1"
@@ -114,13 +114,7 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
     if len(selected) != 1:
         raise ValueError("finding fingerprint must identify exactly one finding in the report")
     finding = selected[0]
-    if (
-        finding.provenance != "deterministic"
-        or finding.source != "blueprint-ai"
-        or finding.disposition != "new"
-        or finding.remediation is None
-        or not finding.remediation.safe
-    ):
+    if not is_safe_repair_candidate(finding) or finding.remediation is None:
         raise ValueError(
             "only active deterministic findings with a declared safe remediation qualify"
         )

@@ -91,6 +91,11 @@ starters validate locally without provisioning resources or choosing remote stat
 - [0.9.1 release validation](https://github.com/pradeeptathineni/blueprint-ai/blob/0.9.1/docs/release-validation-0.9.1.md):
   1.0-readiness stabilization, compatibility fixtures, distribution, and publication evidence.
 
+Review, plan and apply distinguish safe repair candidates from manual work. A no-change apply keeps
+unresolved findings and incomplete coverage visible. Verification after a change names its scope,
+while other pre-apply results remain explicitly unverified. See the
+[finding-to-repair workflow](docs/profiles.md#from-findings-to-repair).
+
 A finding, a failed tool, an unavailable prerequisite, and a successful check are distinct results.
 Generated smoke tests establish basic behavior; they do not establish production readiness or
 complete test coverage. Public package publishing and cloud deployment are separate explicit actions.

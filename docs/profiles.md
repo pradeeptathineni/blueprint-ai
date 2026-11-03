@@ -28,6 +28,33 @@ untracked directories. Invalid refs fail explicitly; a clean tree does not reint
 findings. JUnit represents incomplete concerns without active findings as skipped, and counts only
 active failures. SARIF includes execution completeness and per-concern tool/sandbox evidence.
 
+## From findings to repair
+
+Review, plan and apply use the same terminal report meanings. The plan includes all active
+findings, including work that needs human judgment. `safe repair candidate` identifies an active,
+deterministic Blueprint finding with a declared safe remediation. It is not execution authority
+or a promise that the target can be changed. `manual review` means the finding is not eligible for
+automatic repair. The same eligibility rule governs bulk apply and single-finding reviewed repair.
+Target freshness, conflict checks and explicit confirmation still apply at their existing owners.
+
+```bash
+blueprint-ai review ./project --blueprint repository --model off
+blueprint-ai plan ./project --blueprint repository --model off
+blueprint-ai apply ./project --blueprint repository --model off
+blueprint-ai verify ./project --blueprint repository
+```
+
+When nothing is changed, apply shows the original findings and coverage instead of implying there
+was no work to do. Conflicted repairs retain that report too. After a change, automatic verification
+covers only changed blueprints. Other selected findings or incomplete checks stay visible as
+pre-apply results that were not rerun. Explicitly verify the selected checks for a fresh result.
+Missing tools, partial coverage and errors remain visible even when the plan has no findings.
+A missing LICENSE still requires a human licensing choice rather than an invented repair.
+
+Terminal rendering and incomplete-assessment wording live in the existing output module. CLI
+options, check execution, exit policy, JSON payloads, finding fingerprints and recovery receipts
+retain their existing contracts. The standalone CLI remains usable without Deep or a model.
+
 ## Project settings
 
 Inspect, search, preview, save or reset ordinary defaults from either the CLI or a local browser:

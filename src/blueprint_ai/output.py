@@ -5,8 +5,87 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from blueprint_ai.core import RunReport
+from blueprint_ai.core import BlueprintResult, Finding, RunReport
+from blueprint_ai.remediation import is_safe_repair_candidate
 from blueprint_ai.safety import sanitize_label
+
+
+def _summary(report: RunReport) -> str:
+    return (
+        f"{report.facts.name}: {report.facts.file_count} files | profile {report.profile} | "
+        f"{len(report.active_findings)} new, {len(report.baseline_findings)} baseline, "
+        f"{len(report.suppressed_findings)} suppressed"
+    )
+
+
+def _incomplete(result: BlueprintResult) -> bool:
+    return result.status in {"partial", "error", "tool_missing"} or any(
+        tool.outcome in {"tool_missing", "tool_error", "unsupported"} for tool in result.tools
+    )
+
+
+def _assessment_lines(result: BlueprintResult) -> list[str]:
+    lines = [f"{result.blueprint}: {result.status} ({len(result.findings)} findings)"]
+    for tool in result.tools:
+        if tool.outcome in {"tool_missing", "tool_error", "unsupported"}:
+            lines.append(
+                f"  tool {tool.name}: {tool.outcome}"
+                f" ({sanitize_label(tool.detail or 'analysis incomplete', 300)})"
+            )
+    lines.extend(f"  note: {sanitize_label(note, 1000)}" for note in result.notes)
+    return lines
+
+
+def _repair_label(finding: Finding) -> str:
+    return "safe repair candidate" if is_safe_repair_candidate(finding) else "manual review"
+
+
+def report_human(report: RunReport) -> str:
+    lines = [_summary(report)]
+    for result in report.results:
+        lines.extend(["", *_assessment_lines(result)])
+        for finding in result.findings:
+            location = f" {sanitize_label(finding.file)}" if finding.file else ""
+            lines.append(
+                f"  {finding.priority} {finding.category}{location} [{finding.disposition}]"
+                f" [{_repair_label(finding)}]: {sanitize_label(finding.message, 1000)}"
+            )
+    return "\n".join(lines) + "\n"
+
+
+def report_plan(report: RunReport, findings: list[Finding]) -> str:
+    lines = [_summary(report)]
+    for result in report.results:
+        if _incomplete(result):
+            lines.extend(["", *_assessment_lines(result)])
+    if not findings:
+        lines.extend(["", "No active findings were returned."])
+    else:
+        lines.append("")
+        for index, finding in enumerate(findings, 1):
+            lines.extend(
+                [
+                    f"{index}. {finding.priority} [{finding.blueprint}] [{_repair_label(finding)}] "
+                    f"{sanitize_label(finding.message, 1000)}",
+                    f"   {sanitize_label(finding.recommendation, 1000)}",
+                ]
+            )
+    return "\n".join(lines) + "\n"
+
+
+def report_remaining_review(report: RunReport, verified_blueprints: list[str]) -> str:
+    remaining = report.model_copy(
+        update={
+            "results": [
+                result for result in report.results if result.blueprint not in verified_blueprints
+            ]
+        }
+    )
+    if not remaining.active_findings and not any(
+        _incomplete(result) for result in remaining.results
+    ):
+        return ""
+    return "\nOther pre-apply results (not rerun):\n" + report_human(remaining)
 
 
 def report_markdown(report: RunReport) -> str:
@@ -53,7 +132,7 @@ def report_markdown(report: RunReport) -> str:
         if not result.findings:
             summary = (
                 "No findings from completed checks; analysis is incomplete."
-                if result.status == "partial"
+                if _incomplete(result)
                 else "No findings."
             )
             lines.extend([summary, ""])
@@ -254,6 +333,8 @@ def report_junit(report: RunReport) -> str:
 
 
 def serialize_report(report: RunReport, mode: str) -> str:
+    if mode == "human":
+        return report_human(report)
     if mode == "markdown":
         return report_markdown(report)
     if mode == "sarif":

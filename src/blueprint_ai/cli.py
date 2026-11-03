@@ -23,7 +23,7 @@ from blueprint_ai.engine import make_context, remediation_plan, review, write_ba
 from blueprint_ai.extensions import custom_blueprint_schema, load_custom_blueprints
 from blueprint_ai.impact import analyze_impact
 from blueprint_ai.model import configuration_from_environment, provider_from_environment
-from blueprint_ai.output import serialize_report
+from blueprint_ai.output import report_plan, report_remaining_review, serialize_report
 from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_operation
 from blueprint_ai.reviewed_repair import apply_repair, prepare_repair
 from blueprint_ai.safety import sanitize_label
@@ -180,30 +180,6 @@ def _dump(data: object) -> None:
     typer.echo(json.dumps(data, indent=2, sort_keys=True))
 
 
-def _report_human(report) -> None:
-    typer.echo(
-        f"{report.facts.name}: {report.facts.file_count} files | profile {report.profile} | "
-        f"{len(report.active_findings)} new, {len(report.baseline_findings)} baseline, "
-        f"{len(report.suppressed_findings)} suppressed"
-    )
-    for result in report.results:
-        typer.echo(f"\n{result.blueprint}: {result.status} ({len(result.findings)} findings)")
-        for tool in result.tools:
-            if tool.outcome in {"tool_missing", "tool_error", "unsupported"}:
-                typer.echo(
-                    f"  tool {tool.name}: {tool.outcome}"
-                    f" ({sanitize_label(tool.detail or 'analysis incomplete', 300)})"
-                )
-        for item in result.findings:
-            location = f" {sanitize_label(item.file)}" if item.file else ""
-            typer.echo(
-                f"  {item.priority} {item.category}{location} [{item.disposition}]: "
-                f"{sanitize_label(item.message, 1000)}"
-            )
-        for note in result.notes:
-            typer.echo(f"  note: {sanitize_label(note, 1000)}")
-
-
 def _context(
     path: Path,
     profile: str | None,
@@ -246,10 +222,7 @@ def _context(
 
 
 def _emit_report(report, mode: str) -> None:
-    if mode == "human":
-        _report_human(report)
-    else:
-        typer.echo(serialize_report(report, mode), nl=False)
+    typer.echo(serialize_report(report, mode), nl=False)
 
 
 def _enforce_exit_policy(report: RunReport, context) -> None:
@@ -428,11 +401,7 @@ def plan(
     if json_output:
         _dump({"findings": [item.model_dump(mode="json") for item in findings]})
     else:
-        for index, item in enumerate(findings, 1):
-            typer.echo(
-                f"{index}. {item.priority} [{item.blueprint}] {sanitize_label(item.message, 1000)}"
-            )
-            typer.echo(f"   {sanitize_label(item.recommendation, 1000)}")
+        typer.echo(report_plan(report, findings), nl=False)
 
 
 @app.command()
@@ -490,13 +459,15 @@ def apply(
     if json_output:
         _dump(payload)
     else:
-        if not applied.changes:
-            typer.echo("No supported remediations were needed.")
+        if not applied.changed:
+            typer.echo("No automatic repair was applied. Findings and coverage from this review:")
+            _emit_report(before, "human")
         for change in applied.changes:
             typer.echo(f"{change.status}: {change.target} ({change.detail})")
         if verification_report:
-            typer.echo("\nVerification:")
-            _report_human(verification_report)
+            typer.echo("\nVerification of changed blueprints only:")
+            _emit_report(verification_report, "human")
+            typer.echo(report_remaining_review(before, changed_blueprints), nl=False)
 
 
 @repair_app.command("prepare")

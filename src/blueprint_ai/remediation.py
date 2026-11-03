@@ -670,6 +670,17 @@ def apply_kit(root: Path, facts: ProjectFacts, name: str, *, sandbox=None) -> Ap
     return result
 
 
+def is_safe_repair_candidate(finding: Finding) -> bool:
+    """Select active native findings with a declared safe repair, before target checks."""
+    return (
+        finding.provenance == "deterministic"
+        and finding.source == "blueprint-ai"
+        and finding.disposition == "new"
+        and finding.remediation is not None
+        and finding.remediation.safe
+    )
+
+
 def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> ApplyResult:
     operation_id = uuid.uuid4().hex
     result = ApplyResult(operation_id=operation_id)
@@ -678,12 +689,9 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
     for finding in findings:
         remediation = finding.remediation
         if (
-            not remediation
-            or not remediation.safe
+            not is_safe_repair_candidate(finding)
+            or remediation is None
             or remediation.target in seen
-            or finding.provenance != "deterministic"
-            or finding.source != "blueprint-ai"
-            or finding.disposition != "new"
         ):
             continue
         seen.add(remediation.target)
