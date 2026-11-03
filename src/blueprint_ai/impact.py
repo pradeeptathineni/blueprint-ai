@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from blueprint_ai.discovery.project import _git_changed_files, _git_files, _git_run
 from blueprint_ai.safety import read_text_bounded, safe_regular_file
@@ -23,6 +23,12 @@ SHARED_FILES = {
     "nx.json",
 }
 DEPENDENCY_FIELDS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
+
+
+class WorkspacePackage(TypedDict):
+    path: str
+    dependencies: set[str]
+    test_script: str | None
 
 
 def _manifest(path: Path, root: Path) -> dict[str, Any]:
@@ -57,7 +63,7 @@ def _patterns(root_manifest: dict[str, Any]) -> list[str]:
     return result
 
 
-def _packages(root: Path) -> dict[str, dict[str, Any]]:
+def _packages(root: Path) -> dict[str, WorkspacePackage]:
     found = set()
     for pattern in _patterns(_manifest(root / "package.json", root)):
         for path in root.glob(f"{pattern}/package.json"):
@@ -68,13 +74,13 @@ def _packages(root: Path) -> dict[str, dict[str, Any]]:
                 raise ValueError("workspace has too many packages for bounded impact analysis")
     if not found:
         raise ValueError("workspace patterns matched no package manifests")
-    packages = {}
+    packages: dict[str, WorkspacePackage] = {}
     for path in sorted(found):
         data = _manifest(path, root)
         name = data.get("name")
         if not isinstance(name, str) or not name or name in packages:
             raise ValueError("workspace package name is missing or duplicated")
-        dependencies = set()
+        dependencies: set[str] = set()
         for field in DEPENDENCY_FIELDS:
             value = data.get(field, {})
             if not isinstance(value, dict):
@@ -134,8 +140,8 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
     if removed.returncode != 0 or removed.output_truncated or removed.timed_out:
         raise ValueError("removed-file inventory incomplete; verify the Git comparison ref")
     changed.update(item.decode(errors="replace") for item in removed.stdout.split(b"\0") if item)
-    changed = sorted(changed)
-    if len(changed) > MAX_CHANGED:
+    changed_paths = sorted(changed)
+    if len(changed_paths) > MAX_CHANGED:
         raise ValueError("change inventory exceeds the bounded impact limit")
     ordered_paths = sorted(packages, key=lambda name: len(packages[name]["path"]), reverse=True)
     contained = {
@@ -149,7 +155,7 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
     direct: dict[str, set[str]] = {name: set() for name in packages}
     unmapped = []
     global_files = []
-    for path in changed:
+    for path in changed_paths:
         if path in SHARED_FILES or path.startswith((".github/workflows/", "scripts/", "tools/")):
             global_files.append(path)
             continue
@@ -207,7 +213,7 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
     return {
         "schema": "blueprint.impact.v1",
         "base_ref": base_ref,
-        "changed_files": changed,
+        "changed_files": changed_paths,
         "shared_config_files": sorted(global_files),
         "unmapped_changed_files": sorted(unmapped),
         "packages": impacted,
