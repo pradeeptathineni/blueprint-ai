@@ -74,6 +74,25 @@ def test_root_configuration_is_conservative_and_unmapped_paths_remain_visible(
     assert result["unmapped_changed_files"] == ["README.md"]
     assert len(result["packages"]) == 3
     assert all("shared-config" in row["reasons"] for row in result["packages"])
+    assert all("unknown-impact" in row["reasons"] for row in result["packages"])
+
+
+def test_unknown_root_change_selects_all_candidates_but_stays_partial(workspace: Path) -> None:
+    (workspace / "root-tooling.conf").write_text("changed\n")
+    result = analyze_impact(workspace)
+    assert result["status"] == "partial"
+    assert result["unmapped_changed_files"] == ["root-tooling.conf"]
+    assert len(result["packages"]) == 3
+    assert all(row["reasons"] == ["unknown-impact"] for row in result["packages"])
+
+
+def test_root_npm_config_selects_all_packages_as_known_shared_input(workspace: Path) -> None:
+    (workspace / ".npmrc").write_text("engine-strict=true\n")
+    result = analyze_impact(workspace)
+    assert result["status"] == "mapped"
+    assert result["shared_config_files"] == [".npmrc"]
+    assert len(result["packages"]) == 3
+    assert all(row["reasons"] == ["shared-config"] for row in result["packages"])
 
 
 def test_nested_workspace_selects_parent_and_parent_dependent(workspace: Path) -> None:

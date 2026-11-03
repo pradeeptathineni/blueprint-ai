@@ -13,6 +13,7 @@ MAX_PACKAGES = 256
 MAX_CHANGED = 10_000
 MAX_MANIFEST_BYTES = 256_000
 SHARED_FILES = {
+    ".npmrc",
     "package.json",
     "package-lock.json",
     "npm-shrinkwrap.json",
@@ -174,6 +175,9 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
     if global_files:
         for name in packages:
             reasons[name].add("shared-config")
+    if unmapped:
+        for name in packages:
+            reasons[name].add("unknown-impact")
     frontier = {name for name, paths in direct.items() if paths}
     visited = set(frontier)
     while frontier:
@@ -221,6 +225,6 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
         "qualification": (
             "Package-level candidates from Git changes and declared npm workspace "
             "dependencies. Test files and scripts were not run or proven to cover "
-            "the change; unmapped files need review."
+            "the change; unmapped files need review and conservatively select all packages."
         ),
     }
