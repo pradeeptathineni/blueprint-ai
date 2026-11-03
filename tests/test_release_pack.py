@@ -117,6 +117,10 @@ def test_legacy_pack_can_only_use_explicit_private_scope_compatibility(tmp_path:
     project = _project(tmp_path / "project")
     legacy = release_pack.build(project, ["LICENSE"])
     data = __import__("base64").b64decode(legacy["zip_base64"], validate=True)
+    unbound = release_pack.verify_pack(data, legacy["pack_sha256"])
+    assert unbound["verified"] is True
+    assert unbound["target_binding"] == "unbound-local-pack"
+    assert "no private target-scoped journal was supplied" in unbound["qualification"]
     with pytest.raises(ValueError, match="target identity"):
         release_pack.verify_pack(data, legacy["pack_sha256"], expected_target_id="fixture")
     reopened = release_pack.verify_pack(

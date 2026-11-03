@@ -629,18 +629,28 @@ def verify_pack(
             content = archive.read(row["path"])
             if _sha(content) != row["sha256"] or len(content) != row["bytes"]:
                 raise ValueError("portable file content does not match its manifest")
+    scoped_legacy = not has_target_id and expected_target_id is not None
     return {
         "pack_id": expected_sha256,
         "pack_sha256": expected_sha256,
         "bytes": len(data),
         "verified": True,
         "manifest": manifest,
-        "target_binding": "manifest-target-id" if has_target_id else "legacy-private-journal-scope",
+        "target_binding": (
+            "manifest-target-id"
+            if has_target_id
+            else "legacy-private-journal-scope"
+            if scoped_legacy
+            else "unbound-local-pack"
+        ),
         "qualification": None
         if has_target_id
         else (
             "Legacy pack predates embedded target IDs. Its target scope is established by "
             "the exact private target-scoped retained journal; the immutable ZIP bytes and "
             "manifest remain unchanged."
+            if scoped_legacy
+            else "Pack bytes and manifest verified. No target ID is embedded and no private "
+            "target-scoped journal was supplied; this is an unbound local review artifact."
         ),
     }
