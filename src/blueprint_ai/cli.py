@@ -1159,6 +1159,25 @@ def evolution_catalog() -> None:
     _dump(catalog_data())
 
 
+@evolve_app.command("history")
+def evolution_history(path: PathArg = Path("."), json_output: JsonOption = False) -> None:
+    """Find sealed evolution operations retained for this project."""
+    from blueprint_ai.evolution import list_evolution_operations
+
+    try:
+        rows = list_evolution_operations(path)
+    except (ValueError, OSError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    if json_output:
+        _dump({"operations": rows})
+    elif not rows:
+        typer.echo("No retained evolution operations.")
+    else:
+        for row in rows:
+            typer.echo(f"{row['operation_id']}  {row['status']}  {', '.join(row['targets'])}")
+
+
 @evolve_app.command("plan")
 def evolution_plan_command(
     path: PathArg = Path("."),

@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Literal, TypedDict
 
 import hcl2
 from packaging.specifiers import SpecifierSet
@@ -69,9 +69,17 @@ from .models import (
 )
 
 MAX_PLAN_FILES = 2_000
+MAX_HISTORY_OPERATIONS = 1_000
 MAX_COMMAND_BYTES = 120_000
 MAX_CHECKPOINT_BYTES = 512 * 1024 * 1024
 MAX_CHECKPOINT_FILE_BYTES = 64 * 1024 * 1024
+
+
+class EvolutionOperationSummary(TypedDict):
+    operation_id: str
+    status: str
+    plan_sha256: str
+    targets: list[str]
 
 
 @dataclass(frozen=True)
@@ -451,6 +459,62 @@ def _receipt_is_authoritative(
         bool(re.fullmatch(r"[a-f0-9]{64}", expected))
         and expected == hashlib.sha256(content.encode()).hexdigest()
     )
+
+
+def list_evolution_operations(root: Path) -> list[EvolutionOperationSummary]:
+    """List retained evolution receipts after checking their Git-private seals."""
+    root = root.expanduser().resolve()
+    directory = root / ".blueprint-ai" / "operations"
+    if not directory.exists() and not directory.is_symlink():
+        return []
+    if directory.parent.is_symlink() or directory.is_symlink() or not directory.is_dir():
+        raise ValueError("evolution operation directory is invalid")
+    paths = sorted(directory.glob("*.json"))
+    if len(paths) > MAX_HISTORY_OPERATIONS:
+        raise ValueError("too many retained operation manifests to list")
+    rows: list[EvolutionOperationSummary] = []
+    for path in paths:
+        operation_id = path.stem
+        if not re.fullmatch(r"[0-9a-f]{32}", operation_id):
+            raise ValueError(f"invalid evolution operation id: {operation_id}")
+        relative = f".blueprint-ai/operations/{operation_id}.json"
+        try:
+            content = read_text_bounded(
+                _safe_path(root, relative, missing=False), MAX_MANIFEST_BYTES, root=root
+            )
+            data = json.loads(content)
+        except (OSError, ValueError, UnicodeError) as exc:
+            raise ValueError(f"invalid evolution operation manifest {operation_id}: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"invalid evolution operation manifest {operation_id}: expected object"
+            )
+        if data.get("kind") != "evolution":
+            continue
+        if (
+            data.get("version") != 3
+            or data.get("operation_id") != operation_id
+            or data.get("status") not in {"verified", "partial", "accepted"}
+            or not isinstance(data.get("changes"), list)
+            or not re.fullmatch(r"[a-f0-9]{64}", str(data.get("plan_sha256", "")))
+            or not _receipt_is_authoritative(root, operation_id, content)
+        ):
+            raise ValueError(f"evolution operation receipt is invalid or unsealed: {operation_id}")
+        try:
+            changes = [EvolutionChange.model_validate(item) for item in data["changes"]]
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid evolution changes for operation {operation_id}: {exc}"
+            ) from exc
+        rows.append(
+            {
+                "operation_id": operation_id,
+                "status": data["status"],
+                "plan_sha256": data["plan_sha256"],
+                "targets": [change.target for change in changes],
+            }
+        )
+    return rows
 
 
 def _seal_operation_receipt(

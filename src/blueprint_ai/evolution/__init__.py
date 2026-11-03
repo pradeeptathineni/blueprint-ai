@@ -4,6 +4,7 @@ from .catalog import TRANSFORMATIONS, catalog_data
 from .engine import (
     accept_evolution,
     apply_evolution,
+    list_evolution_operations,
     load_plan,
     plan_evolution,
     project_fingerprint,
@@ -30,6 +31,7 @@ __all__ = [
     "apply_evolution",
     "catalog_data",
     "load_plan",
+    "list_evolution_operations",
     "plan_evolution",
     "project_fingerprint",
     "rollback_evolution",

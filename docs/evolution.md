@@ -16,6 +16,7 @@ blueprint-ai evolve plan ./project
 blueprint-ai tools install cargo
 blueprint-ai evolve plan ./project --target rust/edition=2024 \
   --output ./project/.blueprint-ai/plans/rust-2024.json
+blueprint-ai evolve history ./project
 blueprint-ai evolve apply ./project/.blueprint-ai/plans/rust-2024.json ./project \
   --dry-run --sandbox docker --trust-project-executables
 blueprint-ai evolve apply ./project/.blueprint-ai/plans/rust-2024.json ./project \
@@ -69,7 +70,9 @@ unexpected writes (including ignored files), verifies postconditions, and publis
 verified bytes. The final review rejects introduced deterministic findings. Failures restore any
 published path, return a structured failed report from the CLI, and leave no success receipt. A
 successful apply records original bytes in Git-private state; rollback refuses branch, HEAD, index,
-or post-apply conflicts and proves the checkpoint fingerprint:
+or post-apply conflicts and proves the checkpoint fingerprint. `evolve history` lists retained,
+sealed operation IDs, statuses and changed paths. It does not promise that a later rollback will
+pass conflict checks. Rolled-back operations leave the active list.
 
 ```bash
 blueprint-ai rollback OPERATION_ID ./project --json

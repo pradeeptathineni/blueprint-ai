@@ -16,6 +16,7 @@ from blueprint_ai.evolution import (
     TRANSFORMATIONS,
     apply_evolution,
     catalog_data,
+    list_evolution_operations,
     load_plan,
     plan_evolution,
     project_fingerprint,
@@ -93,6 +94,20 @@ def test_docker_dry_run_apply_idempotency_and_exact_rollback(tmp_path: Path) -> 
 
     result = apply_evolution(root, plan, run_blueprint_review=False)
     assert result.status == "verified" and result.operation_id
+    assert list_evolution_operations(root) == [
+        {
+            "operation_id": result.operation_id,
+            "status": "verified",
+            "plan_sha256": plan.plan_sha256,
+            "targets": ["Dockerfile"],
+        }
+    ]
+    receipt = root / ".blueprint-ai" / "operations" / f"{result.operation_id}.json"
+    sealed = receipt.read_text()
+    receipt.write_text(sealed.replace('"status": "verified"', '"status": "partial"'))
+    with pytest.raises(ValueError, match="invalid or unsealed"):
+        list_evolution_operations(root)
+    receipt.write_text(sealed)
     assert result.before == plan.current_state and result.after
     transformed = (root / "Dockerfile").read_text()
     assert "MAINTAINER" not in transformed
@@ -105,6 +120,7 @@ def test_docker_dry_run_apply_idempotency_and_exact_rollback(tmp_path: Path) -> 
     assert second.status == "noop" and second.steps[0].status == "noop"
     rolled_back = rollback_evolution(root, result.operation_id)
     assert rolled_back.status == "rolled_back"
+    assert list_evolution_operations(root) == []
     assert (root / "Dockerfile").read_text() == original
     assert project_fingerprint(root) == before
 
