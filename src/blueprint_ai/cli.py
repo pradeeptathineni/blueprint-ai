@@ -21,6 +21,7 @@ from blueprint_ai.core import RunReport
 from blueprint_ai.discovery import discover_project
 from blueprint_ai.engine import make_context, remediation_plan, review, write_baseline
 from blueprint_ai.extensions import custom_blueprint_schema, load_custom_blueprints
+from blueprint_ai.impact import analyze_impact
 from blueprint_ai.model import configuration_from_environment, provider_from_environment
 from blueprint_ai.output import serialize_report
 from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_operation
@@ -276,6 +277,40 @@ def inspect(path: PathArg = Path("."), json_output: JsonOption = False) -> None:
         typer.echo(f"types: {', '.join(facts.project_types) or 'unknown'}")
         typer.echo(f"frameworks: {', '.join(facts.frameworks) or 'none'}")
         typer.echo(f"git: {'yes' if facts.is_git else 'no'}")
+
+
+@app.command("impact")
+def impact_command(
+    path: PathArg = Path("."),
+    base_ref: Annotated[
+        str, typer.Option("--base-ref", help="Git ref to compare with the current worktree")
+    ] = "HEAD",
+    json_output: JsonOption = False,
+) -> None:
+    """Show changed npm workspaces and packages that depend on them; run nothing."""
+    try:
+        result = analyze_impact(path, base_ref)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if json_output:
+        _dump(result)
+        return
+    typer.echo(
+        f"{len(result['changed_files'])} changed files; "
+        f"{len(result['packages'])} affected packages ({result['status']})"
+    )
+    for package in result["packages"]:
+        name = sanitize_label(package["name"])
+        reasons = ", ".join(package["reasons"])
+        typer.echo(f"- {name} ({reasons}): {package['candidate_test_count']} candidate test files")
+        if package["test_script"]:
+            typer.echo(f"  package test script: {sanitize_label(package['test_script'], 300)}")
+    if result["unmapped_changed_files"]:
+        typer.echo(
+            "Unmapped changed files need review: "
+            + ", ".join(sanitize_label(path) for path in result["unmapped_changed_files"][:20])
+        )
+    typer.echo(result["qualification"])
 
 
 @app.command("blueprints")
