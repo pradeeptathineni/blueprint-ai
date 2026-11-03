@@ -24,6 +24,20 @@ SHARED_FILES = {
     "nx.json",
 }
 DEPENDENCY_FIELDS = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
+UV_SHARED_FILES = {
+    "pyproject.toml",
+    "uv.lock",
+    "uv.toml",
+    ".python-version",
+    "conftest.py",
+    "pytest.ini",
+    "tox.ini",
+    "setup.cfg",
+    "mypy.ini",
+    "ruff.toml",
+    ".ruff.toml",
+    ".pre-commit-config.yaml",
+}
 
 
 class WorkspacePackage(TypedDict):
@@ -100,7 +114,7 @@ def _packages(root: Path) -> dict[str, WorkspacePackage]:
 
 
 def _test_files(files: list[str], package_path: str, nested_paths: list[str]) -> list[str]:
-    prefix = package_path + "/"
+    prefix = "" if package_path == "." else package_path + "/"
     candidates = []
     for path in files:
         if not path.startswith(prefix) or any(
@@ -119,13 +133,34 @@ def _test_files(files: list[str], package_path: str, nested_paths: list[str]) ->
     return sorted(candidates)
 
 
-def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
-    """List changed npm workspace packages and reverse dependents as check candidates."""
+def analyze_impact(root: Path, base_ref: str = "HEAD", workspace: str = "auto") -> dict[str, Any]:
+    """List changed workspace packages and reverse dependents as check candidates."""
     root = root.resolve()
     tracked = _git_files(root)
     if tracked is None:
         raise ValueError("impact analysis needs this exact Git repository root")
-    packages = _packages(root)
+    if workspace not in {"auto", "npm", "uv"}:
+        raise ValueError("workspace must be auto, npm or uv")
+    if workspace == "auto":
+        npm = root / "package.json"
+        # Preserve the existing npm default for mixed repositories.
+        workspace = (
+            "npm"
+            if npm.exists() and _manifest(npm, root).get("workspaces") is not None
+            else "uv"
+            if (root / "pyproject.toml").exists()
+            else "npm"
+        )
+    unresolved: list[str] = []
+    if workspace == "uv":
+        from blueprint_ai.uv_impact import uv_packages
+
+        packages, unresolved = uv_packages(
+            root, max_packages=MAX_PACKAGES, max_manifest_bytes=MAX_MANIFEST_BYTES
+        )
+    else:
+        packages = _packages(root)
+    shared_files = SHARED_FILES | UV_SHARED_FILES if workspace == "uv" else SHARED_FILES
     changed = set(_git_changed_files(root, base_ref))
     removed = _git_run(
         root,
@@ -149,7 +184,10 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
         name: {
             child
             for child in packages
-            if child != name and packages[child]["path"].startswith(package["path"] + "/")
+            if child != name
+            and (
+                package["path"] == "." or packages[child]["path"].startswith(package["path"] + "/")
+            )
         }
         for name, package in packages.items()
     }
@@ -157,7 +195,7 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
     unmapped = []
     global_files = []
     for path in changed_paths:
-        if path in SHARED_FILES or path.startswith((".github/workflows/", "scripts/", "tools/")):
+        if path in shared_files or path.startswith((".github/workflows/", "scripts/", "tools/")):
             global_files.append(path)
             continue
         owner = next(
@@ -178,6 +216,9 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
     if unmapped:
         for name in packages:
             reasons[name].add("unknown-impact")
+    if unresolved:
+        for name in packages:
+            reasons[name].add("unknown-dependencies")
     frontier = {name for name, paths in direct.items() if paths}
     visited = set(frontier)
     while frontier:
@@ -214,17 +255,33 @@ def analyze_impact(root: Path, base_ref: str = "HEAD") -> dict[str, Any]:
                 "sample_test_files": tests[:20],
             }
         )
-    return {
+    result = {
         "schema": "blueprint.impact.v1",
         "base_ref": base_ref,
         "changed_files": changed_paths,
         "shared_config_files": sorted(global_files),
         "unmapped_changed_files": sorted(unmapped),
         "packages": impacted,
-        "status": "partial" if unmapped else "mapped",
+        "status": "partial"
+        if unmapped or unresolved or workspace == "uv" and global_files
+        else "mapped",
         "qualification": (
             "Package-level candidates from Git changes and declared npm workspace "
             "dependencies. Test files and scripts were not run or proven to cover "
             "the change; unmapped files need review and conservatively select all packages."
         ),
     }
+    if workspace == "uv":
+        result.update(
+            workspace_type="uv",
+            unresolved_dependency_packages=unresolved,
+            qualification=(
+                "Package-level candidates from Git changes and static uv workspace dependency "
+                "names, unioned across extras, groups, build requirements and markers. No uv, "
+                "project code, dependency resolver or test ran. Test candidates do not prove "
+                "coverage. Root/unmapped changes or dynamic dependencies conservatively select "
+                "all packages and remain partial. External workspaces and path sources "
+                "are not read."
+            ),
+        )
+    return result

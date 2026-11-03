@@ -36,6 +36,7 @@ access is optional; `--no-model` makes no remote calls. See
 ```bash
 blueprint-ai inspect ./project
 blueprint-ai impact ./npm-workspace --base-ref main --json
+blueprint-ai impact ./python-workspace --workspace uv --base-ref main --json
 blueprint-ai review ./project --no-model --format json
 blueprint-ai repair prepare --project ./project --report /tmp/review.json \
   --finding <fingerprint> --output /tmp/repair-plan.json
@@ -80,7 +81,7 @@ browser-only overrides. Theme changes preserve project drafts and reviewed previ
 
 ## Choose a workflow
 
-- [npm workspace change impact](docs/monorepo-impact.md): read-only changed-package and dependent-package check candidates.
+- [Workspace change impact](docs/monorepo-impact.md): read-only npm and uv package and dependent check candidates.
 - [Generated support registry](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/support.md): families, tools, availability, and capabilities.
 - [Project genesis](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/genesis.md): naming, providers, cloud starters, and compositions.
 - [Existing-project capabilities](https://github.com/pradeeptathineni/blueprint-ai/blob/main/docs/capabilities.md): plan, add, verify, and rollback.

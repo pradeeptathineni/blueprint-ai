@@ -258,11 +258,15 @@ def impact_command(
     base_ref: Annotated[
         str, typer.Option("--base-ref", help="Git ref to compare with the current worktree")
     ] = "HEAD",
+    workspace: Annotated[
+        str,
+        typer.Option("--workspace", help="auto, npm or uv; auto keeps npm first in mixed repos"),
+    ] = "auto",
     json_output: JsonOption = False,
 ) -> None:
-    """Show changed npm workspaces and packages that depend on them; run nothing."""
+    """Show changed npm or uv packages and their dependents; run nothing."""
     try:
-        result = analyze_impact(path, base_ref)
+        result = analyze_impact(path, base_ref, workspace)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     if json_output:
@@ -282,6 +286,11 @@ def impact_command(
         typer.echo(
             "Unmapped changed files need review: "
             + ", ".join(sanitize_label(path) for path in result["unmapped_changed_files"][:20])
+        )
+    if result.get("unresolved_dependency_packages"):
+        typer.echo(
+            "Dynamic dependencies need review: "
+            + ", ".join(sanitize_label(name) for name in result["unresolved_dependency_packages"])
         )
     typer.echo(result["qualification"])
 
