@@ -39,6 +39,8 @@ def test_defaults_preview_persistence_and_reset(tmp_path: Path) -> None:
     assert entries(reset)["max_workers"]["effective"] == Settings().max_workers
     assert entries(reset)["max_workers"]["source"] == "default"
     assert load_settings(tmp_path) == Settings()
+    assert reset["revision"] == "missing"
+    assert not (tmp_path / CONFIG_FILE).exists()
 
 
 def test_reset_missing_override_writes_nothing(tmp_path: Path) -> None:

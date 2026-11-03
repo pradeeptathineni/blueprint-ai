@@ -158,6 +158,7 @@ def _render(data: bytes | None, updates: dict[str, Any], resets: list[str]) -> b
     text = (data or b"").decode("utf-8")
     node = yaml.compose(text, Loader=_NoAliasSafeLoader)
     replacements = []
+    removed_override = False
     remaining = dict(updates)
     if node is not None:
         if not isinstance(node, yaml.MappingNode) or node.flow_style:
@@ -170,6 +171,7 @@ def _render(data: bytes | None, updates: dict[str, Any], resets: list[str]) -> b
                 end = value.value[-1].end_mark.index
             if name in resets:
                 replacements.append((key.start_mark.index, end, ""))
+                removed_override = True
             elif name in remaining:
                 replacement = json.dumps(remaining.pop(name), ensure_ascii=True)
                 segment = text[value.start_mark.index : end]
@@ -183,6 +185,8 @@ def _render(data: bytes | None, updates: dict[str, Any], resets: list[str]) -> b
         if text and not text.endswith("\n"):
             text += "\n"
         text += f"{key}: {json.dumps(value, ensure_ascii=True)}\n"
+    if removed_override and not text.strip():
+        text = ""
     rendered = text.encode("utf-8")
     if len(rendered) > MAX_CONFIG_BYTES:
         raise ValueError("Updated settings exceed the document size limit.")
@@ -212,7 +216,7 @@ def _prepare(
     parsed, parsed_settings = _parse(rendered)
     if parsed != proposed:
         raise ValueError("YAML layout cannot be edited safely. Use a block mapping.")
-    result = _catalog(None if data is None and not rendered else rendered, parsed, parsed_settings)
+    result = _catalog(None if not rendered else rendered, parsed, parsed_settings)
     result["projectLabel"] = root.resolve().name
     result["changes"] = [
         {
@@ -250,17 +254,26 @@ def write_settings(
         data, rendered, result = _prepare(root, updates, resets, expected_revision)
         if data != rendered and not (data is None and rendered == b""):
             path = root / CONFIG_FILE
-            mode = stat.S_IMODE(path.stat().st_mode) & 0o777 if data is not None else 0o600
-            descriptor, temporary = tempfile.mkstemp(prefix=".blueprint-settings-", dir=root)
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(rendered)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, mode)
-            if _revision(_read(root)[0]) != expected_revision:
-                raise SettingsConflict("Settings changed before saving. Reload and review again.")
-            os.replace(temporary, path)
-            temporary = None
+            if not rendered:
+                if _revision(_read(root)[0]) != expected_revision:
+                    raise SettingsConflict(
+                        "Settings changed before saving. Reload and review again."
+                    )
+                path.unlink()
+            else:
+                mode = stat.S_IMODE(path.stat().st_mode) & 0o777 if data is not None else 0o600
+                descriptor, temporary = tempfile.mkstemp(prefix=".blueprint-settings-", dir=root)
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(rendered)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary, mode)
+                if _revision(_read(root)[0]) != expected_revision:
+                    raise SettingsConflict(
+                        "Settings changed before saving. Reload and review again."
+                    )
+                os.replace(temporary, path)
+                temporary = None
         result["saved"] = True
         return result
     finally:
