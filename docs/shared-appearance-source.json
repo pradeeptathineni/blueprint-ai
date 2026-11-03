@@ -1,0 +1,33 @@
+{
+  "schema": "blueprint.shared-appearance-source.v1",
+  "package": "@deep/theme",
+  "version": "1.0.0",
+  "status": "unreleased-candidate",
+  "declared_source_revision": "ce503f61a0d3b1a60ce11ac99e7d4e954d2280dd",
+  "revision_qualification": "Declared shared candidate pin from prior adapter record. Exact module and license bytes independently matched; this record does not assert remote release or verify that commit object.",
+  "archive_sha256": "f768faba9bca0c0ec6bfab672493118f7f6ae7dacdcee9539c793b7c0640d165",
+  "license": "MIT",
+  "upstream_files": {
+    "index.js": "ae259abb290ad8b5678b64e1d5e3726b16e24c592a3f94c3aaa53c05b285a1b4",
+    "LICENSE": "69e8bc0e7e498d3dbc421855f3be2857130648cc0ef343e81d95afd2ad168296"
+  },
+  "adapter_source": {
+    "project": "monitoring-ai",
+    "path": "monitoring_ai/web/appearance.js",
+    "revision": "3080bc9268d52c7f70a54bf365a369169018aec8",
+    "sha256": "865b866402e573de97948de721b7aaad844c627110577d1f1840eb4a2fe2f6cf"
+  },
+  "adaptation": "Blueprint uses the existing validated browser controller with one Blueprint-origin preference and no Context shortcut. Native project defaults, CSRF, preview and save remain owned by settings.js and the Python settings service.",
+  "adapter_files": {
+    "appearance.js": "aa9495188f94ed45108afea5e04aa0f6472b16827ec772b7ba445de5387bfdba",
+    "settings.css": "4059f83240fb577490ebd3358c04c549835b385adcd45e2bd5776a85c88e75bb",
+    "index.html": "3035f7bdc55460d5291cddceb43ce485779f33ae988708064fdd083aa812c90d"
+  },
+  "native_settings_js_sha256": "46ab2f3c44b428ecff9da8604edb52e238819ce47bb294c40e5d3aac45ede1b0",
+  "storage_key": "blueprint-ai.appearance.v1",
+  "received_through": {
+    "project": "context-ai",
+    "commit": "31470c5eebe2b2d1cc0a5cc40b572df170747450",
+    "adapter": "examples/web/appearance.js"
+  }
+}

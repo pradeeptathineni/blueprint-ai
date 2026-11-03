@@ -74,6 +74,10 @@ Generation uses a fresh staging directory, native generators, declared verifiers
 publication step. It retains source, lockfiles, provenance, and a separate review report. Cloud
 starters validate locally without provisioning resources or choosing remote state.
 
+The local Settings page also offers System and six shared appearance presets, with validated
+browser-only overrides. Theme changes preserve project drafts and reviewed previews. See
+[browser appearance](docs/profiles.md#browser-appearance).
+
 ## Choose a workflow
 
 - [npm workspace change impact](docs/monorepo-impact.md): read-only changed-package and dependent-package check candidates.

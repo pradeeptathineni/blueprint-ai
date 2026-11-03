@@ -56,12 +56,19 @@ def settings_server(root: Path, port: int = 0) -> ThreadingHTTPServer:
             if not self._local():
                 return
             assets = {
-                "/": ((ASSETS / "index.html").read_text().replace("TOKEN", token), "text/html"),
-                "/settings.js": ((ASSETS / "settings.js").read_text(), "text/javascript"),
-                "/settings.css": ((ASSETS / "settings.css").read_text(), "text/css"),
+                "/": ("index.html", "text/html"),
+                "/settings.js": ("settings.js", "text/javascript"),
+                "/settings.css": ("settings.css", "text/css"),
+                "/appearance.js": ("appearance.js", "text/javascript"),
+                "/theme/index.js": ("theme/index.js", "text/javascript"),
+                "/theme/LICENSE": ("theme/LICENSE", "text/plain"),
             }
             if self.path in assets:
-                self._reply(200, *assets[self.path])
+                name, content_type = assets[self.path]
+                body = (ASSETS / name).read_text()
+                if self.path == "/":
+                    body = body.replace("TOKEN", token)
+                self._reply(200, body, content_type)
             elif self.path == "/api/settings":
                 try:
                     self._reply(200, read_settings(root))

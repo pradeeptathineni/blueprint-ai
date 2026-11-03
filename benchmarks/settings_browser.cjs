@@ -6,6 +6,10 @@ const path = require("node:path");
 const { spawn, spawnSync } = require("node:child_process");
 const { chromium } = require("playwright");
 const { default: AxeBuilder } = require("@axe-core/playwright");
+const {
+  preserveDraft,
+  verifyAppearance,
+} = require("./settings_appearance.cjs");
 
 async function main() {
   const output = path.resolve(
@@ -138,6 +142,8 @@ async function main() {
     );
     await page.getByLabel("Search settings").fill("");
     assert.equal(settingsRequests, 0);
+    await preserveDraft(page);
+    assert.equal(settingsRequests, 0);
     await page
       .getByLabel("Maximum priority", { exact: true })
       .selectOption('"P0"');
@@ -147,6 +153,16 @@ async function main() {
         .getByRole("status")
         .filter({ hasText: "Preview validated" })
         .waitFor();
+      const reviewedDraft = await page.locator("#draft").innerText();
+      const postsBefore = settingsRequests;
+      if (!(await page.locator("#appearance-settings").evaluate((e) => e.open)))
+        await page.locator("#appearance-settings > summary").click();
+      await page
+        .getByLabel("Theme preset", { exact: true })
+        .selectOption("sand-light");
+      assert.equal(await page.locator("#draft").innerText(), reviewedDraft);
+      assert.equal(await page.locator("#save").isEnabled(), true);
+      assert.equal(settingsRequests, postsBefore);
       await page
         .getByRole("button", { name: "Save changes", exact: true })
         .click();
@@ -342,6 +358,9 @@ async function main() {
       fullPage: true,
     });
     assert.deepEqual(errors, []);
+    const settingsBeforeAppearance = JSON.stringify(show());
+    const appearance = await verifyAppearance(browser, url, output);
+    assert.equal(JSON.stringify(show()), settingsBeforeAppearance);
     await fs.writeFile(
       path.join(output, "results.json"),
       JSON.stringify(
@@ -350,6 +369,7 @@ async function main() {
           browser: browser.version(),
           synthetic: true,
           modelCalls: 0,
+          appearance,
           coverage: [
             "contextual sidebar and responsive stacking",
             "global settings search and category result counts",

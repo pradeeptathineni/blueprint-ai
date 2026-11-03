@@ -2,11 +2,14 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="" />
     <meta name="settings-token" content="TOKEN" />
     <title>Blueprint settings</title>
     <link rel="stylesheet" href="/settings.css" />
     <script src="/settings.js" defer></script>
+    <script type="module" src="/appearance.js"></script>
   </head>
   <body>
     <main>
@@ -15,6 +18,16 @@
         <h1>Settings</h1>
         <p>Choose defaults for this project's next operation.</p>
       </header>
+      <details id="appearance-settings" class="appearance-settings">
+        <summary>Appearance</summary>
+        <p class="appearance-scope">
+          Appearance is saved only in this browser at this address. Project defaults
+          use Preview/Save.
+        </p>
+        <div id="appearance-controls">
+          <p>Appearance controls need JavaScript.</p>
+        </div>
+      </details>
       <p id="status" role="status" aria-live="polite">
         Loading saved settings…
       </p>

@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import pytest
 
 from blueprint_ai.settings import read_settings
-from blueprint_ai.settings_web import settings_server
+from blueprint_ai.settings_web import ASSETS, settings_server
 
 
 @pytest.fixture
@@ -111,3 +111,22 @@ def test_invalid_request_and_unsafe_control_have_no_effect(local_settings) -> No
             request(url, token, body)
         assert error.value.code == 422
     assert read_settings(root)["revision"] == "missing"
+
+
+def test_shared_appearance_assets_are_exact_and_same_origin(local_settings) -> None:
+    url, _token, root = local_settings
+    before = read_settings(root)
+    for route, name, content_type in (
+        ("/appearance.js", "appearance.js", "text/javascript"),
+        ("/theme/index.js", "theme/index.js", "text/javascript"),
+        ("/theme/LICENSE", "theme/LICENSE", "text/plain"),
+    ):
+        with urlopen(url + route, timeout=3) as response:
+            assert response.read() == (ASSETS / name).read_bytes()
+            assert response.headers["Content-Type"].startswith(content_type)
+            assert response.headers["X-Content-Type-Options"] == "nosniff"
+    for route in ("/theme/../settings.py", "/theme/package.json", "/appearance.js?other"):
+        with pytest.raises(HTTPError) as error:
+            urlopen(url + route, timeout=3)
+        assert error.value.code == 404
+    assert read_settings(root) == before

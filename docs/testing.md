@@ -57,6 +57,14 @@ exercise researched legacy states without claiming that partial/deferred recipes
 The inspection set includes Next/React separation plus Rust 2024 and net10.0 negative controls; the
 Ruff case mirrors the audited package-initializer fixture and verifies the complete composed diff.
 
+
+The Settings browser gate also checks all six shared appearance presets at desktop and phone
+widths, existing draft and preview/save isolation, OS and cross-tab updates, reload, invalid or
+blocked storage and twelve full-page Axe scans. Appearance cases send no project POST or external
+request. Native API tests check the exact asset allowlist and keep CSRF/origin guards. These are
+synthetic-project checks, not a human usability or deployed-browser acceptance claim. Native
+select-menu keyboard choice remains outside the programmatic selection checks.
+
 ## Independent release regression gate
 
 The [red-team report](phase-6-redteam.md) records the corrected source gate. Enable both

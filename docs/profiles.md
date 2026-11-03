@@ -28,6 +28,27 @@ untracked directories. Invalid refs fail explicitly; a clean tree does not reint
 findings. JUnit represents incomplete concerns without active findings as skipped, and counts only
 active failures. SARIF includes execution completeness and per-concern tool/sandbox evidence.
 
+## Browser appearance
+
+Open **Appearance** on the local Settings page to choose System or any of the six shared presets.
+Validated color, corner and density changes apply to the page. The choice belongs only to this
+browser at this address and never edits `.blueprint-ai.yml`. A new server port is a different
+browser origin. Reuse an explicit `settings serve --port` value when the same address is needed
+across restarts.
+
+Appearance changes preserve project edits and a reviewed preview. Project defaults still require
+Preview and Save. System follows OS color changes, tabs at the same address share appearance, and
+reset returns to System. Invalid saved preferences remain untouched until an explicit choice or
+reset. If browser storage is unavailable, page-local choices and native project editing remain
+usable with an explanatory message.
+
+The page adapts the unchanged MIT shared theme module and existing browser controller. The
+[exact source identities](shared-appearance-source.json) and
+[retained license](../src/blueprint_ai/settings_web/theme/LICENSE) distinguish declared pins from
+verified file bytes. The standalone wheel and source archive include the runtime module and license.
+No external font, registry install or remote runtime is required. Deep keeps its own appearance
+owner and accepted Blueprint source pin.
+
 ## From findings to repair
 
 Review, plan and apply use the same terminal report meanings. The plan includes all active

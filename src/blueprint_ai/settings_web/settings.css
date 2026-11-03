@@ -1,10 +1,10 @@
 :root {
   color-scheme: light dark;
   font:
-    16px system-ui,
+    16px var(--font, system-ui),
     sans-serif;
-  background: Canvas;
-  color: CanvasText;
+  background: var(--theme-surface-canvas, Canvas);
+  color: var(--theme-text-primary, CanvasText);
 }
 body {
   margin: 0;
@@ -15,7 +15,7 @@ main {
   padding: 28px 22px 60px;
 }
 header p {
-  opacity: 0.75;
+  color: var(--theme-text-muted, CanvasText);
 }
 h1 {
   font-size: 2.4rem;
@@ -37,7 +37,7 @@ aside {
   display: grid;
   gap: 18px;
   padding-right: 20px;
-  border-right: 1px solid GrayText;
+  border-right: 1px solid var(--theme-border-strong, GrayText);
 }
 aside h2 {
   margin: 0;
@@ -58,7 +58,8 @@ nav button {
 }
 nav button[aria-pressed="true"] {
   font-weight: 700;
-  border: 2px solid Highlight;
+  border: 2px solid var(--theme-focus, Highlight);
+  background: var(--theme-surface-raised, Canvas);
 }
 .settings-content {
   min-width: 0;
@@ -72,17 +73,29 @@ textarea,
 button {
   font: inherit;
   padding: 9px;
-  border: 1px solid GrayText;
-  border-radius: 6px;
-  background: Canvas;
-  color: CanvasText;
+  border: 1px solid var(--theme-border-strong, GrayText);
+  border-radius: var(--theme-radius, 6px);
+  background: var(--theme-surface-canvas, Canvas);
+  color: var(--theme-text-primary, CanvasText);
   max-width: 100%;
   box-sizing: border-box;
 }
+input:not([type="checkbox"]):not([type="color"]):not([type="range"]),
+select,
+textarea {
+  width: 100%;
+  min-width: 0;
+  background: var(--theme-surface-inset, Field);
+}
 input[type="checkbox"] {
-  accent-color: Highlight;
+  accent-color: var(--theme-accent, Highlight);
+}
+button,
+select {
+  min-height: 44px;
 }
 button {
+  background: var(--theme-surface-raised, ButtonFace);
   cursor: pointer;
 }
 button:disabled {
@@ -94,12 +107,13 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 summary:focus-visible {
-  outline: 3px solid Highlight;
+  outline: 3px solid var(--theme-focus, Highlight);
   outline-offset: 3px;
 }
 article {
-  border: 1px solid GrayText;
-  border-radius: 10px;
+  background: var(--theme-surface-panel, Canvas);
+  border: 1px solid var(--theme-border-strong, GrayText);
+  border-radius: var(--theme-radius, 10px);
   padding: 18px;
   margin: 12px 0;
   display: grid;
@@ -112,7 +126,7 @@ article p {
 article small {
   display: block;
   margin: 0.5em 0;
-  opacity: 0.8;
+  color: var(--theme-text-muted, CanvasText);
 }
 article label {
   font-weight: 600;
@@ -124,14 +138,15 @@ article .control {
 }
 section[aria-label="Review changes"],
 details {
-  border-top: 1px solid GrayText;
+  border-top: 1px solid var(--theme-border-strong, GrayText);
   margin-top: 28px;
   padding-top: 15px;
 }
 #status {
+  background: var(--theme-surface-panel, Canvas);
   padding: 12px;
-  border: 1px solid GrayText;
-  border-radius: 6px;
+  border: 1px solid var(--theme-border-strong, GrayText);
+  border-radius: var(--theme-radius, 6px);
   min-height: 1.4em;
 }
 #draft {
@@ -156,12 +171,139 @@ code,
     position: static;
     padding: 0 0 20px;
     border-right: 0;
-    border-bottom: 1px solid GrayText;
+    border-bottom: 1px solid var(--theme-border-strong, GrayText);
   }
   nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   main {
     padding: 20px 16px;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+a {
+  color: var(--theme-accent, LinkText);
+}
+button:hover:not(:disabled) {
+  border-color: var(--theme-accent, Highlight);
+}
+:is(#preview, #save):not(:disabled),
+#appearance-apply-overrides {
+  background: var(--theme-brand-action, ButtonFace);
+  color: var(--theme-on-brand, ButtonText);
+  border-color: var(--theme-brand-action, ButtonBorder);
+}
+:is(#preview, #save):hover:not(:disabled),
+#appearance-apply-overrides:hover {
+  background: var(--theme-brand-hover, ButtonFace);
+}
+:is(#preview, #save):active:not(:disabled),
+#appearance-apply-overrides:active {
+  background: var(--theme-brand-press, ButtonFace);
+}
+.appearance-settings {
+  padding: 14px 18px;
+  border: 1px solid var(--theme-border-strong, GrayText);
+  border-radius: var(--theme-radius, 10px);
+  background: var(--theme-surface-panel, Canvas);
+}
+summary {
+  min-height: 44px;
+  align-content: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+.appearance-scope,
+.appearance-active,
+.appearance-status {
+  color: var(--theme-text-muted, CanvasText);
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+.appearance-row,
+.appearance-color-grid,
+.appearance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  align-items: end;
+}
+.appearance-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+.appearance-overrides {
+  min-width: 0;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid var(--theme-border-strong, GrayText);
+  border-radius: var(--theme-radius, 6px);
+}
+.appearance-overrides legend {
+  padding: 0 6px;
+}
+.appearance-color-grid {
+  margin-bottom: 16px;
+}
+.appearance-actions {
+  margin-top: 16px;
+}
+#appearance-controls input[type="color"] {
+  width: 100%;
+  height: 44px;
+  padding: 4px;
+  background: var(--theme-surface-inset, Field);
+}
+#appearance-controls input[type="range"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  accent-color: var(--theme-accent, Highlight);
+}
+.appearance-status:empty {
+  display: none;
+}
+.appearance-status:not(:empty) {
+  border-left: 3px solid var(--theme-status-warning, GrayText);
+  padding-left: 10px;
+}
+:root[data-theme-density="compact"] article {
+  padding: 12px;
+  gap: 8px 16px;
+}
+:root[data-theme-density="compact"] .settings-layout {
+  gap: 20px;
+}
+:root[data-theme-density="compact"] .appearance-overrides {
+  padding: 10px;
+}
+@media (max-width: 600px) {
+  .appearance-settings {
+    padding: 10px 12px;
+  }
+  .appearance-row,
+  .appearance-color-grid {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .appearance-field {
+    flex-basis: auto;
+  }
+  .appearance-actions button {
+    flex: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }
