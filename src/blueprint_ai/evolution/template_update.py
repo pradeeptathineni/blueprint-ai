@@ -16,6 +16,7 @@ import uuid
 from pathlib import Path
 
 from blueprint_ai import __version__
+from blueprint_ai.genesis.executor import _publish_fresh
 
 from .engine import _operation_lock, _operations_root, _safe_path
 
@@ -187,6 +188,7 @@ def _create(root: Path, files: dict[str, tuple[bytes, int]], record: dict) -> No
         if original is None:
             if root.exists():
                 raise ValueError("template destination appeared during creation")
+            _publish_fresh(staging, root)
         else:
             current = root.stat()
             if (current.st_dev, current.st_ino) != (original.st_dev, original.st_ino) or any(
@@ -194,7 +196,7 @@ def _create(root: Path, files: dict[str, tuple[bytes, int]], record: dict) -> No
             ):
                 raise ValueError("template destination changed during creation")
             staging.chmod(stat.S_IMODE(original.st_mode))
-        os.replace(staging, root)
+            os.replace(staging, root)
         published = True
     finally:
         if not published and staging.exists():

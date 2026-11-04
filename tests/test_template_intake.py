@@ -1,9 +1,12 @@
 """copier-safe-v1 questionnaire intake: typed answers, bound preview, creation and updates."""
 
+import errno
 import json
 import os
+import stat
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
@@ -344,4 +347,135 @@ def test_creation_preserves_a_concurrently_created_destination(
         )
     assert (target / "unrelated.txt").read_text() == "Concurrent work\n"
     assert not (target / "README.md").exists()
+    assert not list(tmp_path.glob(".blueprint-create-*"))
+
+
+@pytest.mark.parametrize("initially_empty", [False, True])
+def test_creation_accepts_absent_and_initially_empty_targets(
+    source: Path, tmp_path: Path, initially_empty: bool
+) -> None:
+    target = tmp_path / "created"
+    if initially_empty:
+        target.mkdir(mode=0o751)
+    answers = {"project_name": "Publication"}
+    digest = preview(source, target, "v1", answers)["preview_sha256"]
+    result = create(source, target, "v1", answers, digest)
+    assert result["status"] == "initialized"
+    assert (target / "README.md").read_text() == "# Publication\n\nCLI: False, port 8000\n"
+    assert stat.S_IMODE((target / "run.sh").stat().st_mode) == 0o755
+    assert (target / ".git").is_dir()
+    assert json.loads((target / ".blueprint-ai/template.json").read_text())["answers"] == {
+        "project_name": "Publication",
+        "package": "demo",
+        "use_cli": False,
+        "port": 8000,
+        "license": "MIT",
+    }
+    if initially_empty:
+        assert stat.S_IMODE(target.stat().st_mode) == 0o751
+    assert not list(tmp_path.glob(".blueprint-create-*"))
+
+
+@pytest.mark.parametrize("concurrent_kind", ["empty", "populated", "symlink"])
+def test_creation_no_replace_at_final_publication_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, concurrent_kind: str
+) -> None:
+    from blueprint_ai.evolution import template_update
+
+    target = tmp_path / "created"
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "unrelated.txt").write_text("Keep other work\n")
+    publish = template_update._publish_fresh
+    identity = None
+
+    def concurrent_publish(staging: Path, destination: Path) -> None:
+        nonlocal identity
+        if concurrent_kind == "symlink":
+            destination.symlink_to(other, target_is_directory=True)
+        else:
+            destination.mkdir(mode=0o751)
+            if concurrent_kind == "populated":
+                (destination / "unrelated.txt").write_text("Keep concurrent work\n")
+        identity = destination.lstat()
+        publish(staging, destination)
+
+    monkeypatch.setattr(template_update, "_publish_fresh", concurrent_publish)
+    with pytest.raises(FileExistsError):
+        template_update._create(
+            target,
+            {"README.md": (b"Scaffold\n", 0o644)},
+            {"schema": 1, "source": "synthetic", "commit": "a" * 40, "answers": {}},
+        )
+    assert identity is not None
+    current = target.lstat()
+    assert (current.st_dev, current.st_ino, current.st_mode) == (
+        identity.st_dev,
+        identity.st_ino,
+        identity.st_mode,
+    )
+    assert not (target / "README.md").exists()
+    if concurrent_kind == "empty":
+        assert list(target.iterdir()) == []
+    elif concurrent_kind == "populated":
+        assert (target / "unrelated.txt").read_text() == "Keep concurrent work\n"
+    else:
+        assert target.is_symlink() and target.readlink() == other
+    assert (other / "unrelated.txt").read_text() == "Keep other work\n"
+    assert not list(tmp_path.glob(".blueprint-create-*"))
+
+
+@pytest.mark.parametrize("initially_empty", [False, True])
+def test_creation_on_platform_without_atomic_no_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, initially_empty: bool
+) -> None:
+    from blueprint_ai.evolution import template_update
+    from blueprint_ai.genesis import executor
+
+    target = tmp_path / "created"
+    if initially_empty:
+        target.mkdir(mode=0o751)
+    monkeypatch.setattr(executor, "sys", SimpleNamespace(platform="unsupported"))
+    monkeypatch.setattr(executor.ctypes, "CDLL", lambda *_args, **_kwargs: object())
+    files = {"README.md": (b"Scaffold\n", 0o644)}
+    record = {"schema": 1, "source": "synthetic", "commit": "a" * 40, "answers": {}}
+    if initially_empty:
+        template_update._create(target, files, record)
+        assert (target / "README.md").read_bytes() == b"Scaffold\n"
+        assert stat.S_IMODE(target.stat().st_mode) == 0o751
+    else:
+        with pytest.raises(OSError, match="atomic no-replace.*unavailable") as caught:
+            template_update._create(target, files, record)
+        assert caught.value.errno == errno.ENOTSUP
+        assert not target.exists()
+    assert not list(tmp_path.glob(".blueprint-create-*"))
+
+
+def test_creation_refuses_replaced_initially_empty_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from blueprint_ai.evolution import template_update
+
+    target, retained = tmp_path / "created", tmp_path / "retained-original"
+    target.mkdir(mode=0o751)
+    original = target.stat()
+    original_git = template_update._git
+
+    def replace_empty(directory: Path, *args: str) -> bytes:
+        result = original_git(directory, *args)
+        target.rename(retained)
+        target.mkdir(mode=0o750)
+        return result
+
+    monkeypatch.setattr(template_update, "_git", replace_empty)
+    with pytest.raises(ValueError, match="destination changed"):
+        template_update._create(
+            target,
+            {"README.md": (b"Scaffold\n", 0o644)},
+            {"schema": 1, "source": "synthetic", "commit": "a" * 40, "answers": {}},
+        )
+    assert retained.stat().st_ino == original.st_ino
+    assert stat.S_IMODE(retained.stat().st_mode) == 0o751
+    assert stat.S_IMODE(target.stat().st_mode) == 0o750
+    assert not list(target.iterdir()) and not list(retained.iterdir())
     assert not list(tmp_path.glob(".blueprint-create-*"))
