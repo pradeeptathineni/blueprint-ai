@@ -408,7 +408,7 @@ def _remove_empty_created_directories(root: Path, directories: list[str]) -> Non
                 pass
 
 
-def _record_manifest(root: Path, result: ApplyResult) -> None:
+def _record_manifest(root: Path, result: ApplyResult, reviewed_repair: dict | None = None) -> None:
     if not result.changed or not result.operation_id:
         return
     relative = Path(".blueprint-ai") / "operations" / f"{result.operation_id}.json"
@@ -422,6 +422,8 @@ def _record_manifest(root: Path, result: ApplyResult) -> None:
         "created_at": datetime.now(UTC).isoformat(),
         "changes": [change.model_dump(mode="json") for change in result.changed],
     }
+    if reviewed_repair is not None:
+        payload["reviewed_repair"] = reviewed_repair
     _atomic_create(root, target, json.dumps(payload, indent=2) + "\n")
     result.manifest_path = relative.as_posix()
 
@@ -434,9 +436,11 @@ def _operation_manifest_target(root: Path, operation_id: str) -> Path:
     return target
 
 
-def _commit_manifest_or_rollback(root: Path, result: ApplyResult) -> None:
+def _commit_manifest_or_rollback(
+    root: Path, result: ApplyResult, reviewed_repair: dict | None = None
+) -> None:
     try:
-        _record_manifest(root, result)
+        _record_manifest(root, result, reviewed_repair)
     except OSError:
         _rollback_created_changes(root, result, "operation manifest failed")
         _remove_empty_created_directories(root, result.created_directories)
@@ -681,7 +685,13 @@ def is_safe_repair_candidate(finding: Finding) -> bool:
     )
 
 
-def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> ApplyResult:
+def apply_findings(
+    root: Path,
+    facts: ProjectFacts,
+    findings: list[Finding],
+    *,
+    reviewed_repair: dict | None = None,
+) -> ApplyResult:
     operation_id = uuid.uuid4().hex
     result = ApplyResult(operation_id=operation_id)
     _operation_manifest_target(root, operation_id)
@@ -734,7 +744,7 @@ def apply_findings(root: Path, facts: ProjectFacts, findings: list[Finding]) -> 
             {remediation.target: content},
             remediation.description,
         )
-    _commit_manifest_or_rollback(root, result)
+    _commit_manifest_or_rollback(root, result, reviewed_repair)
     if not result.changed:
         result.operation_id = None
     return result

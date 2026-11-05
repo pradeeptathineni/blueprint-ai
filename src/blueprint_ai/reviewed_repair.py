@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -36,10 +37,14 @@ class RepairPlan(BaseModel):
     target: str
     target_sha256: str | None
     proposed_content: str
+    inspection_report: dict[str, Any] | None = None
     plan_sha256: str = ""
 
     def digest(self) -> str:
         payload = self.model_dump(mode="json", exclude={"plan_sha256"})
+        # Keep existing plans readable without inventing historical review evidence
+        if self.inspection_report is None:
+            payload.pop("inspection_report")
         return hashlib.sha256(_canonical(payload)).hexdigest()
 
     def validate_digest(self) -> None:
@@ -143,8 +148,11 @@ def prepare_repair(report_path: Path, finding_fingerprint: str, root: Path) -> R
         target=exact_remediation.target,
         target_sha256=_sha(target_bytes),
         proposed_content=proposed_content,
+        inspection_report=report.model_dump(mode="json"),
     )
     plan.plan_sha256 = plan.digest()
+    if len((json.dumps(plan.model_dump(mode="json"), indent=2) + "\n").encode()) > MAX_PLAN_BYTES:
+        raise ValueError("repair plan with retained inspection exceeds size limit")
     return plan
 
 
@@ -190,7 +198,16 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
     if proposed_content != plan.proposed_content:
         raise ValueError("stale repair plan: proposed repair content changed")
 
-    applied = apply_findings(root, before.facts, [exact])
+    applied = apply_findings(
+        root,
+        before.facts,
+        [exact],
+        reviewed_repair={
+            "plan_sha256": plan.plan_sha256,
+            "source_snapshot": plan.source_snapshot,
+            "finding_fingerprint": plan.finding_fingerprint,
+        },
+    )
     if not applied.changed:
         raise ValueError(
             "the selected finding produced no applied change; no verification receipt created"
@@ -215,6 +232,8 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         "proposed_content_sha256": proposed_content_sha256,
         "operation_id": applied.operation_id,
         "changes": [change.model_dump(mode="json") for change in applied.changes],
+        "inspection_report_not_rerun": plan.inspection_report,
+        "verification_report": after.model_dump(mode="json"),
         "verification": (
             "finding-absent"
             if not remaining and actual_content_sha256 == proposed_content_sha256
@@ -223,5 +242,77 @@ def apply_repair(plan_path: Path, root: Path, confirm_digest: str) -> dict[str, 
         "remaining_finding_fingerprints": [item.fingerprint for item in remaining],
         "verification_scope": (
             "same deterministic blueprint/finding only; no independent trial or quality claim"
+        ),
+    }
+
+
+def repair_status(plan_path: Path, root: Path) -> dict[str, Any]:
+    """Recover a retained operation by plan identity without dispatching any change.
+
+    Project receipts are unsigned evidence. Missing receipts cannot distinguish an
+    unapplied request, interrupted persistence, or a completed rollback.
+    """
+    root = root.expanduser().resolve(strict=True)
+    plan = RepairPlan.model_validate_json(read_bytes_bounded(plan_path, MAX_PLAN_BYTES))
+    plan.validate_digest()
+    if Path(plan.project).resolve() != root:
+        raise ValueError("repair plan belongs to another project")
+    operations = root / ".blueprint-ai" / "operations"
+    matches = []
+    if operations.exists():
+        if operations.is_symlink() or operations.resolve() != operations:
+            raise ValueError("operation directory crosses a symbolic link")
+        for index, path in enumerate(operations.iterdir()):
+            if index >= 1000:
+                raise ValueError("operation recovery exceeds the bounded receipt limit")
+            if not re.fullmatch(r"[a-f0-9]{32}\.json", path.name):
+                continue
+            data = json.loads(read_bytes_bounded(path, MAX_PLAN_BYTES, root=root))
+            if not isinstance(data, dict):
+                raise ValueError("invalid operation receipt")
+            binding = data.get("reviewed_repair")
+            if not isinstance(binding, dict) or binding.get("plan_sha256") != plan.plan_sha256:
+                continue
+            proposed = _sha(plan.proposed_content.encode("utf-8"))
+            changes = data.get("changes", [])
+            if (
+                data.get("version") != 2
+                or data.get("operation_id") != path.stem
+                or data.get("reviewed_repair")
+                != {
+                    "plan_sha256": plan.plan_sha256,
+                    "source_snapshot": plan.source_snapshot,
+                    "finding_fingerprint": plan.finding_fingerprint,
+                }
+                or not isinstance(changes, list)
+                or len(changes) != 1
+                or not isinstance(changes[0], dict)
+                or changes[0].get("target") != plan.target
+                or changes[0].get("sha256") != proposed
+            ):
+                raise ValueError("operation receipt does not match the reviewed change")
+            matches.append(data)
+    if len(matches) > 1:
+        raise ValueError("multiple operations match this plan; manual recovery required")
+    actual = _sha(_target_bytes(root, plan.target))
+    return {
+        "format": "blueprint-ai/reviewed-repair-status/v1",
+        "plan_sha256": plan.plan_sha256,
+        "operation_id": matches[0]["operation_id"] if matches else None,
+        "state": (
+            "applied-content-present"
+            if matches and actual == _sha(plan.proposed_content.encode("utf-8"))
+            else "conflicted-or-absent"
+            if matches
+            else "unconfirmed"
+        ),
+        "target": plan.target,
+        "target_current_sha256": actual,
+        "inspection_report_not_rerun": plan.inspection_report,
+        "verification": "not-rerun",
+        "qualification": (
+            "Read-only receipt and current-byte comparison; no checks or apply ran. "
+            "Receipts are unsigned local evidence. Missing receipt is unconfirmed, "
+            "including after rollback; do not automatically retry."
         ),
     }

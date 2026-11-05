@@ -42,6 +42,7 @@ blueprint-ai repair prepare --project ./project --report /tmp/review.json \
   --finding <fingerprint> --output /tmp/repair-plan.json
 blueprint-ai repair apply --project ./project --plan /tmp/repair-plan.json \
   --confirm-digest <plan-sha256>
+blueprint-ai repair status --project ./project --plan /tmp/repair-plan.json
 blueprint-ai support
 blueprint-ai init ./new-service --kind python-api --dry-run --no-model
 blueprint-ai add security-policy ./project

@@ -25,7 +25,7 @@ from blueprint_ai.impact import analyze_impact
 from blueprint_ai.model import configuration_from_environment, provider_from_environment
 from blueprint_ai.output import report_plan, report_remaining_review, serialize_report
 from blueprint_ai.remediation import KITS, apply_findings, apply_kit, rollback_operation
-from blueprint_ai.reviewed_repair import apply_repair, prepare_repair
+from blueprint_ai.reviewed_repair import apply_repair, prepare_repair, repair_status
 from blueprint_ai.safety import sanitize_label
 from blueprint_ai.settings_cli import app as settings_app
 
@@ -531,6 +531,18 @@ def repair_apply(
     _dump(receipt)
     if receipt["verification"] != "finding-absent":
         raise typer.Exit(code=2)
+
+
+@repair_app.command("status")
+def repair_status_command(
+    project: Annotated[Path, typer.Option("--project", exists=True, file_okay=False)],
+    plan: Annotated[Path, typer.Option("--plan", exists=True, dir_okay=False)],
+) -> None:
+    """Read the original request's retained operation and current bytes without retrying."""
+    try:
+        _dump(repair_status(plan, project))
+    except (ValueError, OSError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 @app.command()

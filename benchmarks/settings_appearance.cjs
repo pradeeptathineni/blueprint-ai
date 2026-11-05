@@ -66,7 +66,7 @@ async function verifyAppearance(browser, url, output) {
         .getByLabel("Theme preset", { exact: true })
         .selectOption(preset);
       await theme(page, preset);
-      for (const width of [1280, 390]) {
+      for (const width of [1280, 390, 320]) {
         await page.setViewportSize({ width, height: 900 });
         assert.equal(
           await page.evaluate(
@@ -186,6 +186,27 @@ async function verifyAppearance(browser, url, output) {
       true,
     );
     await page.getByLabel("Theme preset", { exact: true }).focus();
+    // Use native select keys so programmatic selection cannot hide a broken keyboard path
+    await page.keyboard.press("m");
+    await page.keyboard.press("Enter");
+    await theme(page, "matrix-dark");
+    const focus = await page
+      .getByLabel("Theme preset", { exact: true })
+      .evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          visible: element.matches(":focus-visible"),
+          outline: style.outlineStyle,
+          width: parseFloat(style.outlineWidth),
+        };
+      });
+    assert.equal(focus.visible, true);
+    assert.notEqual(focus.outline, "none");
+    assert.ok(focus.width >= 2);
+    await page.screenshot({
+      path: path.join(output, "appearance-keyboard-focus.png"),
+      fullPage: true,
+    });
     await page.keyboard.press("Tab");
     assert.equal(
       await page
@@ -254,6 +275,7 @@ async function verifyAppearance(browser, url, output) {
       "invalid preference preservation",
       "blocked storage methods/getter",
       "keyboard details and tab focus",
+      "native keyboard theme selection and visible focus at 320px",
       "project edits remain usable",
     ],
   };
